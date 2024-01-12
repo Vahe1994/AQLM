@@ -139,7 +139,7 @@ def fit_faiss_kmeans(
     try:
         import faiss
     except ModuleNotFoundError:
-        assert "Faiss is not installed. Please install it before running this function."
+        raise RuntimeError("Faiss is not installed. Please install it before running this function.")
 
     d = data.shape[1]
     if max_points_per_centroid is not None:
