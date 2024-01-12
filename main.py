@@ -156,6 +156,12 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
     inps, forward_args = get_inps(model, dataloader, args)
     outs = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
 
+
+    inps_ref = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
+    for inp_tensor, inp_tensor_ref in zip(inps, inps_ref):
+        inp_tensor_ref[...] = inp_tensor
+    outs_ref = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
+
     use_cache = model.config.use_cache
     model.config.use_cache = False
 
@@ -181,6 +187,11 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             sequential = get_sequential_groups(model)
         else:
             sequential = [list(find_sublayers(layer).keys())]
+
+        if len(args.devices) == 1:
+            assert False
+        else:
+            update_outs_parallel(args.devices, layer, inps_ref, outs_ref, compute_mse=False, **forward_args)
 
         for names in sequential:
             if len(args.devices) == 1:
@@ -218,7 +229,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             print(layer)
             layer = layer.to(dtype=torch.float32)
             with using_tf32(enabled=True):
-                layer = finetune_groupwise(layer=layer, inps=inps, outs=outs, args=args, **forward_args)
+                layer = finetune_groupwise(layer=layer, inps=inps, outs=outs_ref, args=args, **forward_args)
             layer = layer.to(dtype=layer_dtype_original)
             print("FINISHED FINETUNING")
         if args.save:
@@ -241,6 +252,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
         torch.cuda.empty_cache()
 
         inps, outs = outs, inps
+        inps_ref, outs_ref = outs_ref, inps_ref
 
         # Logging
         stats_payload["layer_time"] = time.time() - start_time
