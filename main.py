@@ -700,7 +700,7 @@ if __name__ == "__main__":
     if args.devices is None:
         args.devices = [torch.device(f"cuda:{i}") for i in range(torch.cuda.device_count())]
     else:
-        args.devices = [torch.device(device_str) for device_str in range(args.devices)]
+        args.devices = [torch.device(device_str) for device_str in args.devices]
     assert all(isinstance(device, torch.device) for device in args.devices)
 
     if args.wandb:
