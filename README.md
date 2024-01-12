@@ -79,7 +79,7 @@ export WANDB_NAME=COOL_EXP_NAME
 python main.py $MODEL_PATH $DATASET_PATH --nsamples=1024 \
  --num_codebooks=1 --nbits_per_codebook=16 --in_group_size=8 \
  --relative_mse_tolerance=0.01 --finetune_relative_mse_tolerance=0.001 \
- --batch_size=32 --local_batch_size=2 --wandb --save $SAVE_PATH
+ --finetune_batch_size=32 --wandb --save $SAVE_PATH
 
 ```
 
@@ -92,8 +92,7 @@ Main CLI arguments:
 - `--num_codebooks` - number of codebooks per layer
 - `--nbits_per_codebook` - each codebook will contain 2 ** nbits_per_codebook vectors
 - `--in_group_size` - how many weights are quantized together (aka "g" in the arXiv paper)
-- `--local_batch_size` - (for fine-tuning only) how many sequences are processed on each GPU in a single forward pass
-- `--batch_size` - (for fine-tuning only) the total number of sequences used for each optimization step
+- `--finetune_batch_size` - (for fine-tuning only) the total number of sequences used for each optimization step
 - `--relative_mse_tolerance`- (for initial calibration) - stop training when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)
 - `--finetune_relative_mse_tolerance`- same, but for fine-tuning
 - `--offload activations` -- during calibration, move activations from GPU memory to RAM. This reduces VRAM usage while slowing calibration by ~10% (depending on your hardware). 

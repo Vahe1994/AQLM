@@ -57,7 +57,7 @@ class AQEngine(nn.Module):
             codebook_value_num_groups=args.codebook_value_num_groups,
             scale_nbits=args.scale_nbits,
             max_iter=args.init_max_iter,
-            max_points_per_centroid=args.max_points_per_centroid,
+            max_points_per_centroid=args.init_max_points_per_centroid,
             devices=args.devices,
             verbose=True,
         )

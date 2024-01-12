@@ -67,19 +67,21 @@ def finetune_groupwise(
         differentiable_parameters, lr=args.finetune_lr, betas=(0.9, 0.95), amsgrad=True
     )
 
-    assert args.batch_size % len(args.devices) == 0, "batch_size must be divisible by the number of GPUs"
+    assert args.finetune_batch_size % len(args.devices) == 0, "batch_size must be divisible by the number of GPUs"
 
     num_samples_per_device = len(inps[0])
-    local_batch_size = args.batch_size // len(args.devices) if args.local_batch_size is None else args.local_batch_size
+    local_batch_size = args.local_batch_size
+    if local_batch_size is None:
+        local_batch_size = args.finetune_batch_size // len(args.devices)
 
     assert all(len(inps_tensor) == num_samples_per_device for inps_tensor in inps)
-    assert args.batch_size % (local_batch_size * len(args.devices)) == 0, ""
-    num_accumulation_steps = args.batch_size // (local_batch_size * len(args.devices))
+    assert args.finetune_batch_size % (local_batch_size * len(args.devices)) == 0, ""
+    num_accumulation_steps = args.finetune_batch_size // (local_batch_size * len(args.devices))
     assert num_samples_per_device % local_batch_size * num_accumulation_steps == 0, (
         num_samples_per_device,
         local_batch_size,
     )
-    steps_per_epoch = num_samples_per_device * len(args.devices) // args.batch_size
+    steps_per_epoch = num_samples_per_device * len(args.devices) // args.finetune_batch_size
     batch_iterators = [
         iterate_minibatches(inps[i], outs[i], batch_size=local_batch_size, device=args.devices[i])
         for i in range(len(args.devices))
@@ -176,12 +178,13 @@ def _compute_mse_on_batch(
     inps_batch = inps_batch.to(dtype=torch.float32)
     outs_batch = outs_batch.to(dtype=torch.float32)
 
-    for name, value in list(kwargs.items()):
-        if isinstance(value, torch.Tensor) and value.shape[0] == 1:
-            if name not in ("attention_mask", "position_ids"):
-                warnings.warn(f"Tiling an unexpected kwarg {name} over batch size; make sure this is valid.")
-            repeats = [len(inps_batch)] + [1 for _ in range(value.ndim - 1)]
-            kwargs[name] = value.tile(*repeats)
+    if inps_batch.shape[0] != 1:  # replicate kwargs to match the batch size
+        for name, value in list(kwargs.items()):
+            if isinstance(value, torch.Tensor) and value.shape[0] == 1:
+                if name not in ("attention_mask", "position_ids"):
+                    warnings.warn(f"Tiling an unexpected kwarg {name} over batch size; make sure this is valid.")
+                repeats = [len(inps_batch)] + [1 for _ in range(value.ndim - 1)]
+                kwargs[name] = value.tile(*repeats)
 
     outs_prediction, *_unused = layer(inps_batch, **kwargs)
     assert outs_prediction.shape == outs_batch.shape

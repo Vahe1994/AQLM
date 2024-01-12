@@ -497,7 +497,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "dataset",
         type=str,
-        default="none",
         help="Dataset name [c4, pajama, refinedweb] or path to data where to extract calibration data from.",
     )
     parser.add_argument(
@@ -511,8 +510,23 @@ if __name__ == "__main__":
         default=None,
         help="Number of calibration data samples.If None take all calibration data.",
     )
+    parser.add_argument(
+        "--model_seqlen",
+        type=int,
+        default=4096,
+        choices=[2048, 4096],
+        help="Model seqlen and calibration data context length.",
+    )
     parser.add_argument("--load", type=str, default=None, help="Path to load quantized statistics.")
     parser.add_argument("--save", type=str, default=None, help="Path to save quantized statistics.")
+    parser.add_argument("--devices", metavar="N", type=str, nargs="+", default=None, help="List of devices")
+    parser.add_argument(
+        "--dtype",
+        type=str,
+        default="auto",
+        choices=["auto", "float16", "float32", "bfloat16"],
+        help="dtype to load the model in",
+    )
     parser.add_argument(
         "--seed",
         type=int,
@@ -535,6 +549,87 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to run in true sequential model.",
     )
+
+
+    parser.add_argument(
+        "--num_codebooks",
+        type=int,
+        default=1,
+        help="#Number of codebooks per layer",
+    )
+    parser.add_argument(
+        "--nbits_per_codebook",
+        type=int,
+        default=16,
+        help="each codebook will contain 2 ** nbits_per_codebook vectors",
+    )
+    parser.add_argument(
+        "--out_group_size",
+        type=int,
+        default=1,
+        help="How many output units are quantized together",
+    )
+    parser.add_argument(
+        "--in_group_size",
+        type=int,
+        default=8,
+        help="How many input features are quantized together",
+    )
+
+
+    parser.add_argument(
+        "--scale_nbits",
+        type=int,
+        default=0,
+        help="Number of bits dedicated to the learnable group-wise scale. 0 means do not use group-wise scales "
+        "(still has row-wise scales), 1-15 means using per-group scales quantized to this many bits, "
+        "16+ means use per-group scales but do not quantize them",
+    )
+    parser.add_argument(
+        "--codebook_value_nbits",
+        type=int,
+        default=16,
+        help="If below 16, quantize the values in each codebook with the specified number of bits",
+    )
+    parser.add_argument(
+        "--codebook_value_num_groups",
+        type=int,
+        default=1,
+        help="Split codebook vectors into this many groups for quantizations. Only used when quantized codebooks.",
+    )
+
+
+    parser.add_argument(
+        "--init_max_iter",
+        type=int,
+        default=100,
+        help="Number of K-Means iterations used to initialize codebooks and codes",
+    )
+    parser.add_argument(
+        "--use_faiss",
+        action="store_true",
+        help="Whether to use faiss.Kmeans when initializing codebooks and codes",
+    )
+    parser.add_argument(
+        "--init_max_points_per_centroid",
+        type=int,
+        default=None,
+        help="During K-means initialzation, sample (this_many * 2 ^ nbits_per_codebook) points for training K-means",
+    )
+
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=1e-4,
+        help="Learning rate for Adam optimizer",
+    )
+    parser.add_argument(
+        "--beam_size",
+        type=int,
+        default=1,
+        help="Keep top-(this_many) best candidates for each codebook when finding optimal codes",
+    )
+
     parser.add_argument(
         "--max_epochs",
         type=int,
@@ -552,27 +647,6 @@ if __name__ == "__main__":
         type=int,
         default=100,
         help="Run (this many) Adam updates before every beam search round",
-    )
-    parser.add_argument(
-        "--model_seqlen",
-        type=int,
-        default=4096,
-        choices=[2048, 4096],
-        help="Model seqlen and calibration data context length.",
-    )
-    parser.add_argument(
-        "--nbits_per_codebook",
-        type=int,
-        default=16,
-        help="each codebook will contain 2 ** nbits_per_codebook vectors",
-    )
-    parser.add_argument(
-        "--scale_nbits",
-        type=int,
-        default=0,
-        help="Number of bits dedicated to the learnable group-wise scale. 0 means do not use group-wise scales "
-        "(still has row-wise scales), 1-15 means using per-group scales quantized to this many bits, "
-        "16+ means use per-group scales but do not quantize them",
     )
     parser.add_argument(
         "--finetune_max_epochs",
@@ -593,76 +667,18 @@ if __name__ == "__main__":
         help="Stop fine-tuning (GO) when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)",
     )
 
+
     parser.add_argument(
-        "--codebook_value_nbits",
-        type=int,
-        default=16,
-        help="If below 16, quantize the values in each codebook with the specified number of bits",
-    )
-    parser.add_argument(
-        "--codebook_value_num_groups",
+        "--finetune_batch_size",
         type=int,
         default=1,
-        help="Split codebook vectors into this many groups for quantizations. Only used when quantized codebooks.",
-    )
-    parser.add_argument(
-        "--init_max_iter",
-        type=int,
-        default=100,
-        help="Number of K-Means iterations used to initialize codebooks and codes",
-    )
-    parser.add_argument(
-        "--use_faiss",
-        action="store_true",
-        help="Whether to use faiss.Kmeans when initializing codebooks and codes",
-    )
-    parser.add_argument(
-        "--max_points_per_centroid",
-        type=int,
-        default=None,
-        help="During K-means initialzation, sample (this_many * 2 ^ nbits_per_codebook) points for training K-means",
-    )
-    parser.add_argument(
-        "--lr",
-        type=float,
-        default=1e-4,
-        help="Learning rate for Adam optimizer",
-    )
-    parser.add_argument(
-        "--num_codebooks",
-        type=int,
-        default=1,
-        help="#Number of codebooks per layer",
-    )
-    parser.add_argument(
-        "--out_group_size",
-        type=int,
-        default=1,
-        help="How many output units are quantized together",
-    )
-    parser.add_argument(
-        "--in_group_size",
-        type=int,
-        default=8,
-        help="How many input features are quantized together",
-    )
-    parser.add_argument(
-        "--beam_size",
-        type=int,
-        default=1,
-        help="Keep top-(this_many) best candidates for each codebook when finding optimal codes",
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=1,
-        help="Train on this many sequences when fine-tuning the layer (GO), globally across all GPUs",
+        help="(fine-tuning only) train on batches of this many sequences, globally across all GPUs",
     )
     parser.add_argument(
         "--local_batch_size",
         type=int,
         default=None,
-        help="Per-device and per-forward-pass batch size used to accumulate global --batch_size",
+        help="(fine-tuning only) Per-device and per-forward-pass batch size used to accumulate global --batch_size",
     )
     parser.add_argument(
         "--print_frequency",
@@ -670,19 +686,12 @@ if __name__ == "__main__":
         default=10,
         help="Print Adam progress after each print_frequency updates",
     )
-    parser.add_argument("--devices", metavar="N", type=str, nargs="+", default=None, help="List of devices")
-    parser.add_argument(
-        "--dtype",
-        type=str,
-        default="auto",
-        choices=["auto", "float16", "float32", "bfloat16"],
-        help="dtype to load the model in",
-    )
+
     parser.add_argument("--wandb", action="store_true", help="Whether to use wandb or store locally.")
     parser.add_argument(
         "--no_quant",
         action="store_true",
-        help="Skip model quantization and evalueate the model in it's original dtype",
+        help="Skip model quantization and immediately evaluate the loaded model",
     )
 
     torch.set_num_threads(16)
