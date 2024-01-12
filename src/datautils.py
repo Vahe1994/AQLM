@@ -58,7 +58,7 @@ def get_c4(nsamples, seqlen, tokenizer, eval_mode=False):
     if not eval_mode:
         traindata = load_dataset(
             "allenai/c4",
-            "allenai--c4",
+            "default",
             data_files={"train": "en/c4-train.00000-of-01024.json.gz"},
             split="train",
             revision="607bd4c8450a42878aa9ddc051a65a055450ef87",
@@ -81,7 +81,7 @@ def get_c4(nsamples, seqlen, tokenizer, eval_mode=False):
     else:
         valdata = load_dataset(
             "allenai/c4",
-            "allenai--c4",
+            "default",
             data_files={"validation": "en/c4-validation.00000-of-00008.json.gz"},
             split="validation",
             revision="607bd4c8450a42878aa9ddc051a65a055450ef87",
