@@ -497,7 +497,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "dataset",
         type=str,
-        help="Dataset name [c4, pajama, refinedweb] or path to data where to extract calibration data from.",
+        help="Dataset name [c4, pajama] or path to data where to extract calibration data from.",
     )
     parser.add_argument(
         "--new_eval",
