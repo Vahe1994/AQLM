@@ -37,7 +37,6 @@ def get_red_pajama(nsamples, seqlen, tokenizer):
     return trainloader
 
 
-
 def get_wikitext2(nsamples, seqlen, tokenizer, eval_mode=False):
     if not eval_mode:
         traindata = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
