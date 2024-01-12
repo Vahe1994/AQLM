@@ -668,7 +668,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--local_batch_size",
         type=int,
-        default=None,
+        default=1,
         help="(fine-tuning only) Per-device and per-forward-pass batch size used to accumulate global --batch_size",
     )
     parser.add_argument(
