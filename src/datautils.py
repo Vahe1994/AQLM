@@ -17,14 +17,14 @@ def set_seed(seed: Optional[int]):
 
 
 def get_red_pajama(nsamples, seqlen, tokenizer, eval_mode=False):
-    loaded_data = load_dataset('togethercomputer/RedPajama-Data-1T-Sample', split="test" if eval_mode else "train")
+    loaded_data = load_dataset("togethercomputer/RedPajama-Data-1T-Sample", split="test" if eval_mode else "train")
     tokenizer.bos_token_id = 1
     tokenizer.eos_token_id = 2
     loader = []
     for _ in range(nsamples):
         while True:
             i = random.randint(0, len(loaded_data) - 1)
-            enc = tokenizer(loaded_data[i]['text'], return_tensors='pt')
+            enc = tokenizer(loaded_data[i]["text"], return_tensors="pt")
             if enc.input_ids.shape[1] > seqlen:
                 break
         i = random.randint(0, enc.input_ids.shape[1] - seqlen - 1)
@@ -34,6 +34,7 @@ def get_red_pajama(nsamples, seqlen, tokenizer, eval_mode=False):
         loader.append(inp)
 
     return loader, None
+
 
 def get_wikitext2(nsamples, seqlen, tokenizer, eval_mode=False):
     if not eval_mode:
