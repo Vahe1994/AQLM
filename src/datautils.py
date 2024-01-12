@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from datasets import load_dataset
 from packaging import version
+from tqdm import trange
 from transformers import AutoTokenizer, LlamaTokenizer
 
 
@@ -17,11 +18,12 @@ def set_seed(seed: Optional[int]):
 
 
 def get_red_pajama(nsamples, seqlen, tokenizer, eval_mode=False):
+    print("Loading red_pajama from togethercomputer/RedPajama-Data-1T-Sample")
     loaded_data = load_dataset("togethercomputer/RedPajama-Data-1T-Sample", split="test" if eval_mode else "train")
     tokenizer.bos_token_id = 1
     tokenizer.eos_token_id = 2
     loader = []
-    for _ in range(nsamples):
+    for _ in trange(nsamples, desc="Making red_pajama calibration set", leave=False):
         while True:
             i = random.randint(0, len(loaded_data) - 1)
             enc = tokenizer(loaded_data[i]["text"], return_tensors="pt")
