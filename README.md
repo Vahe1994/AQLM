@@ -53,11 +53,11 @@ on one or several devices.
 
 ### Model downloading
 The code requires the LLaMA model to be downloaded in Huggingface format and saved locally. The scripts below assume that `$TRANSFORMERS_CACHE` variable points to the Huggingface Transformers cache folder.
-To download and cache the model, run this in any python code:
+To download and cache the models, run this in the same environment:
 
 ```python
 from transformers import AutoTokenizer, AutoModelForCausalLM
-model_name = "meta-llama/Llama-2-7b-hf"
+model_name = "meta-llama/Llama-2-7b-hf"  # or whatever else you wish to download
 tokenizer = AutoTokenizer.from_pretrained(model_name, torch_dtype="auto")
 model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype="auto")
 ```
