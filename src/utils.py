@@ -63,7 +63,7 @@ def using_tf32(enabled: bool):
     was_cudnn = torch.backends.cudnn.allow_tf32
     was_matmul = torch.backends.cuda.matmul.allow_tf32
     torch.backends.cudnn.allow_tf32 = enabled
-    torch.backends.cuda.matmul.allow_tf32 = enabled  # TODO unhardcode
+    torch.backends.cuda.matmul.allow_tf32 = enabled
     yield
     torch.backends.cudnn.allow_tf32 = was_cudnn
     torch.backends.cuda.matmul.allow_tf32 = was_matmul

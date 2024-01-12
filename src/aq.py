@@ -19,8 +19,7 @@ class QuantizedLinear(nn.Module):
         self.bias = bias
 
     def forward(self, input: torch.Tensor):
-        # TODO this can be optimized! (after we're sure the idea works)
-        # TODO maybe integrate with QuantizedLinear?
+        # TODO[aqlm] this can be optimized! maybe integrate with QuantizedLinear?
         return F.linear(input, self.quantized_weight(), self.bias)
 
 

@@ -209,7 +209,7 @@ def fit_kmeans_1d(
         - indices are integers [0, k) in the same shape as data; they denote the index of the nearest centroid
         - restored_data is a floating point tensor in the same shape as data; they are dequantized(quantized(data))
     :note: to reconstruct clusters manually, call clusters.gather(-1, indices)
-    :TODO: torch.jit.script / torch.compile
+    :TODO[aqlm]: torch.jit.script / torch.compile
     """
     assert groupwise_data.ndim == 2
     assert 0 <= offset_rate < 0.5
