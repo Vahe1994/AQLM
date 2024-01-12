@@ -21,11 +21,11 @@ They will be saved in default Huggingface Datasets directory unless alternative 
 See [relevant Datasets documentation section](https://huggingface.co/docs/datasets/main/en/cache#cache-directory)
 ## Models
 
-This repository is expected to work with models of `LLaMA ` families so far.
+This repository is currently designed to work with models of `LLaMA ` family.
 
 ## Data
 
-When quantizing models with AQLM, we recommend that you use a subset of the original data the model was trained on (or something similar).
+When quantizing models with AQLM, we recommend that you use a subset of the original data the model was trained on.
 
 For Llama-2 models, the closest available dataset is [RedPajama](https://huggingface.co/datasets/togethercomputer/RedPajama-Data-1T-Sample) .
 
@@ -40,16 +40,16 @@ __We shall add step-by-step instructions for this before Jan 13 23:59 AOE.__
 
 ### WandB logging
 
-For the sake of convenience one can optionally log the data to `Weights and Biases` service (wandb).
+One can optionally log the data to `Weights and Biases` service (wandb).
 Run `pip install wandb` for W&B logging.
 Specify `$WANDB_ENTITY`, `$WANDB_PROJECT`, `$WANDB_NAME` environment variables prior to running experiments. use `--wandb` argument to enable logging
 # Launching
 
 ### GPU and RAM requirements
 This code was developed and tested using a several A100 GPU with 80GB GPU RAM. 
-`--offload activations` option, reduce VRAM usage.
-For `Language Model Evaluation Harness` evaluation one needs to have enough memory to load whole model
-on one or several devices + activation tensors.
+You can use the `--offload activations` option to reduce VRAM usage.
+For `Language Model Evaluation Harness` evaluation one needs to have enough memory to load whole model  + activation tensors 
+on one or several devices.
 
 ### Model downloading
 The code requires the LLaMA model to be downloaded in Huggingface format and saved locally. The scripts below assume that `$TRANSFORMERS_CACHE` variable points to the Huggingface Transformers cache folder.
