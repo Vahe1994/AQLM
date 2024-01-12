@@ -690,7 +690,7 @@ if __name__ == "__main__":
         help="Skip model quantization and immediately evaluate the loaded model",
     )
 
-    torch.set_num_threads(16)
+    torch.set_num_threads(min(16, torch.get_num_threads()))
     torch.backends.cudnn.allow_tf32 = False
     torch.backends.cuda.matmul.allow_tf32 = False
 
