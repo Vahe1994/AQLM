@@ -48,7 +48,6 @@ def get_model(model_path, load_quantized=None, dtype="auto", model_seqlen=2048):
                 low_cpu_mem_usage=True,
                 local_files_only=True,
             )
-    # Please verify correcttess #TODO[aqlm]
     model.seqlen = model_seqlen
     print("Model loaded sucessfully ...")
 
