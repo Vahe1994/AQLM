@@ -241,9 +241,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             assert len(activations) == 1
             update_activations(layer, activations[0], **forward_args)
         else:
-            update_activations_inplace_parallel(
-                args.devices, layer, activations, **forward_args
-            )
+            update_activations_inplace_parallel(args.devices, layer, activations, **forward_args)
 
         layers[layer_index] = layer.to(layer_device_original)
         del layer
