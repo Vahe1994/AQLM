@@ -156,6 +156,17 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
     inps, forward_args = get_inps(model, dataloader, args)
     outs = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
 
+    #TODO if this works, the next thing we should implement is memory-efficient fine-tuning:
+    # 1) in init_aq_engines, do not update outs at all
+    # 2) keep 2 sens of activations: acts_quant and acts_ref
+    # for block in all_transformer_blocks:
+    #    update_acts_inplace_(block, acts_ref)
+    #    engines = init_aq_engines(block, acts_quant)
+    #    for layer in get_linear_layers(block):
+    #        engines.quantize_using_aq(layer, ...).and_update_in_block(block)
+    #    finetune(block).to_minimize(||block(acts_quant) - acts_ref||^2)
+    #    update_acts_inplace_(block, acts_quant)
+
 
     inps_ref = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
     for inp_tensor, inp_tensor_ref in zip(inps, inps_ref):
