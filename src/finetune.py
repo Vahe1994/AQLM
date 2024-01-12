@@ -63,9 +63,7 @@ def finetune_groupwise(
         replacement_tables = _make_parameter_replacement_tables(layer, replicas, param_names, differentiable_parameters)
 
     print(f"Fine-tuning {sum(param.numel() for param in differentiable_parameters)} parameters")
-    opt = torch.optim.Adam(
-        differentiable_parameters, lr=args.finetune_lr, betas=(0.9, 0.95), amsgrad=True
-    )
+    opt = torch.optim.Adam(differentiable_parameters, lr=args.finetune_lr, betas=(0.9, 0.95), amsgrad=True)
 
     assert args.finetune_batch_size % len(args.devices) == 0, "batch_size must be divisible by the number of GPUs"
 
@@ -132,7 +130,7 @@ def finetune_groupwise(
 
 
 def _make_parameter_replacement_tables(
-        layer: nn.Module, replicas: Sequence[nn.Module], param_names: Sequence[str], parameters: nn.ParameterList
+    layer: nn.Module, replicas: Sequence[nn.Module], param_names: Sequence[str], parameters: nn.ParameterList
 ) -> Sequence[List[Sequence[Tuple[nn.Module, str]]]]:
     """
     Prepare auxiliary data structures for quickly copying parameters to replicas for data-parallel training.

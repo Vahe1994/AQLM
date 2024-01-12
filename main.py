@@ -550,7 +550,6 @@ if __name__ == "__main__":
         help="Whether to run in true sequential model.",
     )
 
-
     parser.add_argument(
         "--num_codebooks",
         type=int,
@@ -576,7 +575,6 @@ if __name__ == "__main__":
         help="How many input features are quantized together",
     )
 
-
     parser.add_argument(
         "--scale_nbits",
         type=int,
@@ -597,7 +595,6 @@ if __name__ == "__main__":
         default=1,
         help="Split codebook vectors into this many groups for quantizations. Only used when quantized codebooks.",
     )
-
 
     parser.add_argument(
         "--init_max_iter",
@@ -666,7 +663,6 @@ if __name__ == "__main__":
         default=None,
         help="Stop fine-tuning (GO) when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)",
     )
-
 
     parser.add_argument(
         "--finetune_batch_size",
