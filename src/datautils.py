@@ -185,9 +185,8 @@ def get_loaders(name, nsamples=128, seed=0, seqlen=2048, eval_mode=False, model_
     Loads and prepares data for a Transformers model.
     Args:
         name (str): The name of the dataset to load.
-        This can be one of 'wikitext2', 'c4', 'ptb' for datasets loaded from Huggingface datasets,
-        'pajama' or 'refinedweb' for pre-tokenized datasets in folder `data` or 'none' for cases
-        where a dataset is not needed, like RTN. It can also accept data path to custom file.
+        This can be one of 'wikitext2', 'c4', 'ptb','pajama' for datasets loaded from Huggingface datasets,
+        or 'none' for cases where a dataset is not needed, like RTN. It can also accept data path to custom file.
         nsamples (int, optional): The number of samples to load from the dataset. Defaults to 128.
         seed (int, optional): The random seed value for data shuffling and splitting. Defaults to 0.
         seqlen (int, optional): The maximum sequence length for input tokenization. Defaults to 2048.
@@ -207,9 +206,7 @@ def get_loaders(name, nsamples=128, seed=0, seqlen=2048, eval_mode=False, model_
 
     # for pre-tokenized datasets
 
-    if name.lower() == "refinedweb":
-        data = torch.load("./data/refined_web_n=128.pth")[:nsamples]
-    elif name.lower() == "none":
+    if name.lower() == "none":
         print("Not loading any dataset. (OK if you use no compression or methods like RTN.)")
         return None
     elif os.path.isfile(name):
@@ -218,7 +215,7 @@ def get_loaders(name, nsamples=128, seed=0, seqlen=2048, eval_mode=False, model_
         except FileNotFoundError:
             raise FileNotFoundError(
                 f"Failed to load custom data from {name}.",
-                "Check data path or use one of [c4, wikitext2, ptb, pajama, refinedweb, none]",
+                "Check data path or use one of [c4, wikitext2, ptb, pajama, none]",
             )
     else:
         # for datasets requiring tokenization
@@ -252,7 +249,7 @@ def get_loaders(name, nsamples=128, seed=0, seqlen=2048, eval_mode=False, model_
         else:
             raise ValueError(
                 f"Failed to load data from {name}.",
-                "Check dataset name or path or use one of [c4, wikitext2, ptb, pajama, refinedweb, none]",
+                "Check dataset name or path or use one of [c4, wikitext2, ptb, pajama, none]",
             )
 
     if hasattr(data, "input_ids"):
