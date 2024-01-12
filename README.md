@@ -46,29 +46,35 @@ on one or several devices + activation tensors.
 
 ### Model downloading
 The code requires the LLaMA model to be downloaded in Huggingface format and saved locally. The scripts below assume that `$TRANSFORMERS_CACHE` variable points to the Huggingface Transformers cache folder.
+To download and cache the model, run this in any python code:
 
-### Perplexity benchmarks:
+```python
+from transformers import AutoTokenizer, AutoModelForCausalLM
+model_name = "meta-llama/Llama-2-7b-hf"
+tokenizer = AutoTokenizer.from_pretrained(model_name, torch_dtype="auto")
+model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype="auto")
+```
+
+
+### How to quantize a model with AQLM
 This script compresses the model and then tests its performance in terms of perplexity using WikiText2, C4, and Penn Treebank datasets. 
 
 The command to launch the script should look like this: 
 
-```
-export MODEL_PATH=<PATH_TO_MODEL_DIR>
-export DATASET=<INSERT DATASET NAME OR PATH TO CUSTOM DATA>
+```bash
+export CUDA_VISIBLE_DEVICES=0,1,2,3  # optional: select GPUs
+export MODEL_PATH=<PATH_TO_MODEL_ON_HUB>    # e.g. meta-llama/Llama-2-7b-hf
+export DATASET_PATH=<INSERT DATASET NAME OR PATH TO CUSTOM DATA>   # see data instructions
+export SAVE_PATH=/path/to/save/quantized/model/
+export WANDB_PROJECT=MY_AQ_EXPS
+export WANDB_NAME=COOL_EXP_NAME
 
-python main.py $MODEL_PATH $DATASET \
-    --num_codebooks=2 \
-    --
-    --relative_mse_tolerance=0.01 \
-    --go_relative_mse_tolerance=0.001 \
-    --nsamples=1024 \  
-    --nbits_per_codebook=15 \
-    --in_group_size=8 \
-    --scale_nbits=0 \
-    --local_batch_size=4 \
-    --save="save_path"\
-    --batch_size=32 \
-    --wandb
+python main.py $MODEL_PATH $DATASET_PATH --nsamples=1024 \
+ --num_codebooks=1 --nbits_per_codebook=16 --in_group_size=8 \
+ --relative_mse_tolerance=0.01 --go_relative_mse_tolerance=0.001 \
+ --batch_size=32 --local_batch_size=2 \
+ --wandb --save $SAVE_PATH
+
 ```
 
 Note the launch arguments:
@@ -87,22 +93,25 @@ run `python main.py --help` for more details on command line arguments, includin
 - `--save --load` -- path to save/load quantized model.
 - `--wandb` - log to wandb
 
-### LM Evaluation Harness benchmark.
+### Zero-shot benchmarks via LM Evaluation Harness
 
 To perform zero-shot evaluation, we use [Language Model Evaluation Harness](https://github.com/EleutherAI/lm-evaluation-harness) framework with slight modifications. This repository contains a copy of LM Evaluation Harness repo from early 2023 in `lm-eval-harness` folder. 
-#### Installation
+
 Before running the code make sure that you have all the requirements and dependencies of `lm-eval-harness` installed. To install them run:
 ```
 pip install -r lm-evaluation-harness/requirements.txt
 ```
-#### Execution
 
 The main script launching the evaluation procedure is `lmeval.py` .
 
 
-```
-export MODEL_PATH=<INSERT PATH_TO_MODEL_DIR>
+```bash
+export CUDA_VISIBLE_DEVICES=0,1,2,3  # optional: select GPUs
+export QUANTZED_MODEL=<PATH_TO_SAVED_QUANTIZED_MODEL_FROM_MAIN.py>
+export MODEL_PATH=<INSERT_PATH_TO_ORIINAL_MODEL_ON_HUB>
 export DATASET=<INSERT DATASET NAME OR PATH TO CUSTOM DATA>
+export WANDB_PROJECT=MY_AQ_LM_EVAL
+export WANDB_NAME=COOL_EVAL_NAME
 
 python lmeval.py \
     --model hf-causal \
@@ -113,9 +122,14 @@ python lmeval.py \
 ```
 
 ## Contributing
-We use black and isort for all pull requests. Before committing your code run black . && isort . .
 
-## Citation
+If you want to contribute something substantial (more than a typo), please open an issue first.
+We use black and isort for all pull requests. Before committing your code run `black . && isort .`
+
+## Cite
+
+If you found this work useful, please consider citing:
+
 ```
 @misc{egiazarian2024extreme,
       title={Extreme Compression of Large Language Models via Additive Quantization}, 
