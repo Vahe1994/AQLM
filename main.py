@@ -257,9 +257,9 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                 assert activation_tensor.ndim == 3  # batch_size, seq_len, hid_size
                 assert activation_tensor.shape == reference_activation_tensor.shape
                 for j in range(len(activation_tensor)):
-                    outs_batch_loss = (activation_tensor[j] - reference_activation_tensor[j]
+                    outs_batch_loss = (activation_tensor[j : j + 1] - reference_activation_tensor[j : j + 1]
                                        ).float().square().flatten(1, -1).mean(dim=1).sqrt()
-                    outs_batch_loss /= reference_activation_tensor[j].flatten(1, -1).float().std(dim=1)
+                    outs_batch_loss /= reference_activation_tensor[j : j + 1].flatten(1, -1).float().std(dim=1)
                     out_losses.append(outs_batch_loss.item())
 
         # Logging
