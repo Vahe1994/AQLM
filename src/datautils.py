@@ -16,6 +16,25 @@ def set_seed(seed: Optional[int]):
     torch.random.manual_seed(seed)
 
 
+def get_red_pajama(nsamples, seqlen, tokenizer, eval_mode=False):
+    loaded_data = load_dataset('togethercomputer/RedPajama-Data-1T-Sample', split="test" if eval_mode else "train")
+    tokenizer.bos_token_id = 1
+    tokenizer.eos_token_id = 2
+    loader = []
+    for _ in range(nsamples):
+        while True:
+            i = random.randint(0, len(loaded_data) - 1)
+            enc = tokenizer(loaded_data[i]['text'], return_tensors='pt')
+            if enc.input_ids.shape[1] > seqlen:
+                break
+        i = random.randint(0, enc.input_ids.shape[1] - seqlen - 1)
+        j = i + seqlen
+        inp = enc.input_ids[:, i:j]
+        assert inp.shape[1] == seqlen
+        loader.append(inp)
+
+    return loader, None
+
 def get_wikitext2(nsamples, seqlen, tokenizer, eval_mode=False):
     if not eval_mode:
         traindata = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
@@ -186,9 +205,8 @@ def get_loaders(name, nsamples=128, seed=0, seqlen=2048, eval_mode=False, model_
     set_seed(seed)
 
     # for pre-tokenized datasets
-    if name.lower() == "pajama":
-        data = torch.load(f"./data/red_pajama_n=1024_{seqlen}_context_length.pth")[:nsamples]
-    elif name.lower() == "refinedweb":
+
+    if name.lower() == "refinedweb":
         data = torch.load("./data/refined_web_n=128.pth")[:nsamples]
     elif name.lower() == "none":
         print("Not loading any dataset. (OK if you use no compression or methods like RTN.)")
@@ -220,6 +238,8 @@ def get_loaders(name, nsamples=128, seed=0, seqlen=2048, eval_mode=False, model_
 
         if name.lower() == "wikitext2":
             data = get_wikitext2(nsamples, seqlen, tokenizer, eval_mode=eval_mode)
+        elif name.lower() == "pajama":
+            data = get_red_pajama(nsamples, seqlen, tokenizer, eval_mode=eval_mode)
         elif name.lower() == "ptb":
             data = get_ptb(nsamples, seqlen, tokenizer, eval_mode=eval_mode)
         elif name.lower() == "ptb_new":
