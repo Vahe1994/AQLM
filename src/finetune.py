@@ -11,7 +11,6 @@ import torch.nn.functional as F
 from torch.nn.parallel.scatter_gather import Gather
 
 from aq_engine import replace_parameter_
-from src.aq import QuantizedWeight
 from src.utils import iterate_minibatches
 
 
@@ -92,7 +91,7 @@ def finetune_groupwise(
 
     print(f"Fine-tuning {sum(param.numel() for param in differentiable_parameters)} parameters")
     opt = torch.optim.Adam(
-        differentiable_parameters, lr=args.go_lr, betas=(0.9, 0.95), amsgrad=True
+        differentiable_parameters, lr=args.finetune_lr, betas=(0.9, 0.95), amsgrad=True
     )  # TODO do we really need beta1?
 
     assert args.batch_size % len(args.devices) == 0, "batch_size must be divisible by the number of GPUs"
@@ -115,7 +114,7 @@ def finetune_groupwise(
 
     previous_best_loss = float("inf")  # for early stopping
     steps_accumulated = 0
-    for epoch in range(args.max_go_epochs):
+    for epoch in range(args.finetune_max_epochs):
         loss_numerator = loss_denominator = 0
         for step in range(steps_per_epoch):
             if len(args.devices) == 1:
@@ -148,9 +147,9 @@ def finetune_groupwise(
         if verbose and (epoch * steps_per_epoch + step) % args.print_frequency != 0:
             print(f"epoch={epoch}\tstep={step}\tloss={loss_numerator / loss_denominator:.10f}\t")
 
-        if args.go_relative_mse_tolerance is not None:
+        if args.finetune_relative_mse_tolerance is not None:
             epoch_loss = loss_numerator / loss_denominator
-            if epoch_loss / previous_best_loss > (1.0 - args.go_relative_mse_tolerance):
+            if epoch_loss / previous_best_loss > (1.0 - args.finetune_relative_mse_tolerance):
                 return layer  # early stopping; no updates after last epoch's beam search
             previous_best_loss = min(epoch_loss, previous_best_loss)
 

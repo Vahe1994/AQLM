@@ -13,7 +13,7 @@ from transformers import PreTrainedModel
 from aq_engine import AQEngine
 from src.aq import QuantizedLinear
 from src.datautils import get_loaders
-from src.go import finetune_groupwise
+from src.finetune import finetune_groupwise
 from src.modelutils import (
     FALCON_TYPES,
     find_sublayers,
@@ -574,21 +574,20 @@ if __name__ == "__main__":
         "(still has row-wise scales), 1-15 means using per-group scales quantized to this many bits, "
         "16+ means use per-group scales but do not quantize them",
     )
-
     parser.add_argument(
-        "--max_go_epochs",
+        "--finetune_max_epochs",
         type=int,
         default=1000,
         help="Run this many passes over training data when doing global optimization; no means skip GO",
     )
     parser.add_argument(
-        "--go_lr",
+        "--finetune_lr",
         type=float,
         default=1e-5,
         help="global optimization learning rate",
     )
     parser.add_argument(
-        "--go_relative_mse_tolerance",
+        "--finetune_relative_mse_tolerance",
         type=float,
         default=None,
         help="Stop fine-tuning (GO) when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)",
