@@ -131,9 +131,9 @@ class AQEngine(nn.Module):
         delta_weight = (quantized_weight - reference_weight).to(self.XTX.dtype)
         return (delta_weight @ self.XTX).flatten() @ delta_weight.flatten() / self.quantized_weight.out_features
 
-    def _substitute_and_compute_mse(self, overrides: nn.ParameterDict, selection: slice) -> torch.Tensor:
+    def _replace_and_compute_mse(self, params_to_replace: nn.ParameterDict, selection: slice) -> torch.Tensor:
         """Utility for parallelism: replace the specified parameters of self.quantized_weight, then compute MSE"""
-        for param_name, param_value in overrides.items():
+        for param_name, param_value in params_to_replace.items():
             replace_parameter_(self.quantized_weight, param_name, param_value)
         return self._compute_mse(selection)
 
@@ -147,17 +147,17 @@ class AQEngine(nn.Module):
         active_slices_by_replica = [
             slice(i * shard_size, min((i + 1) * shard_size, num_output_groups)) for i in range(len(devices))
         ]
-        funcs_by_replica = [replica._substitute_and_compute_mse for replica in replicas]
-        inputs_by_replica = [(dict(), active_slices_by_replica[0])]  # no overrides needed for 0-th replica
+        funcs_by_replica = [replica._replace_and_compute_mse for replica in replicas]
+        inputs_by_replica = [(dict(), active_slices_by_replica[0])]  # no replacements needed for 0-th replica (master)
         for i in range(1, len(devices)):
             inputs_by_replica.append((replicated_parameters[i], active_slices_by_replica[i]))
         mse_components = torch.nn.parallel.parallel_apply(funcs_by_replica, inputs_by_replica, devices=devices)
         return Gather.apply(devices[0], 0, *(mse.view(1) for mse in mse_components)).sum()
 
-    def _substitute_and_beam_search(self, overrides: nn.ParameterDict, selection: slice, **kwargs) -> torch.Tensor:
+    def _replace_and_beam_search(self, params_to_replace: nn.ParameterDict, selection: slice, **kwargs) -> torch.Tensor:
         """Utility for parallelism: replace the specified parameters of self.quantized_weight, then run beam search"""
         dtype = self.quantized_weight.codebooks.dtype
-        for param_name, param_value in overrides.items():
+        for param_name, param_value in params_to_replace.items():
             replace_parameter_(self.quantized_weight, param_name, param_value)
         out_channel_selection = slice(
             selection.start * self.quantized_weight.out_group_size,
@@ -193,7 +193,7 @@ class AQEngine(nn.Module):
                 slice(i * shard_size, min((i + 1) * shard_size, num_output_groups)) for i in range(len(devices))
             ]
 
-            funcs_by_replica = [replica._substitute_and_beam_search for replica in replicas]
+            funcs_by_replica = [replica._replace_and_beam_search for replica in replicas]
             inputs_by_replica = [(dict(), active_slices_by_replica[0])]
             for i in range(1, len(devices)):
                 inputs_by_replica.append((replicated_parameters[i], active_slices_by_replica[i]))
