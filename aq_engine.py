@@ -102,7 +102,6 @@ class AQEngine(nn.Module):
                 differentiable_parameters,
                 seed=seed,
                 beam_size=args.beam_size,
-                sparsity_regularizer=args.sparsity_regularizer,
                 verbose=True,
             )
         return self.quantized_weight

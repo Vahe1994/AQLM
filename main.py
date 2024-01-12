@@ -665,12 +665,6 @@ if __name__ == "__main__":
         help="Per-device and per-forward-pass batch size used to accumulate global --batch_size",
     )
     parser.add_argument(
-        "--sparsity_regularizer",
-        type=float,
-        default=0,
-        help="An (optional) regularizer that promotes sparsity. Subtracted from loss for each zero code (index)",
-    )
-    parser.add_argument(
         "--print_frequency",
         type=int,
         default=10,
