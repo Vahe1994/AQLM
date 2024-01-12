@@ -2,9 +2,6 @@
 
 Official PyTorch implementation for [Extreme Compression of Large Language Models via Additive Quantization](https://arxiv.org/pdf/2401.06118.pdf)
 
-**UNDER CONSTRUCTION** -- we have just opened the codebase and are still changing it every few hours. If you need a more stable codebase, please return here after Jan 13 23:59 CET
-
-
 ## Installation
 
 ### Packages
