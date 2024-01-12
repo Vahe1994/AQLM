@@ -251,10 +251,14 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
         # compute MSE between activations
         out_losses = []
         if not args.skip_out_loss:
-            for act, ref_act in zip(activations, reference_activations):
-                outs_batch_loss = (act - ref_act.to(device)).float().square().flatten(1, -1).mean(dim=1).sqrt()
-                outs_batch_loss /= ref_act.flatten(1, -1).float().std(dim=1)
-                out_losses.append(outs_batch_loss.item())
+            for activation_tensor, reference_activation_tensor in zip(activations, reference_activations):
+                assert activation_tensor.ndim == 3  # batch_size, seq_len, hid_size
+                assert activation_tensor.shape == reference_activation_tensor.shape
+                for j in range(len(activation_tensor)):
+                    outs_batch_loss = (activation_tensor[j] - reference_activation_tensor[j]
+                                       ).float().square().flatten(1, -1).mean(dim=1).sqrt()
+                    outs_batch_loss /= reference_activation_tensor[j].flatten(1, -1).float().std(dim=1)
+                    out_losses.append(outs_batch_loss.item())
 
         # Logging
         stats_payload["layer_time"] = time.time() - start_time
@@ -470,10 +474,7 @@ def update_activations_inplace_parallel(
                 for k, v in forward_args.items()
             }
         )
-    out_losses_by_device: Sequence[Sequence[float]] = torch.nn.parallel.parallel_apply(
-        funcs_by_device, inputs_by_device, kwargs_by_device, devices=devices
-    )
-    return list(chain(*out_losses_by_device))
+    torch.nn.parallel.parallel_apply(funcs_by_device, inputs_by_device, kwargs_by_device, devices=devices)
 
 
 if __name__ == "__main__":
