@@ -51,7 +51,7 @@ def quantize_model(model, args):
 
 
 @torch.no_grad()
-def get_inps(
+def get_input_embeddings(
     model: PreTrainedModel, data_iterable: Iterable, args: Namespace, nsamples: Optional[int] = None
 ) -> Sequence[torch.Tensor]:
     """
@@ -153,25 +153,10 @@ def get_inps(
 def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
     assert not torch.backends.cuda.matmul.allow_tf32
     print("\nStarting AQ quantization ...")
-    inps, forward_args = get_inps(model, dataloader, args)
-    outs = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
-
-    #TODO if this works, the next thing we should implement is memory-efficient fine-tuning:
-    # 1) in init_aq_engines, do not update outs at all
-    # 2) keep 2 sens of activations: acts_quant and acts_ref
-    # for block in all_transformer_blocks:
-    #    update_acts_inplace_(block, acts_ref)
-    #    engines = init_aq_engines(block, acts_quant)
-    #    for layer in get_linear_layers(block):
-    #        engines.quantize_using_aq(layer, ...).and_update_in_block(block)
-    #    finetune(block).to_minimize(||block(acts_quant) - acts_ref||^2)
-    #    update_acts_inplace_(block, acts_quant)
-
-
-    inps_ref = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
-    for inp_tensor, inp_tensor_ref in zip(inps, inps_ref):
-        inp_tensor_ref[...] = inp_tensor
-    outs_ref = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
+    activations, forward_args = get_input_embeddings(model, dataloader, args)
+    reference_activations = [torch.zeros_like(tensor, pin_memory=tensor.is_pinned()) for tensor in activations]
+    for act, ref_act in zip(activations, reference_activations):
+        ref_act[...] = act
 
     use_cache = model.config.use_cache
     model.config.use_cache = False
@@ -194,22 +179,23 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
         for k, v in forward_args.items():
             forward_args[k] = v.to(args.devices[0]) if isinstance(v, torch.Tensor) else v
 
+        if len(args.devices) == 1:
+            assert len(reference_activations) == 1  # number of per-device inputs/outputs
+            update_activations(layer, reference_activations[0], **forward_args)
+        else:
+            update_activations_inplace_parallel(args.devices, layer, reference_activations, **forward_args)
+
         if args.true_sequential:
             sequential = get_sequential_groups(model)
         else:
             sequential = [list(find_sublayers(layer).keys())]
 
-        if len(args.devices) == 1:
-            assert False
-        else:
-            update_outs_parallel(args.devices, layer, inps_ref, outs_ref, compute_mse=False, **forward_args)
-
         for names in sequential:
             if len(args.devices) == 1:
-                assert len(inps) == len(outs) == 1  # number of per-device inputs/outputs
-                aq_handlers = init_aq_engines(layer, names, inps[0], outs[0], **forward_args)
+                assert len(activations) == 1  # number of per-device inputs/outputs
+                aq_handlers = init_aq_engines(layer, names, activations, **forward_args)
             else:
-                aq_handlers = init_aq_engines_parallel(args.devices, layer, names, inps, outs, **forward_args)
+                aq_handlers = init_aq_engines_parallel(args.devices, layer, names, activations, **forward_args)
 
             for sublayer_name in aq_handlers.keys():
                 print(f"Quantizing module {sublayer_name} of layer {layer_index}")
@@ -240,7 +226,9 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             print(layer)
             layer = layer.to(dtype=torch.float32)
             with using_tf32(enabled=True):
-                layer = finetune_groupwise(layer=layer, inps=inps, outs=outs_ref, args=args, **forward_args)
+                layer = finetune_groupwise(
+                    layer=layer, inputs=activations, targets=reference_activations, args=args, **forward_args
+                )
             layer = layer.to(dtype=layer_dtype_original)
             print("FINISHED FINETUNING")
         if args.save:
@@ -250,11 +238,11 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             torch.save(layer, layer_save_path)
 
         if len(args.devices) == 1:
-            assert len(inps) == len(outs) == 1
-            out_losses = update_outs(layer, inps[0], outs[0], compute_mse=not args.skip_out_loss, **forward_args)
+            assert len(activations) == 1
+            update_activations(layer, activations[0], **forward_args)
         else:
-            out_losses = update_outs_parallel(
-                args.devices, layer, inps, outs, compute_mse=not args.skip_out_loss, **forward_args
+            update_activations_inplace_parallel(
+                args.devices, layer, activations, **forward_args
             )
 
         layers[layer_index] = layer.to(layer_device_original)
@@ -262,8 +250,13 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
         del aq_handlers
         torch.cuda.empty_cache()
 
-        inps, outs = outs, inps
-        inps_ref, outs_ref = outs_ref, inps_ref
+        # compute MSE between activations
+        out_losses = []
+        if not args.skip_out_loss:
+            for act, ref_act in zip(activations, reference_activations):
+                outs_batch_loss = (act - ref_act.to(device)).float().square().flatten(1, -1).mean(dim=1).sqrt()
+                outs_batch_loss /= ref_act.flatten(1, -1).float().std(dim=1)
+                out_losses.append(outs_batch_loss.item())
 
         # Logging
         stats_payload["layer_time"] = time.time() - start_time
@@ -303,7 +296,7 @@ def perplexity_eval(model, testenc, args):
     use_cache = model.config.use_cache
     model.config.use_cache = False
 
-    inps, forward_args = get_inps(model, testenc, args, nsamples=nsamples)
+    inps, forward_args = get_input_embeddings(model, testenc, args, nsamples=nsamples)
     outs = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
     device = args.devices[0]
     for k, v in forward_args.items():
@@ -314,9 +307,9 @@ def perplexity_eval(model, testenc, args):
         layer = layers[i].to(device)
         if len(args.devices) == 1:
             assert len(inps) == len(outs) == 1
-            update_outs(layer, inps[0], outs[0], compute_mse=False, **forward_args)
+            update_activations(layer, inps[0], outs[0], compute_mse=False, **forward_args)
         else:
-            update_outs_parallel(args.devices, layer, inps, outs, compute_mse=False, **forward_args)
+            update_activations_inplace_parallel(args.devices, layer, inps, outs, compute_mse=False, **forward_args)
         layers[i] = layer.cpu()
         del layer
         torch.cuda.empty_cache()
@@ -352,18 +345,16 @@ def perplexity_eval(model, testenc, args):
 def init_aq_engines(
     layer: nn.Module,
     names: Sequence[str],
-    inps_tensor: torch.Tensor,
-    outs_tensor: torch.Tensor,
+    activations_tensor: torch.Tensor,
     **forward_args: Dict[str, Any],
 ) -> Dict[str, AQEngine]:
     """
     Create a dictionary of AQUtil instances for each quantized layer;
-    Run forward pass on each sample in inps_tensor; write output activations to outs_tensor (in-plance)
+    Run forward pass on each sample in activations_tensor;
     Accumulate XTX to each one of aq_handlers
     :param layer: transformer layer with one or more linear layer to be quantized
     :param names: a list/tuple of string names for linear sub-layers inside :layer: that shall be quantized
-    :param inps_tensor: a tensor of input activations, [nsamples_per_device, seq_len, hidden_size]
-    :param outs_tensor: a tensor to write output activations into, [nsamples_per_device, seq_len, hidden_size]
+    :param activations_tensor: a tensor of input activations, [nsamples_per_device, seq_len, hidden_size]
     :param forward_args: additional keyword arguments, e.g. attention mask
     :returns: a dictionary where keys are full layer names and values are AQUtil instances ready to run .quantize
     """
@@ -384,10 +375,9 @@ def init_aq_engines(
                 setattr(module, child_name, _LayerWrapperThatAccumulatesXTX(child, wrapped_layer_to_hander[child]))
 
     # compute output activations and accumulate XTX
-    for j in trange(len(inps_tensor), desc="calc outs before quantization", leave=False):
-        outs_tensor[j].copy_(
-            layer(inps_tensor[j].to(device).unsqueeze(0), **forward_args)[0].view_as(outs_tensor[j]), non_blocking=True
-        )
+    for j in trange(len(activations_tensor), desc="prepare hessians (XTX) for additive quantization", leave=False):
+        _ = layer(activations_tensor[j].to(device).unsqueeze(0), **forward_args)
+        del _
 
     # remove wrappers
     for module in list(layer.modules()):
@@ -412,8 +402,7 @@ def init_aq_engines_parallel(
     devices: Sequence[torch.device],
     layer: nn.Module,
     names: Sequence[str],
-    inps: Sequence[torch.Tensor],
-    outs: Sequence[torch.Tensor],
+    activations: Sequence[torch.Tensor],
     **forward_args,
 ):
     """Parallel version of init_aq_engines; works on lists of input/output tensors"""
@@ -423,7 +412,7 @@ def init_aq_engines_parallel(
     inputs_by_device = []
     kwargs_by_device = []
     for i in range(len(devices)):
-        inputs_by_device.append((layer_replicas[i], names, inps[i], outs[i]))
+        inputs_by_device.append((layer_replicas[i], names, activations[i]))
         kwargs_by_device.append(
             {
                 k: (v.to(devices[i], non_blocking=True) if isinstance(v, torch.Tensor) else v)
@@ -447,54 +436,36 @@ def init_aq_engines_parallel(
 
 
 @torch.no_grad()
-def update_outs(
-    layer: nn.Module, inps_tensor: torch.Tensor, outs_tensor: torch.Tensor, compute_mse: bool, **forward_args
-) -> Sequence[float]:
+def update_activations(layer: nn.Module, activations_tensor: torch.Tensor, **forward_args) -> Sequence[float]:
     """
-    Update outs_tensor with new activations and optionally compute sample-wise mse loss with previous activations
+    Update activations_tensor in-place with layer outputs and optionally compute sample-wise mse loss with previous activations
     :param layer: transformer layer with one or more linear layer to be quantized
-    :param inps_tensor: a tensor of input activations, [nsamples_per_device, seq_len, hidden_size]
-    :param outs_tensor: a tensor to write output activations into, [nsamples_per_device, seq_len, hidden_size]
+    :param activations_tensor: a tensor of input activations, [nsamples_per_device, seq_len, hidden_size]
     :note: outs_tensor must contain previous activations with which to compute MSE loss
     :param compute_mse: if True, return a list of sample-wise mse losses; if False, return an empty sequence
     :param forward_args: additional keyword arguments, e.g. attention mask
     :returns: a list of mean squared errors for each sequence
     """
     device = torch.device(f"cuda:{torch.cuda.current_device()}" if torch.cuda.is_available() else "cpu")
-    out_losses = []
-    for j in trange(len(inps_tensor), desc="calc outs after quantization", leave=False):
-        outs_batch = layer(inps_tensor[j].to(device).unsqueeze(0), **forward_args)[0]
-        if compute_mse:
-            outs_batch_loss = (
-                (outs_batch - outs_tensor[j].to(device))
-                .float()
-                .square()
-                .view(outs_batch.shape[0], -1)
-                .mean(dim=1)
-                .sqrt()
-            )
-            outs_batch_loss /= outs_batch.view(outs_batch.shape[0], -1).float().std(dim=1)
-            out_losses.append(outs_batch_loss.item())
-        outs_tensor[j].copy_(outs_batch.reshape_as(outs_tensor[j]), non_blocking=True)
-    return out_losses
+    for j in trange(len(activations_tensor), desc="calc outs after quantization", leave=False):
+        outs_batch = layer(activations_tensor[j].to(device).unsqueeze(0), **forward_args)[0]
+        activations_tensor[j].copy_(outs_batch.reshape_as(activations_tensor[j]), non_blocking=True)
 
 
 @torch.no_grad()
-def update_outs_parallel(
+def update_activations_inplace_parallel(
     devices: Sequence[torch.device],
     layer: nn.Module,
-    inps: Sequence[torch.Tensor],
-    outs: Sequence[torch.Tensor],
-    compute_mse: bool,
+    activations: Sequence[torch.Tensor],
     **forward_args,
 ) -> Sequence[float]:
     """Parallel version of update_outs_and_compute_losses; works on lists of input/output tensors"""
     layer_replicas = torch.nn.parallel.replicate(layer, devices=devices, detach=True)
-    funcs_by_device = [update_outs for _ in devices]
+    funcs_by_device = [update_activations for _ in devices]
     inputs_by_device = []
     kwargs_by_device = []
     for i in range(len(devices)):
-        inputs_by_device.append((layer_replicas[i], inps[i], outs[i], compute_mse))
+        inputs_by_device.append((layer_replicas[i], activations[i]))
         kwargs_by_device.append(
             {
                 k: (v.to(devices[i], non_blocking=True) if isinstance(v, torch.Tensor) else v)

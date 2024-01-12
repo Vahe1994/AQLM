@@ -18,31 +18,31 @@ from src.utils import iterate_minibatches
 def finetune_groupwise(
     *,
     layer: nn.Module,
-    inps: Sequence[torch.Tensor],
-    outs: Sequence[torch.Tensor],
+    inputs: Sequence[torch.Tensor],
+    targets: Sequence[torch.Tensor],
     args: Namespace,
     verbose: bool = True,
     **kwargs,
 ) -> nn.Module:
     """
-    Fine-tune a module with pre-quantized linear layers so as to minimize MSE between layer-wise inps/outs
+    Fine-tune a module with pre-quantized linear layers so as to minimize MSE between layer-wise inputs/targets
 
     :param layer: a trainable module where linear layers are replaced by QuantizedLinear instances
-    :param inps: a list of tensors of input activations, [nsamples_per_device, seq_len, hidden_size]
-    :param outs: a list of tensors of previous output activations, [nsamples_per_device, seq_len, hidden_size]
+    :param inputs: a list of tensors of input activations, [nsamples_per_device, seq_len, hidden_size]
+    :param targets: a list of tensors of previous output activations, [nsamples_per_device, seq_len, hidden_size]
     :param args: quantization hyperparameters from main.py
     :param kwargs: additional keyword arguments to be passed into layer on each forward
     """
     assert isinstance(args.devices, (list, tuple)) and len(args.devices) >= 1, f"Found devices = {args.devices}"
-    assert isinstance(inps, (list, tuple)) and isinstance(inps, (list, tuple))
-    assert len(inps) == len(outs) == len(args.devices)
+    assert isinstance(inputs, (list, tuple)) and isinstance(inputs, (list, tuple))
+    assert len(inputs) == len(targets) == len(args.devices)
     for i in range(len(args.devices)):
-        assert isinstance(inps[i], torch.Tensor) and isinstance(outs[i], torch.Tensor)
+        assert isinstance(inputs[i], torch.Tensor) and isinstance(targets[i], torch.Tensor)
         if not args.offload_activations:
-            assert inps[i].device == outs[i].device == args.devices[i], (inps[i].device, outs[i].device, args.devices)
+            assert inputs[i].device == targets[i].device == args.devices[i], (inputs[i].device, targets[i].device, args.devices)
         else:
-            assert inps[i].device == outs[i].device == torch.device("cpu")
-            assert inps[i].is_pinned() and outs[i].is_pinned()
+            assert inputs[i].device == targets[i].device == torch.device("cpu")
+            assert inputs[i].is_pinned() and targets[i].is_pinned()
 
     # replicate non-trainable parameters to each GPU
     replicas = kwargs_by_device = None
@@ -67,12 +67,12 @@ def finetune_groupwise(
 
     assert args.finetune_batch_size % len(args.devices) == 0, "batch_size must be divisible by the number of GPUs"
 
-    num_samples_per_device = len(inps[0])
+    num_samples_per_device = len(inputs[0])
     local_batch_size = args.local_batch_size
     if local_batch_size is None:
         local_batch_size = args.finetune_batch_size // len(args.devices)
 
-    assert all(len(inps_tensor) == num_samples_per_device for inps_tensor in inps)
+    assert all(len(inps_tensor) == num_samples_per_device for inps_tensor in inputs)
     assert args.finetune_batch_size % (local_batch_size * len(args.devices)) == 0, ""
     num_accumulation_steps = args.finetune_batch_size // (local_batch_size * len(args.devices))
     assert num_samples_per_device % local_batch_size * num_accumulation_steps == 0, (
@@ -81,7 +81,7 @@ def finetune_groupwise(
     )
     steps_per_epoch = num_samples_per_device * len(args.devices) // args.finetune_batch_size
     batch_iterators = [
-        iterate_minibatches(inps[i], outs[i], batch_size=local_batch_size, device=args.devices[i])
+        iterate_minibatches(inputs[i], targets[i], batch_size=local_batch_size, device=args.devices[i])
         for i in range(len(args.devices))
     ]
 
@@ -172,9 +172,9 @@ def _compute_mse_on_batch(
     Compute the activation MSE error between transformer layers
     :param
     """
-    inps_batch, outs_batch = next(batch_iter)
+    inps_batch, targets_batch = next(batch_iter)
     inps_batch = inps_batch.to(dtype=torch.float32)
-    outs_batch = outs_batch.to(dtype=torch.float32)
+    targets_batch = targets_batch.to(dtype=torch.float32)
 
     if inps_batch.shape[0] != 1:  # replicate kwargs to match the batch size
         for name, value in list(kwargs.items()):
@@ -184,9 +184,9 @@ def _compute_mse_on_batch(
                 repeats = [len(inps_batch)] + [1 for _ in range(value.ndim - 1)]
                 kwargs[name] = value.tile(*repeats)
 
-    outs_prediction, *_unused = layer(inps_batch, **kwargs)
-    assert outs_prediction.shape == outs_batch.shape
-    return F.mse_loss(outs_prediction, outs_batch)
+    predictions, *_unused = layer(inps_batch, **kwargs)
+    assert predictions.shape == targets_batch.shape
+    return F.mse_loss(predictions, targets_batch)
 
 
 def _compute_mse_parallel(
