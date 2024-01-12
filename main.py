@@ -226,6 +226,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             print(layer)
             layer = layer.to(dtype=torch.float32)
             with using_tf32(enabled=True):
+                # at this point, [reference_activations] are next layer inputs and [activations] are this layer's inputs
                 layer = finetune_groupwise(
                     layer=layer, inputs=activations, targets=reference_activations, args=args, **forward_args
                 )
@@ -251,6 +252,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
         # compute MSE between activations
         out_losses = []
         if not args.skip_out_loss:
+            # at this point, [reference_activations] are next layer inputs and [activations] are also next layer inputs
             for activation_tensor, reference_activation_tensor in zip(activations, reference_activations):
                 assert activation_tensor.ndim == 3  # batch_size, seq_len, hid_size
                 assert activation_tensor.shape == reference_activation_tensor.shape
