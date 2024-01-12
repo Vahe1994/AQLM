@@ -172,19 +172,20 @@ def _compute_mse_on_batch(
     Compute the activation MSE error between transformer layers
     :param
     """
-    inps_batch, targets_batch = next(batch_iter)
-    inps_batch = inps_batch.to(dtype=torch.float32)
+    inputs_batch, targets_batch = next(batch_iter)
+    inputs_batch = inputs_batch.to(dtype=torch.float32)
     targets_batch = targets_batch.to(dtype=torch.float32)
+    print(inputs_batch.shape, targets_batch.shape)
 
-    if inps_batch.shape[0] != 1:  # replicate kwargs to match the batch size
+    if inputs_batch.shape[0] != 1:  # replicate kwargs to match the batch size
         for name, value in list(kwargs.items()):
             if isinstance(value, torch.Tensor) and value.shape[0] == 1:
                 if name not in ("attention_mask", "position_ids"):
                     warnings.warn(f"Tiling an unexpected kwarg {name} over batch size; make sure this is valid.")
-                repeats = [len(inps_batch)] + [1 for _ in range(value.ndim - 1)]
+                repeats = [len(inputs_batch)] + [1 for _ in range(value.ndim - 1)]
                 kwargs[name] = value.tile(*repeats)
 
-    predictions, *_unused = layer(inps_batch, **kwargs)
+    predictions, *_unused = layer(inputs_batch, **kwargs)
     assert predictions.shape == targets_batch.shape
     return F.mse_loss(predictions, targets_batch)
 
