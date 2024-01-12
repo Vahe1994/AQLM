@@ -175,7 +175,6 @@ def _compute_mse_on_batch(
     inputs_batch, targets_batch = next(batch_iter)
     inputs_batch = inputs_batch.to(dtype=torch.float32)
     targets_batch = targets_batch.to(dtype=torch.float32)
-    print(inputs_batch.shape, targets_batch.shape)
 
     if inputs_batch.shape[0] != 1:  # replicate kwargs to match the batch size
         for name, value in list(kwargs.items()):
