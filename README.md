@@ -79,7 +79,7 @@ export WANDB_NAME=COOL_EXP_NAME
 python main.py $MODEL_PATH $DATASET_PATH --nsamples=1024 \
  --num_codebooks=1 --nbits_per_codebook=16 --in_group_size=8 \
  --relative_mse_tolerance=0.01 --finetune_relative_mse_tolerance=0.001 \
- --finetune_batch_size=32 --wandb --save $SAVE_PATH
+ --finetune_batch_size=32 --offload_activations --wandb --save $SAVE_PATH
 
 ```
 
@@ -95,7 +95,7 @@ Main CLI arguments:
 - `--finetune_batch_size` - (for fine-tuning only) the total number of sequences used for each optimization step
 - `--relative_mse_tolerance`- (for initial calibration) - stop training when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)
 - `--finetune_relative_mse_tolerance`- same, but for fine-tuning
-- `--offload activations` -- during calibration, move activations from GPU memory to RAM. This reduces VRAM usage while slowing calibration by ~10% (depending on your hardware). 
+- `--offload_activations` -- during calibration, move activations from GPU memory to RAM. This reduces VRAM usage while slowing calibration by ~10% (depending on your hardware). 
 - `--save` -- path to save/load quantized model. (see also: `--load`)
 - `--wandb` - if this parameter is set, the code will log results to wandb
 
