@@ -185,6 +185,17 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
         else:
             update_activations_inplace_parallel(args.devices, layer, reference_activations, **forward_args)
 
+        print("PREPARING TO FINETUNE ORIGINAL LAYER")
+        print(layer)
+        layer = layer.to(dtype=torch.float32)
+        with using_tf32(enabled=True):
+            # at this point, [reference_activations] are next layer inputs and [activations] are this layer's inputs
+            layer = finetune_groupwise(
+                layer=layer, inputs=activations, targets=reference_activations, args=args, **forward_args
+            )
+        layer = layer.to(dtype=layer_dtype_original)
+        print("FINISHED FINETUNING ORIGINAL LAYER")
+
         if args.true_sequential:
             sequential = get_sequential_groups(model)
         else:
@@ -222,7 +233,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                 print("curent_avg_bits", overall_bits / model_number_of_params)
                 quantizers["model.layers.%d.%s" % (layer_index, sublayer_name)] = ()  # to be updated
 
-            print("PREPARING TO FINETUNE")
+            print("PREPARING TO FINETUNE QUANTIZED LAYER")
             print(layer)
             layer = layer.to(dtype=torch.float32)
             with using_tf32(enabled=True):
@@ -231,7 +242,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                     layer=layer, inputs=activations, targets=reference_activations, args=args, **forward_args
                 )
             layer = layer.to(dtype=layer_dtype_original)
-            print("FINISHED FINETUNING")
+            print("FINISHED FINETUNING QUANTIZED LAYER")
         if args.save:
             os.makedirs(args.save, exist_ok=True)
             layer_save_path = os.path.join(args.save, f"{layer_index}.pth")
