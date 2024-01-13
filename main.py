@@ -185,17 +185,19 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
         else:
             update_activations_inplace_parallel(args.devices, layer, reference_activations, **forward_args)
 
-        print("PREPARING TO FINETUNE ORIGINAL LAYER")
-        print(layer)
-        layer = layer.to(dtype=torch.float32)
-        with using_tf32(enabled=True):
-            # at this point, [reference_activations] are next layer inputs and [activations] are this layer's inputs
-            layer = finetune_groupwise(
-                layer=layer, inputs=activations, targets=reference_activations, args=args, **forward_args
-            )
-        layer = layer.to(dtype=layer_dtype_original)
-        print("FINISHED FINETUNING ORIGINAL LAYER")
-
+        if layer_index > 10:
+            print("PREPARING TO FINETUNE ORIGINAL LAYER")
+            print(layer)
+            layer = layer.to(dtype=torch.float32)
+            with using_tf32(enabled=True):
+                # at this point, [reference_activations] are next layer inputs and [activations] are this layer's inputs
+                layer = finetune_groupwise(
+                    layer=layer, inputs=activations, targets=reference_activations, args=args, **forward_args
+                )
+            layer = layer.to(dtype=layer_dtype_original)
+            print("FINISHED FINETUNING ORIGINAL LAYER")
+        else:
+            print("NOT PREFINETUNING")
         if args.true_sequential:
             sequential = get_sequential_groups(model)
         else:
