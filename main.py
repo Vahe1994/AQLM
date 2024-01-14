@@ -323,9 +323,9 @@ def perplexity_eval(model, testenc, args):
         layer = layers[i].to(device)
         if len(args.devices) == 1:
             assert len(activations) == 1
-            update_activations(layer, activations[0], compute_mse=False, **forward_args)
+            update_activations(layer, activations[0], **forward_args)
         else:
-            update_activations_inplace_parallel(args.devices, layer, activations, compute_mse=False, **forward_args)
+            update_activations_inplace_parallel(args.devices, layer, activations, **forward_args)
         layers[i] = layer.cpu()
         del layer
         torch.cuda.empty_cache()
