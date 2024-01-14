@@ -33,7 +33,7 @@ class QuantizedLinear(nn.Module):
             torch.empty((num_codebooks, self.codebook_size, out_group_size, in_group_size), **factory_kwargs), requires_grad=True
         )  # [num_codebooks, codebook_size, out_group_size, in_group_size]
         self.codes = nn.Parameter(torch.empty((num_out_groups, num_in_groups, num_codebooks), device=device, dtype=get_int_dtype(nbits_per_codebook)), requires_grad=False)  #  [num_out_groups, num_in_groups, num_codebooks]
-        self.scales = nn.Parameter(torch.empty((num_out_groups, num_in_groups, 1, 1), **factory_kwargs), requires_grad=True)  #  [num_out_groups, num_in_groups, 1, 1]
+        self.scales = nn.Parameter(torch.empty((num_out_groups, 1, 1, 1), **factory_kwargs), requires_grad=True)  #  [num_out_groups, 1, 1, 1]
         
         if bias:
             self.bias = nn.Parameter(torch.empty(out_features, **factory_kwargs))
