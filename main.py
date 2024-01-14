@@ -297,7 +297,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
         def __init__(self, model):
             super().__init__()
             self.norm = model.model.norm
-            self.lm_head = model.model.lm_head
+            self.lm_head = model.lm_head
         def forward(self, inps_: torch.Tensor):
             hidden_states = inps_.unsqueeze(0)
             if self.norm is not None:
