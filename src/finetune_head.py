@@ -215,7 +215,7 @@ def _compute_mse_parallel(
             for replacement_param, replacement_table in zip(replicated_parameters[i], replacement_tables[i]):
                 for (replica_submodule, attr_name) in replacement_table:
                     replace_parameter_(replica_submodule, attr_name, replacement_param)
-        inputs_by_replica.append((replicas[i], reference_layer_replicas, batch_iterators[i]))
+        inputs_by_replica.append((replicas[i], reference_layer_replicas[i], batch_iterators[i]))
     mse_components = torch.nn.parallel.parallel_apply(
         funcs_by_replica, inputs_by_replica, kwargs_by_device, devices=devices
     )
