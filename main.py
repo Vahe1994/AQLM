@@ -273,9 +273,6 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             wandb.log({"layer_time": stats_payload["layer_time"]}, step=layer_index)
         print(stats_payload)
 
-        print("DEBUG EARLY OUT")
-        break
-
     print("Finetuning LM head")
     class LMHead(nn.Module):
         def __init__(self, model):
