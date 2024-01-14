@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 from torch.nn.parallel.scatter_gather import Gather
 
-from src.aq import QuantizedWeight
+from src.aq import QuantizedLinear
 from src.utils import ellipsis
 
 
@@ -46,21 +46,25 @@ class AQEngine(nn.Module):
         """create a QuantizedLinear with specified args based on the collected hessian (XTX) data"""
         assert isinstance(args.devices, (list, tuple)) and len(args.devices) >= 1, f"Found devices = {args.devices}"
         assert args.devices[0] == self.device, (args.devices[0], self.XTX.device)
-        self.quantized_weight = QuantizedWeight(
-            XTX=self.XTX.to(device=self.device, dtype=torch.float32),
-            reference_weight=self.layer.weight.detach().to(device=self.device, dtype=torch.float32),
+        
+        reference_weight = self.layer.weight.detach().to(device=self.device, dtype=torch.float32)
+        self.quantized_weight = QuantizedLinear(
+            in_features=reference_weight.shape[1],
+            out_features=reference_weight.shape[0],
             out_group_size=args.out_group_size,
             in_group_size=args.in_group_size,
             num_codebooks=args.num_codebooks,
             nbits_per_codebook=args.nbits_per_codebook,
-            codebook_value_nbits=args.codebook_value_nbits,
-            codebook_value_num_groups=args.codebook_value_num_groups,
-            scale_nbits=args.scale_nbits,
+            device=self.device,
+        )
+        self.quantized_weight.initialize(
+            reference_weight=reference_weight,
             max_iter=args.init_max_iter,
             max_points_per_centroid=args.init_max_points_per_centroid,
             devices=args.devices,
             verbose=True,
         )
+        del reference_weight
 
         differentiable_parameters = nn.ParameterDict(
             {name: param for name, param in self.quantized_weight.named_parameters() if param.requires_grad}
