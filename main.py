@@ -313,8 +313,7 @@ def perplexity_eval(model, testenc, args):
     use_cache = model.config.use_cache
     model.config.use_cache = False
 
-    inps, forward_args = get_input_embeddings(model, testenc, args, nsamples=nsamples)
-    outs = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
+    activations, forward_args = get_input_embeddings(model, testenc, args, nsamples=nsamples)
     device = args.devices[0]
     for k, v in forward_args.items():
         forward_args[k] = v.to(device) if isinstance(v, torch.Tensor) else v
@@ -323,23 +322,22 @@ def perplexity_eval(model, testenc, args):
     for i in trange(len(layers), desc="processing eval data by layer"):
         layer = layers[i].to(device)
         if len(args.devices) == 1:
-            assert len(inps) == len(outs) == 1
-            update_activations(layer, inps[0], outs[0], compute_mse=False, **forward_args)
+            assert len(activations) == 1
+            update_activations(layer, activations[0], compute_mse=False, **forward_args)
         else:
-            update_activations_inplace_parallel(args.devices, layer, inps, outs, compute_mse=False, **forward_args)
+            update_activations_inplace_parallel(args.devices, layer, activations, compute_mse=False, **forward_args)
         layers[i] = layer.cpu()
         del layer
         torch.cuda.empty_cache()
-        inps, outs = outs, inps
 
     get_model_head(model).to(device)
     testenc = testenc.to(device)
-    nsamples_per_device = len(inps[0])
-    assert len(set(map(len, inps[:-1]))) <= 1 and len(inps[-1]) <= len(inps[0])
+    nsamples_per_device = len(activations[0])
+    assert len(set(map(len, activations[:-1]))) <= 1 and len(activations[-1]) <= len(activations[0])
 
     nlls = []
     for i in range(nsamples):
-        inp = inps[i // nsamples_per_device][i % nsamples_per_device].to(args.devices[0], non_blocking=True)
+        inp = activations[i // nsamples_per_device][i % nsamples_per_device].to(args.devices[0], non_blocking=True)
         lm_logits = get_lm_logits(inp.to(device), model)
         shift_logits = lm_logits[:, :-1, :].contiguous()
         shift_labels = testenc[:, (i * model.seqlen) : ((i + 1) * model.seqlen)][:, 1:]
