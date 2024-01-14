@@ -305,6 +305,8 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             return self.lm_head(hidden_states)
 
     head_layer = LMHead(model)
+    original_device = next(head_layer.parameters()).device
+    head_layer = head_layer.to(args.devices[0])
     reference_head_layer = copy.deepcopy(head_layer)
     for param in reference_head_layer.parameters():
         param.requires_grad = False
@@ -312,6 +314,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
         layer=head_layer, reference_layer=reference_head_layer,
         inputs=activations, ref_inputs=reference_activations, args=args
     )
+    head_layer = head_layer.to(original_device)
     # note: since head_layer reuses model's norm and logits, they'll be updated in-place
     print("DONE FINETUNING HEAD")
 
