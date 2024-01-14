@@ -1,3 +1,4 @@
+import copy
 import os
 import time
 from argparse import Namespace
@@ -11,6 +12,7 @@ from tqdm.auto import trange
 from transformers import PreTrainedModel
 
 from aq_engine import AQEngine
+from src.finetune_head import finetune_head
 from src.aq import QuantizedLinear
 from src.datautils import get_loaders
 from src.finetune import finetune_groupwise
@@ -185,19 +187,19 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
         else:
             update_activations_inplace_parallel(args.devices, layer, reference_activations, **forward_args)
 
-        if layer_index > 10:
-            print("PREPARING TO FINETUNE ORIGINAL LAYER")
-            print(layer)
-            layer = layer.to(dtype=torch.float32)
-            with using_tf32(enabled=True):
-                # at this point, [reference_activations] are next layer inputs and [activations] are this layer's inputs
-                layer = finetune_groupwise(
-                    layer=layer, inputs=activations, targets=reference_activations, args=args, **forward_args
-                )
-            layer = layer.to(dtype=layer_dtype_original)
-            print("FINISHED FINETUNING ORIGINAL LAYER")
-        else:
-            print("NOT PREFINETUNING")
+        # if layer_index > 10:
+        #     print("PREPARING TO FINETUNE ORIGINAL LAYER")
+        #     print(layer)
+        #     layer = layer.to(dtype=torch.float32)
+        #     with using_tf32(enabled=True):
+        #         # at this point, [reference_activations] are next layer inputs and [activations] are this layer's inputs
+        #         layer = finetune_groupwise(
+        #             layer=layer, inputs=activations, targets=reference_activations, args=args, **forward_args
+        #         )
+        #     layer = layer.to(dtype=layer_dtype_original)
+        #     print("FINISHED FINETUNING ORIGINAL LAYER")
+        # else:
+        #     print("NOT PREFINETUNING")
         if args.true_sequential:
             sequential = get_sequential_groups(model)
         else:
@@ -283,6 +285,32 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             wandb.log({"out_loss": stats_payload["out_loss"]}, step=layer_index)
             wandb.log({"layer_time": stats_payload["layer_time"]}, step=layer_index)
         print(stats_payload)
+
+        print("DEBUG EARLY OUT")
+        break
+
+    print("Finetuning LM head")
+    class LMHead(nn.Module):
+        def __init__(self, model):
+            super().__init__()
+            self.norm = model.model.norm
+            self.lm_head = model.model.lm_head
+        def forward(self, inps_: torch.Tensor):
+            hidden_states = inps_.unsqueeze(0)
+            if self.norm is not None:
+                hidden_states = self.norm(hidden_states)
+            return self.lm_head(hidden_states)
+
+    head_layer = LMHead(model)
+    reference_head_layer = copy.deepcopy(head_layer)
+    for param in reference_head_layer.parameters():
+        param.requires_grad = False
+    head_layer = finetune_head(
+        layer=head_layer, reference_layer=reference_head_layer,
+        inputs=activations, ref_inputs=reference_activations, args=args
+    )
+    # note: since head_layer reuses model's norm and logits, they'll be updated in-place
+    print("DONE FINETUNING HEAD")
 
     print("=====================\nFinal stats:")
     if args.save:
