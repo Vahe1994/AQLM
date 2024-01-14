@@ -168,6 +168,9 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
     model_number_of_params = 0
     layers = get_layers(model)
     for layer_index in range(len(layers)):
+        if layer_index >= 1:
+            print("DEBUG EARLY STOP")
+            break
         print(f"\n---------------- Layer {layer_index} of {len(layers)} ----------------")
         stats_payload = {}
         start_time = time.time()
