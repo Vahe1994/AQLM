@@ -646,6 +646,12 @@ if __name__ == "__main__":
         help="Run (this many) Adam updates before every beam search round",
     )
     parser.add_argument(
+        "--finetune_optimizer",
+        type=str,
+        default="adam",
+        help="Finetuning optimizer",
+    )
+    parser.add_argument(
         "--finetune_max_epochs",
         type=int,
         default=1000,
@@ -663,12 +669,33 @@ if __name__ == "__main__":
         default=None,
         help="Stop fine-tuning (GO) when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)",
     )
-
     parser.add_argument(
         "--finetune_batch_size",
         type=int,
         default=1,
         help="(fine-tuning only) train on batches of this many sequences, globally across all GPUs",
+    )
+    parser.add_argument(
+        "--finetune_momentum",
+        type=float,
+        default=0.9,
+        help="Finetuning learning rate",
+    )
+    parser.add_argument(
+        "--finetune_adam_beta1",
+        type=float,
+        default=0.9,
+        help="Finetuning adam_beta1",
+    )
+    parser.add_argument(
+        "--finetune_adam_beta2",
+        type=float,
+        default=0.95,
+        help="Finetuning adam_beta2",
+    )
+    parser.add_argument(
+        "--finetune_keep_best",
+        action="store_true"
     )
     parser.add_argument(
         "--local_batch_size",
