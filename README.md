@@ -24,13 +24,21 @@ This repository is currently designed to work with models of `LLaMA ` family.
 
 When quantizing models with AQLM, we recommend that you use a subset of the original data the model was trained on.
 
-For Llama-2 models, the closest available dataset is [RedPajama](https://huggingface.co/datasets/togethercomputer/RedPajama-Data-1T-Sample) .
+For Llama-2 models, the closest available dataset is [RedPajama](https://huggingface.co/datasets/togethercomputer/RedPajama-Data-1T-Sample) . To load subset of RedPajama provide "pajama" in --dataset argument.
+This will process nsamples data and tokenize it using provided model tokenizer.
 
-We also provide subsets of Redpajama for 2048 and 4096 context lengths stored in `data` directory:
-* `red_pajama_n=1024_2048_context_length.pth`
-* `red_pajama_n=1024_4096_context_length.pth`
-  
-**Warning:** These subsets are already processed with the corresponding model tokenizer. If you want to quantize another model (e.g. mistral/mixtral), please re-tokenize the data.
+Additionaly we provide tokenized Redpajama for LLama and Solar/Mistral models for 4096 context lengths stored in [Hunggingface](https://huggingface.co/datasets/Vahe1994/AQLM) .
+To load it, use:
+
+```python
+from huggingface_hub import hf_hub_download
+
+hf_hub_download(repo_id="Vahe1994/AQLM", filename="data/name.pth",repo_type="dataset")
+```
+
+To use downloaded data from HF, place it in data folder(optional) and set correct path to it in "--dataset" argument in main.py.
+
+**Warning:** These subsets are already processed with the corresponding model tokenizer. If you want to quantize another model (e.g. mistral/mixtral), please re-tokenize the data with provided script in src/datautils.
 
 __We shall add step-by-step instructions for this before Jan 13 23:59 AOE.__
 
