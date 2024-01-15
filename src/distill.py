@@ -7,13 +7,13 @@ import torch.nn.functional as F
 from .utils import maybe_get_0th_element
 
 
-def kl_div_loss(student_logits, teacher_logits, temperature):
+def kl_div_loss(student_logits, teacher_hiddens, temperature):
     "Kullback-Leibler divergence loss"
     num_tokens = student_logits.numel() / student_logits.size(-1)
     return (
         F.kl_div(
             input=F.log_softmax(student_logits / temperature, dim=-1),
-            target=F.log_softmax(teacher_logits / temperature, dim=-1),
+            target=F.log_softmax(teacher_hiddens / temperature, dim=-1),
             log_target=True,
             reduction="sum",
         )
@@ -28,21 +28,21 @@ def _extract_into_tensor(tensor_list: List[torch.Tensor], indices: Iterable[int]
 
 
 @torch.inference_mode()
-def cache_teacher_logits(teacher_model, dataloader, args) -> List[torch.Tensor]:
-    cached_teacher_logits = []
+def cache_teacher_hiddens(teacher_model, dataloader, args) -> List[torch.Tensor]:
+    cached_teacher_hiddens = []
     # get device
     device = maybe_get_0th_element(args.devices)
 
-    for i in trange(len(dataloader),  total=len(dataloader), desc='Caching teacher activations', leave=False):
+    for i in trange(len(dataloader),  total=len(dataloader), desc='Caching teacher outputs', leave=False):
         batch = maybe_get_0th_element(dataloader[i]).to(device)
         # get activations
-        teacher_logits = teacher_model(batch).logits
-        cached_teacher_logits.append(teacher_logits.cpu())
+        teacher_hiddens = teacher_model.model(batch).last_hidden_state
+        cached_teacher_hiddens.append(teacher_hiddens.cpu())
 
-    return cached_teacher_logits
+    return cached_teacher_hiddens
 
 
-def distill_logits(model, dataloader, teacher_logits, args):
+def distill_logits(model, dataloader, teacher_hiddens, args):
     # set model into train mode
     model.train()
     # get device
@@ -88,10 +88,12 @@ def distill_logits(model, dataloader, teacher_logits, args):
             # prepare inputs
             inputs = _extract_into_tensor(dataloader, batch_indices).to(device)
             # prepare targets
-            targets = _extract_into_tensor(teacher_logits, batch_indices).to(device)
+            pre_targets = _extract_into_tensor(teacher_hiddens, batch_indices).to(device)
+            with torch.no_grad():
+                teacher_logits = model.lm_head(pre_targets)
             # get student outputs
-            outputs = model(inputs).logits
-            loss = kl_div_loss(outputs, targets, args.distill_temperature)
+            student_logits = model(inputs).logits
+            loss = kl_div_loss(student_logits, teacher_logits, args.distill_temperature)
             loss.div(num_accumulation_steps).backward()
             steps_accumulated += 1
 

@@ -14,7 +14,7 @@ from aq_engine import AQEngine
 from src.aq import QuantizedLinear
 from src.datautils import get_loaders
 from src.finetune import finetune_groupwise
-from src.distill import cache_teacher_logits, distill_logits
+from src.distill import cache_teacher_hiddens, distill_logits
 from src.modelutils import (
     FALCON_TYPES,
     find_sublayers,
@@ -69,14 +69,14 @@ def distill_model(model, args) -> None:
         seqlen=model.seqlen,
     )
     # cache teacher logits
-    teacher_logits = cache_teacher_logits(teacher_model, dataloader, args)
+    teacher_hiddens = cache_teacher_hiddens(teacher_model, dataloader, args)
     # delete teacher
     del teacher_model
     torch.cuda.empty_cache()
     # place student on device
     model = model.to(device)
     # distill student
-    distill_logits(model, dataloader, teacher_logits, args)
+    distill_logits(model, dataloader, teacher_hiddens, args)
 
 
 @torch.no_grad()
