@@ -14,6 +14,7 @@ from aq_engine import AQEngine
 from src.aq import QuantizedLinear
 from src.datautils import get_loaders
 from src.finetune import finetune_groupwise
+from src.distill import cache_teacher_logits, distill_logits
 from src.modelutils import (
     FALCON_TYPES,
     find_sublayers,
@@ -23,7 +24,7 @@ from src.modelutils import (
     get_model_head,
     get_sequential_groups,
 )
-from src.utils import using_tf32
+from src.utils import using_tf32, maybe_get_0th_element
 
 try:
     import wandb
@@ -48,6 +49,34 @@ def quantize_model(model, args):
     results = quantize_aq(model, dataloader, args)
     print(f"quantization time: {time.time() - tick:.1f}")
     return results
+
+
+def distill_model(model, args) -> None:
+    # get device
+    device = maybe_get_0th_element(args.devices)
+    # offload student
+    model = model.cpu()
+    # init teacher
+    teacher_model = get_model(args.model_path, None, args.dtype, args.model_seqlen).train(False)
+    # TODO add sequential inference
+    teacher_model = teacher_model.to(device)
+    # get train loader
+    dataloader = get_loaders(
+        args.dataset,
+        nsamples=args.nsamples,
+        seed=args.seed,
+        model_path=args.model_path,
+        seqlen=model.seqlen,
+    )
+    # cache teacher logits
+    teacher_logits = cache_teacher_logits(teacher_model, dataloader, args)
+    # delete teacher
+    del teacher_model
+    torch.cuda.empty_cache()
+    # place student on device
+    model = model.to(device)
+    # distill student
+    distill_logits(model, dataloader, teacher_logits, args)
 
 
 @torch.no_grad()
@@ -484,6 +513,7 @@ def update_outs_parallel(
     return list(chain(*out_losses_by_device))
 
 
+
 if __name__ == "__main__":
     import argparse
 
@@ -646,12 +676,6 @@ if __name__ == "__main__":
         help="Run (this many) Adam updates before every beam search round",
     )
     parser.add_argument(
-        "--finetune_optimizer",
-        type=str,
-        default="adam",
-        help="Finetuning optimizer",
-    )
-    parser.add_argument(
         "--finetune_max_epochs",
         type=int,
         default=1000,
@@ -676,12 +700,6 @@ if __name__ == "__main__":
         help="(fine-tuning only) train on batches of this many sequences, globally across all GPUs",
     )
     parser.add_argument(
-        "--finetune_momentum",
-        type=float,
-        default=0.9,
-        help="Finetuning learning rate",
-    )
-    parser.add_argument(
         "--finetune_adam_beta1",
         type=float,
         default=0.9,
@@ -704,12 +722,69 @@ if __name__ == "__main__":
         help="(fine-tuning only) Per-device and per-forward-pass batch size used to accumulate global --batch_size",
     )
     parser.add_argument(
+        "--distill",
+        action="store_true",
+        help="Whether to apply KD."
+    )
+    parser.add_argument(
+        "--distill_lr",
+        type=float,
+        default=1e-4,
+        help="distillation learning rate",
+    )
+    parser.add_argument(
+        "--distill_max_epochs",
+        type=int,
+        default=100,
+        help="Run this many passes over training data when doing distillation",
+    )
+    parser.add_argument(
+        "--distill_relative_mse_tolerance",
+        type=float,
+        default=None,
+        help="Stop fine-tuning (distillation) when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)",
+    )
+    parser.add_argument(
+        "--distill_batch_size",
+        type=int,
+        default=1,
+        help="(distillation only) train on batches of this many sequences, globally across all GPUs",
+    )
+    parser.add_argument(
+        "--distill_local_batch_size",
+        type=int,
+        default=1,
+        help="(distillation only) Per-device and per-forward-pass batch size used to accumulate global --batch_size",
+    )
+    parser.add_argument(
+        "--distill_adam_beta1",
+        type=float,
+        default=0.9,
+        help="Distillation adam_beta1",
+    )
+    parser.add_argument(
+        "--distill_adam_beta2",
+        type=float,
+        default=0.95,
+        help="Distillation adam_beta2",
+    )
+    parser.add_argument(
+        "--distill_temperature",
+        type=float,
+        default=1.0,
+        help="Distillation temperature",
+    )
+    parser.add_argument(
+        "--distill_gradient_checkpointing",
+        action="store_true",
+        help="Whether to apply gradient checkpointing on distillation",
+    )
+    parser.add_argument(
         "--print_frequency",
         type=int,
         default=10,
         help="Print Adam progress after each print_frequency updates",
     )
-
     parser.add_argument("--wandb", action="store_true", help="Whether to use wandb or store locally.")
     parser.add_argument(
         "--no_quant",
@@ -757,6 +832,10 @@ if __name__ == "__main__":
     if not args.load and not args.no_quant:
         print("\n============ Quantizing model... ============")
         quantize_model(model, args)
+
+    if args.distill and not args.no_quant:
+        print("\n============ Distilling model... ============")
+        distill_model(model, args)
 
     print("\n============ Evaluating perplexity... ============")
     torch.cuda.reset_peak_memory_stats()

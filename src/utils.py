@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import os
-from typing import Callable, Iterator, Optional, Sequence
+from typing import Callable, Iterator, Optional, Sequence, Union, Any
 
 import torch
 
@@ -103,3 +103,12 @@ def iterate_minibatches(
             prev_batch = batch if isinstance(batch, (list, tuple)) and len(tensors) > 1 else batch[0]
             del batch
         yield prev_batch
+
+
+def maybe_get_0th_element(x: Union[Any, Sequence[Any]]) -> Any:
+    """
+    Return first element if input is Sequence, otherwise return input
+    """
+    if isinstance(x, Sequence):
+        return x[0]
+    return x
