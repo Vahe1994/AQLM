@@ -54,6 +54,7 @@ class AQEngine(nn.Module):
             in_group_size=args.in_group_size,
             num_codebooks=args.num_codebooks,
             nbits_per_codebook=args.nbits_per_codebook,
+            bias=self.layer.bias is not None,
             device=self.device,
             codebook_value_nbits=args.codebook_value_nbits,
             codebook_value_num_groups=args.codebook_value_num_groups,
@@ -61,6 +62,7 @@ class AQEngine(nn.Module):
         )
         self.quantized_weight.initialize(
             reference_weight=self.layer.weight.detach().to(device=self.device, dtype=torch.float32),
+            bias=self.layer.bias.detach() if self.layer.bias is not None else None,
             max_iter=args.init_max_iter,
             max_points_per_centroid=args.init_max_points_per_centroid,
             devices=args.devices,
