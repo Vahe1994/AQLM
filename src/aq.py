@@ -8,19 +8,30 @@ import torch.nn.functional as F
 from tqdm.auto import trange
 
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
-from src.utils import ellipsis, maybe_script, get_int_dtype
 from src.matmul_kernels import aqlm_gemv_simple
+from src.utils import ellipsis, get_int_dtype, maybe_script
 
 
 class QuantizedLinear(nn.Module):
     EPS = 1e-9
-    
-    def __init__(self, in_features: int, out_features: int , in_group_size: int, out_group_size: int, num_codebooks: int, nbits_per_codebook: int, bias=True, device=None, dtype=None):
-        factory_kwargs = {'device': device, 'dtype': dtype}
+
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        in_group_size: int,
+        out_group_size: int,
+        num_codebooks: int,
+        nbits_per_codebook: int,
+        bias=True,
+        device=None,
+        dtype=None,
+    ):
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        
+
         assert self.in_features % in_group_size == 0
         assert self.out_features % out_group_size == 0
         num_out_groups = out_features // out_group_size
@@ -29,23 +40,36 @@ class QuantizedLinear(nn.Module):
         self.num_codebooks = num_codebooks
         self.nbits_per_codebook = nbits_per_codebook
         self.codebook_size = 2**nbits_per_codebook
-        
+
         self.codebooks = nn.Parameter(
-            torch.empty((num_codebooks, self.codebook_size, out_group_size, in_group_size), **factory_kwargs), requires_grad=True
+            torch.empty((num_codebooks, self.codebook_size, out_group_size, in_group_size), **factory_kwargs),
+            requires_grad=True,
         )  # [num_codebooks, codebook_size, out_group_size, in_group_size]
-        self.codes = nn.Parameter(torch.empty((num_out_groups, num_in_groups, num_codebooks), device=device, dtype=get_int_dtype(nbits_per_codebook)), requires_grad=False)  #  [num_out_groups, num_in_groups, num_codebooks]
-        self.scales = nn.Parameter(torch.empty((num_out_groups, 1, 1, 1), **factory_kwargs), requires_grad=True)  #  [num_out_groups, 1, 1, 1]
-        
+        self.codes = nn.Parameter(
+            torch.empty(
+                (num_out_groups, num_in_groups, num_codebooks), device=device, dtype=get_int_dtype(nbits_per_codebook)
+            ),
+            requires_grad=False,
+        )  #  [num_out_groups, num_in_groups, num_codebooks]
+        self.scales = nn.Parameter(
+            torch.empty((num_out_groups, 1, 1, 1), **factory_kwargs), requires_grad=True
+        )  #  [num_out_groups, 1, 1, 1]
+
         if bias:
             self.bias = nn.Parameter(torch.empty(out_features, **factory_kwargs))
         else:
-            self.register_parameter('bias', None)
-        
+            self.register_parameter("bias", None)
+
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         # return F.linear(input, self.reconstruct_weight(), self.bias)
         original_shape = input.shape
         input = input.reshape(-1, original_shape[-1])
-        return torch.cat([aqlm_gemv_simple(input_vector.unsqueeze(0), self.codes, self.codebooks, self.scales) for input_vector in input]).reshape(original_shape[:-1] + (-1,))
+        return torch.cat(
+            [
+                aqlm_gemv_simple(input_vector.unsqueeze(0), self.codes, self.codebooks, self.scales)
+                for input_vector in input
+            ]
+        ).reshape(original_shape[:-1] + (-1,))
 
     def initialize(
         self,
@@ -56,7 +80,10 @@ class QuantizedLinear(nn.Module):
         assert reference_weight.shape == (self.out_features, self.in_features)
         with torch.no_grad():
             weight_groupwise = reference_weight.reshape(
-                self.out_features // self.out_group_size, self.out_group_size, self.in_features // self.in_group_size, self.in_group_size
+                self.out_features // self.out_group_size,
+                self.out_group_size,
+                self.in_features // self.in_group_size,
+                self.in_group_size,
             ).swapaxes(
                 1, 2
             )  # [num_out_groups, num_in_groups, out_group_size, in_group_size]
@@ -77,7 +104,6 @@ class QuantizedLinear(nn.Module):
             self.codes.data = codes
             self.codebooks.data = codebooks
 
-
     def get_codebooks(self) -> torch.Tensor:
         """Get quantization codebooks or reconstruct them from second level quantization (see codebook_values_nbits)"""
         return self.codebooks
@@ -95,7 +121,11 @@ class QuantizedLinear(nn.Module):
             Formally, the indices must be in range [ 0 , self.out_features // self.out_group_size )
 
         """
-        weight = _dequantize_weight(self.codes[selection].to(torch.int64) % (2 ** self.nbits_per_codebook), self.get_codebooks(), self.get_scales()[selection])
+        weight = _dequantize_weight(
+            self.codes[selection].to(torch.int64) % (2**self.nbits_per_codebook),
+            self.get_codebooks(),
+            self.get_scales()[selection],
+        )
         return weight
 
     @torch.no_grad()
