@@ -780,6 +780,11 @@ if __name__ == "__main__":
         help="Whether to apply gradient checkpointing on distillation",
     )
     parser.add_argument(
+        "--distill_amp",
+         action="store_true",
+        help="Whether to use amp on distillation",
+    )
+    parser.add_argument(
         "--print_frequency",
         type=int,
         default=10,

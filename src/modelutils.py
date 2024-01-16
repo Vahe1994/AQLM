@@ -33,21 +33,17 @@ def get_model(model_path, load_quantized=None, dtype="auto", model_seqlen=2048):
         dtype = getattr(torch, dtype)
 
     with suspend_nn_inits():
+        model = AutoModelForCausalLM.from_pretrained(
+            pretrained_model_name_or_path=model_path,
+            trust_remote_code=True,
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True,
+            local_files_only=True,
+        ).eval()
         if load_quantized:
-            print("Initializing model with random weights...")
-            config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)  # consider trust_remote_code=True
-            model = AutoModelForCausalLM.from_config(config, trust_remote_code=True, torch_dtype=dtype).eval()
             print("Loading quantized model ...")
             model = load_quantized_model(model, load_quantized)
-        else:
-            print("Loading pretrained model ...")
-            model = AutoModelForCausalLM.from_pretrained(
-                pretrained_model_name_or_path=model_path,
-                trust_remote_code=True,
-                torch_dtype=dtype,
-                low_cpu_mem_usage=True,
-                local_files_only=True,
-            )
+            
     model.seqlen = model_seqlen
     print("Model loaded sucessfully ...")
 

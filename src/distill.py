@@ -45,6 +45,8 @@ def cache_teacher_hiddens(teacher_model, dataloader, args) -> List[torch.Tensor]
 def distill_logits(model, dataloader, teacher_hiddens, args):
     # set model into train mode
     model.train()
+    # cast model to float
+    model.float()
     # get device
     device = maybe_get_0th_element(args.devices)
     # initialize trainable parameters on main device; prepare to send them to replicas
@@ -90,27 +92,33 @@ def distill_logits(model, dataloader, teacher_hiddens, args):
             # prepare targets
             pre_targets = _extract_into_tensor(teacher_hiddens, batch_indices).to(device)
             with torch.no_grad():
-                teacher_logits = model.lm_head(pre_targets)
+                teacher_logits = model.lm_head(pre_targets.float())
             # get student outputs
-            student_logits = model(inputs).logits
-            loss = kl_div_loss(student_logits, teacher_logits, args.distill_temperature)
+            with torch.autocast(device_type='cuda', enabled=args.distill_amp):
+                student_logits = model(inputs).logits
+                loss = kl_div_loss(student_logits, teacher_logits, args.distill_temperature)
             loss.div(num_accumulation_steps).backward()
             steps_accumulated += 1
 
             if not torch.isfinite(loss).item():
-                raise ValueError(f"Fine-tuning loss is {loss}")
+                raise ValueError(f"Distillation loss is {loss}")
+            
+            loss_numerator += loss.item()
+            loss_denominator += 1
 
             if steps_accumulated == num_accumulation_steps:
                 opt.step()
                 opt.zero_grad()
                 steps_accumulated = 0
                 step += 1
+            else:
+                continue
 
-            loss_numerator += loss.item()
-            loss_denominator += 1
-
-            if step % args.print_frequency != 0:
+            if step % args.print_frequency == 0:
                 print(f"epoch={epoch}\tstep={step}\tloss={loss_numerator / loss_denominator:.10f}\t")
+
+        if step != args.print_frequency == 0:
+            print(f"epoch={epoch}\tstep={step}\tloss={loss_numerator / loss_denominator:.10f}\t")
 
         if args.distill_relative_mse_tolerance is not None:
             epoch_loss = loss_numerator / loss_denominator
