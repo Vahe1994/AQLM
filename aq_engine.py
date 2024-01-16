@@ -24,7 +24,7 @@ class AQEngine(nn.Module):
         self.register_buffer(
             "XTX", torch.zeros((self.columns, self.columns), dtype=accumultor_dtype, device=self.device)
         )
-        self.quantized_weight: Optional[QuantizedWeight] = None
+        self.quantized_weight: Optional[QuantizedLinear] = None
         self.nsamples = 0
 
     @torch.no_grad()
@@ -42,11 +42,11 @@ class AQEngine(nn.Module):
         self.XTX += inp.matmul(inp.t())
 
     @torch.enable_grad()
-    def quantize(self, *, args: Namespace, verbose: bool = True) -> QuantizedWeight:
+    def quantize(self, *, args: Namespace, verbose: bool = True) -> QuantizedLinear:
         """create a QuantizedLinear with specified args based on the collected hessian (XTX) data"""
         assert isinstance(args.devices, (list, tuple)) and len(args.devices) >= 1, f"Found devices = {args.devices}"
         assert args.devices[0] == self.device, (args.devices[0], self.XTX.device)
-        
+
         reference_weight = self.layer.weight.detach().to(device=self.device, dtype=torch.float32)
         self.quantized_weight = QuantizedLinear(
             in_features=reference_weight.shape[1],
@@ -119,8 +119,7 @@ class AQEngine(nn.Module):
             The indices / slices must correspond to output channels (if out_group_size==1) or groups (if > 1).
             Formally, the indices must be in range [ 0 , self.out_features // self.out_group_size )
         """
-        assert self.quantized_weight is not None, "must be called inside / after AQUtil.quantize"
-        quantized_weight = self.quantized_weight(selection)
+        quantized_weight = self.quantized_weight.reconstruct_weight(selection)
 
         if isinstance(selection, ellipsis):
             reference_weight = self.layer.weight.detach().to(quantized_weight.dtype)
