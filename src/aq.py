@@ -87,7 +87,7 @@ class QuantizedLinear(nn.Module):
             self.scales_clusters = nn.Parameter(
                 scales_clusters, requires_grad=True
             )  #  [2**self.scale_nbits, num_in_groups] if scale_nbits > 0 else [2**self.scale_nbits, 1]
-            self.scale_indices = nn.Parameter(scale_indices, requires_grad=False)  #  [num_out_groups, 1]
+            self.scales_indices = nn.Parameter(scale_indices, requires_grad=False)  #  [num_out_groups, 1]
 
         # BIAS
         if bias:
@@ -128,7 +128,7 @@ class QuantizedLinear(nn.Module):
             else:
                 scales_clusters, scales_indices, _ = fit_kmeans_1d(scales.flatten(1, -1), k=2**self.scale_nbits)
                 self.scales_clusters.data = scales_clusters
-                self.scales_indices = pack_int_data(scales_indices, self.scale_nbits)
+                self.scales_indices.data = pack_int_data(scales_indices, self.scale_nbits)
 
             weight_for_init = (weight_groupwise / scales).swapaxes(1, 2).reshape_as(reference_weight)
             del weight_groupwise
@@ -198,7 +198,9 @@ class QuantizedLinear(nn.Module):
                 dequantized_scales = dequantized_scales + (self.scales - self.scales.detach())
             return dequantized_scales
         else:  # train scale codebook only
-            return self.scales_clusters.gather(1, self.scales_indices)[:, :, None, None]
+            return self.scales_clusters.gather(1, unpack_int_data(self.scales_indices, self.scale_nbits))[
+                :, :, None, None
+            ]
 
     def reconstruct_weight(self, selection: Union[slice, ellipsis, torch.Tensor] = ...):
         """
@@ -239,13 +241,16 @@ class QuantizedLinear(nn.Module):
         :param kwargs: any additional keyword arguments are forwarded to beam_search_optimal_codes function
         :returns: the updated codes
         """
-        self.codes[selection] = beam_search_optimal_codes(
-            XTX=XTX,
-            reference_weight=reference_weight,
-            codebooks=self.get_codebooks(),
-            prev_codes=self.codes[selection],
-            scales=self.get_scales()[selection],
-            **kwargs,
+        self.codes[selection] = pack_int_data(
+            beam_search_optimal_codes(
+                XTX=XTX,
+                reference_weight=reference_weight,
+                codebooks=self.get_codebooks(),
+                prev_codes=unpack_int_data(self.codes[selection], self.nbits_per_codebook),
+                scales=self.get_scales()[selection],
+                **kwargs,
+            ),
+            self.nbits_per_codebook,
         )
         return self.codes[selection]
 
