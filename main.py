@@ -833,13 +833,14 @@ if __name__ == "__main__":
         print("\n============ Quantizing model... ============")
         quantize_model(model, args)
 
-    if args.distill and not args.no_quant:
+    if args.distill and (args.load or not args.no_quant):
         print("\n============ Distilling model... ============")
         distill_model(model, args)
 
     print("\n============ Evaluating perplexity... ============")
     torch.cuda.reset_peak_memory_stats()
-    datasets = ["wikitext2", "ptb", "c4"]
+    # datasets = ["wikitext2", "ptb", "c4"]
+    datasets = ["wikitext2", "ptb"]
     if args.new_eval:
         datasets = ["wikitext2", "ptb-new", "c4-new"]
     for dataset in datasets:

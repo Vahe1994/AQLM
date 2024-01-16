@@ -180,7 +180,7 @@ def load_dequantized_model(model, load_path):
         layer = layers[layer_index]
         quant_layer = torch.load(os.path.join(load_path, str(layer_index) + ".pth"), map_location="cpu")
         layers[layer_index] = load_linear_layers(layer, quant_layer)
-    model.load_state_dict(torch.load(load_path + "/not_quantized_weights.pt"), strict=False)
+    model.load_state_dict(torch.load(os.path.join(load_path, "not_quantized_weights.pt")), strict=False)
     return model
 
 
@@ -193,5 +193,5 @@ def load_quantized_model(model, load_path):
             os.path.join(load_path, str(layer_index) + ".pth"),
             map_location=model.model.layers[layer_index].input_layernorm.weight.device,
         )
-    model.load_state_dict(torch.load(os.path.join(load_path, "/not_quantized_weights.pt")), strict=False)
+    model.load_state_dict(torch.load(os.path.join(load_path, "not_quantized_weights.pt")), strict=False)
     return model
