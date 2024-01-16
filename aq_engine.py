@@ -47,24 +47,25 @@ class AQEngine(nn.Module):
         assert isinstance(args.devices, (list, tuple)) and len(args.devices) >= 1, f"Found devices = {args.devices}"
         assert args.devices[0] == self.device, (args.devices[0], self.XTX.device)
 
-        reference_weight = self.layer.weight.detach().to(device=self.device, dtype=torch.float32)
         self.quantized_weight = QuantizedLinear(
-            in_features=reference_weight.shape[1],
-            out_features=reference_weight.shape[0],
+            in_features=self.layer.weight.shape[1],
+            out_features=self.layer.weight.shape[0],
             out_group_size=args.out_group_size,
             in_group_size=args.in_group_size,
             num_codebooks=args.num_codebooks,
             nbits_per_codebook=args.nbits_per_codebook,
             device=self.device,
+            codebook_value_nbits=args.codebook_value_nbits,
+            codebook_value_num_groups=args.codebook_value_num_groups,
+            scale_nbits=args.scale_nbits,
         )
         self.quantized_weight.initialize(
-            reference_weight=reference_weight,
+            reference_weight=self.layer.weight.detach().to(device=self.device, dtype=torch.float32),
             max_iter=args.init_max_iter,
             max_points_per_centroid=args.init_max_points_per_centroid,
             devices=args.devices,
             verbose=True,
         )
-        del reference_weight
 
         differentiable_parameters = nn.ParameterDict(
             {name: param for name, param in self.quantized_weight.named_parameters() if param.requires_grad}
@@ -119,6 +120,7 @@ class AQEngine(nn.Module):
             The indices / slices must correspond to output channels (if out_group_size==1) or groups (if > 1).
             Formally, the indices must be in range [ 0 , self.out_features // self.out_group_size )
         """
+        assert self.quantized_weight is not None, "must be called inside / after AQUtil.quantize"
         quantized_weight = self.quantized_weight.reconstruct_weight(selection)
 
         if isinstance(selection, ellipsis):
