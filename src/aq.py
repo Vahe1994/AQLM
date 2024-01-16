@@ -61,15 +61,15 @@ class QuantizedLinear(nn.Module):
             self.register_parameter("bias", None)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        # return F.linear(input, self.reconstruct_weight(), self.bias)
-        original_shape = input.shape
-        input = input.reshape(-1, original_shape[-1])
-        return torch.cat(
-            [
-                aqlm_gemv_simple(input_vector.unsqueeze(0), self.codes, self.codebooks, self.scales)
-                for input_vector in input
-            ]
-        ).reshape(original_shape[:-1] + (-1,))
+        return F.linear(input, self.reconstruct_weight(), self.bias)
+        # original_shape = input.shape
+        # input = input.reshape(-1, original_shape[-1])
+        # return torch.cat(
+        #     [
+        #         aqlm_gemv_simple(input_vector.unsqueeze(0), self.codes, self.codebooks, self.scales)
+        #         for input_vector in input
+        #     ]
+        # ).reshape(original_shape[:-1] + (-1,))
 
     def initialize(
         self,
@@ -613,6 +613,7 @@ def init_aq_kmeans(
                 chosen_ids = torch.randperm(weight_residue.shape[0], device=weight_residue.device)[
                     : max_points_per_centroid * codebook_size
                 ]
+            print(f"{codebook_size=} {weight_residue.shape=}")
             codebook_i, _, _ = fit_kmeans(
                 weight_residue if chosen_ids is None else weight_residue[chosen_ids, :],
                 k=codebook_size,
@@ -620,6 +621,7 @@ def init_aq_kmeans(
                 devices=devices,
                 **kwargs,
             )
+            print(f"{codebook_i.shape=}")
             codes_i, reconstructed_weight_i = find_nearest_cluster(weight_residue, codebook_i, devices=devices)
 
         codes_i = codes_i.reshape(num_out_groups, num_in_groups, 1)

@@ -1,3 +1,4 @@
+import json
 import os
 import time
 from argparse import Namespace
@@ -191,24 +192,23 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
 
             for sublayer_name in aq_handlers.keys():
                 print(f"Quantizing module {sublayer_name} of layer {layer_index}")
-                quantized_weight = aq_handlers[sublayer_name].quantize(args=args, verbose=True)
+                quantized_linear = aq_handlers[sublayer_name].quantize(args=args, verbose=True)
 
                 with torch.no_grad():
                     assert aq_handlers[sublayer_name].layer.weight in set(
                         layer.parameters()
                     )  # test that this is not a replica
 
-                    new_linear = QuantizedLinear(quantized_weight, aq_handlers[sublayer_name].layer.bias)
                     found_original = False
                     for submodule in layer.modules():
                         for child_name, child_module in submodule.named_children():
                             if child_module is aq_handlers[sublayer_name].layer:
-                                setattr(submodule, child_name, new_linear)
+                                setattr(submodule, child_name, quantized_linear)
                                 found_original = True  # note: do not break to handle tied layers
 
                     assert found_original, f"could not find {sublayer_name}"
 
-                weight_avg_bits = quantized_weight.estimate_nbits_per_parameter()
+                weight_avg_bits = quantized_linear.estimate_nbits_per_parameter()
                 overall_bits += int(weight_avg_bits * torch.numel(aq_handlers[sublayer_name].layer.weight.data))
                 model_number_of_params += torch.numel(aq_handlers[sublayer_name].layer.weight.data)
                 print("curent_avg_bits", overall_bits / model_number_of_params)
@@ -221,11 +221,6 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                 layer = finetune_groupwise(layer=layer, inps=inps, outs=outs, args=args, **forward_args)
             layer = layer.to(dtype=layer_dtype_original)
             print("FINISHED FINETUNING")
-        if args.save:
-            os.makedirs(args.save, exist_ok=True)
-            layer_save_path = os.path.join(args.save, f"{layer_index}.pth")
-            print(f"Saving layer {layer_index}... to {layer_save_path}")
-            torch.save(layer, layer_save_path)
 
         if len(args.devices) == 1:
             assert len(inps) == len(outs) == 1
@@ -253,15 +248,18 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
 
     print("=====================\nFinal stats:")
     if args.save:
-        torch.save(vars(args), args.save + "/args.pt")
-        already_saved_weights = set()
-        for layer in get_layers(model):
-            for param in layer.parameters():
-                already_saved_weights.add(param)
-        not_quantized_weights = {
-            name: param for name, param in model.named_parameters() if param not in already_saved_weights
+        os.makedirs(args.save, exist_ok=True)
+        config_dict = model.config.to_dict()
+        config_dict["aqlm"] = {
+            "nbits_per_codebook": args.nbits_per_codebook,
+            "num_codebooks": args.num_codebooks,
+            "out_group_size": args.out_group_size,
+            "in_group_size": args.in_group_size,
         }
-        torch.save(not_quantized_weights, args.save + "/not_quantized_weights.pt")
+        with open(os.path.join(args.save, "config.json"), "w") as config_file:
+            json.dump(config_dict, config_file)
+
+        torch.save(model.state_dict(), os.path.join(args.save, "pytorch_model.bin"))
 
     if args.wandb:
         wandb.log({"max_cuda_mem_quantize": round(torch.cuda.max_memory_allocated() / 1e9, 2)})
