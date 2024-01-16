@@ -26,9 +26,13 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-
+from transformers import LlamaConfig
 from transformers.activations import ACT2FN
-from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast, SequenceClassifierOutputWithPast
+from transformers.modeling_outputs import (
+    BaseModelOutputWithPast,
+    CausalLMOutputWithPast,
+    SequenceClassifierOutputWithPast,
+)
 from transformers.modeling_utils import PreTrainedModel
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 from transformers.utils import (
@@ -38,10 +42,8 @@ from transformers.utils import (
     logging,
     replace_return_docstrings,
 )
-from transformers import LlamaConfig
 
 from src.aq import QuantizedLinear
-
 
 if is_flash_attn_available():
     from flash_attn import flash_attn_func, flash_attn_varlen_func
@@ -235,9 +237,7 @@ class LlamaMLP(nn.Module):
             up_proj_slices = self.up_proj.weight.split(slice, dim=0)
             down_proj_slices = self.down_proj.weight.split(slice, dim=1)
 
-            gate_proj = torch.cat(
-                [F.linear(x, gate_proj_slices[i]) for i in range(self.config.pretraining_tp)], dim=-1
-            )
+            gate_proj = torch.cat([F.linear(x, gate_proj_slices[i]) for i in range(self.config.pretraining_tp)], dim=-1)
             up_proj = torch.cat([F.linear(x, up_proj_slices[i]) for i in range(self.config.pretraining_tp)], dim=-1)
 
             intermediate_states = (self.act_fn(gate_proj) * up_proj).split(slice, dim=2)
@@ -282,10 +282,18 @@ class LlamaAttention(nn.Module):
                 f"hidden_size must be divisible by num_heads (got `hidden_size`: {self.hidden_size}"
                 f" and `num_heads`: {self.num_heads})."
             )
-        self.q_proj = QuantizedLinear(self.hidden_size, self.num_heads * self.head_dim, bias=config.attention_bias, **config.aqlm)
-        self.k_proj = QuantizedLinear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias, **config.aqlm)
-        self.v_proj = QuantizedLinear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias, **config.aqlm)
-        self.o_proj = QuantizedLinear(self.num_heads * self.head_dim, self.hidden_size, bias=config.attention_bias, **config.aqlm)
+        self.q_proj = QuantizedLinear(
+            self.hidden_size, self.num_heads * self.head_dim, bias=config.attention_bias, **config.aqlm
+        )
+        self.k_proj = QuantizedLinear(
+            self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias, **config.aqlm
+        )
+        self.v_proj = QuantizedLinear(
+            self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias, **config.aqlm
+        )
+        self.o_proj = QuantizedLinear(
+            self.num_heads * self.head_dim, self.hidden_size, bias=config.attention_bias, **config.aqlm
+        )
         self._init_rope()
 
     def _init_rope(self):
