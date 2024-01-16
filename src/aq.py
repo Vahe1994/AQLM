@@ -9,6 +9,7 @@ from tqdm.auto import trange
 
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
 from src.utils import ellipsis, maybe_script, get_int_dtype
+from src.matmul_kernels import aqlm_gemv_simple
 
 
 class QuantizedLinear(nn.Module):
@@ -41,7 +42,10 @@ class QuantizedLinear(nn.Module):
             self.register_parameter('bias', None)
         
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        return F.linear(input, self.reconstruct_weight(), self.bias)
+        # return F.linear(input, self.reconstruct_weight(), self.bias)
+        original_shape = input.shape
+        input = input.reshape(-1, original_shape[-1])
+        return torch.cat([aqlm_gemv_simple(input_vector.unsqueeze(0), self.codes, self.codebooks, self.scales) for input_vector in input]).reshape(original_shape[:-1] + (-1,))
 
     def initialize(
         self,
@@ -91,7 +95,7 @@ class QuantizedLinear(nn.Module):
             Formally, the indices must be in range [ 0 , self.out_features // self.out_group_size )
 
         """
-        weight = _dequantize_weight(self.codes[selection], self.get_codebooks(), self.get_scales()[selection])
+        weight = _dequantize_weight(self.codes[selection].to(torch.int64) % (2 ** self.nbits_per_codebook), self.get_codebooks(), self.get_scales()[selection])
         return weight
 
     @torch.no_grad()
