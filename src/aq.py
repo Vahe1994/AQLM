@@ -264,8 +264,21 @@ class QuantizedLinear(nn.Module):
 
         matrix_store = num_parameters // group_size * self.num_codebooks * self.nbits_per_codebook
 
-        codebooks_store = self.num_codebooks * self.codebook_size * group_size * 16
-        scale_store = num_out_groups * 16
+        codebooks_store = self.num_codebooks * self.codebook_size * group_size * self.codebook_value_nbits
+        if self.codebook_value_nbits < 16:
+            codebooks_store += (
+                2**self.codebook_value_nbits * self.num_codebooks * self.codebook_value_num_groups * group_size * 16
+            )
+
+        if self.scale_nbits >= 16 or 2**self.scale_nbits >= num_in_groups:  # group-wise scales in 16 bit
+            scale_store = self.scale_nbits * num_out_groups * num_in_groups
+        elif 0 < self.scale_nbits < 16:  # use scale quantization codebooks
+            scale_store = self.scale_nbits * num_out_groups * num_in_groups
+            scale_store += num_out_groups * 2**self.scale_nbits * 16
+        elif self.scale_nbits == 0:  # no group-wise scales; use global 1d scales instead
+            scale_store = num_out_groups * 16
+        else:
+            assert False
 
         return (matrix_store + codebooks_store + scale_store) / num_parameters
 
