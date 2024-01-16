@@ -8,7 +8,6 @@ import torch.nn.functional as F
 from tqdm.auto import trange
 
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
-from src.matmul_kernels import aqlm_gemv_simple
 from src.utils import ellipsis, get_int_dtype, maybe_script
 
 
@@ -98,14 +97,6 @@ class QuantizedLinear(nn.Module):
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         return F.linear(input, self.reconstruct_weight(), self.bias)
-        # original_shape = input.shape
-        # input = input.reshape(-1, original_shape[-1])
-        # return torch.cat(
-        #     [
-        #         aqlm_gemv_simple(input_vector.unsqueeze(0), self.codes, self.codebooks, self.scales)
-        #         for input_vector in input
-        #     ]
-        # ).reshape(original_shape[:-1] + (-1,))
 
     def initialize(
         self,
