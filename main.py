@@ -255,6 +255,9 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             "num_codebooks": args.num_codebooks,
             "out_group_size": args.out_group_size,
             "in_group_size": args.in_group_size,
+            "codebook_value_nbits": args.codebook_value_nbits,
+            "codebook_value_num_groups": args.codebook_value_num_groups,
+            "scale_nbits": args.scale_nbits,
         }
         with open(os.path.join(args.save, "config.json"), "w") as config_file:
             json.dump(config_dict, config_file)
