@@ -6,6 +6,8 @@ import torch
 from tqdm.auto import trange
 from transformers import AutoConfig, PretrainedConfig
 
+from src.utils import pack_int_data
+
 
 def get_num_layers(config) -> int:
     match config["model_type"]:
@@ -23,23 +25,6 @@ def get_layers_prefix(config) -> str:
             raise NotImplementedError(f"Can't get layers prefix for {unknown_type}")
 
 
-def pack_ints(data: torch.IntTensor, nbits: int) -> torch.IntTensor:
-    match nbits:
-        case x if x <= 8:
-            return data.to(torch.uint8)
-        case x if x <= 16:
-            data[data >= 2**15] -= 2**16
-            return data.to(torch.int16)
-        case x if x <= 32:
-            data[data >= 2**31] -= 2**32
-            return data.to(torch.int32)
-        case x if x <= 64:
-            data[data >= 2**63] -= 2**64
-            return data.to(torch.int64)
-        case x:
-            raise ValueError(f"Can't represent values with {x} bits")
-
-
 def get_converted_state_dict(config, nbits: int, in_path: os.PathLike) -> dict:
     state_dict = {}
 
@@ -50,7 +35,7 @@ def get_converted_state_dict(config, nbits: int, in_path: os.PathLike) -> dict:
         layer = torch.load(os.path.join(in_path, f"{i}.pth"))
         for name, p in layer.named_parameters():
             if not torch.is_floating_point(p.data):
-                p.data = pack_ints(p.data, nbits)
+                p.data = pack_int_data(p.data, nbits)
             name = re.sub("quantized_weight.", "", name)
             state_dict[f"{layers_prefix}.{i}.{name}"] = p.data
 
