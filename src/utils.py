@@ -49,6 +49,27 @@ def get_mean_nbits_by_codebook(codes: torch.IntTensor, huffman_group_size: int =
     return mean_code_lengths
 
 
+def get_int_dtype(nbits: int) -> torch.dtype:
+    if nbits <= 8:
+        return torch.int8
+    if nbits <= 16:
+        return torch.int16
+    if nbits <= 32:
+        return torch.int32
+    if nbits <= 64:
+        return torch.int64
+    raise ValueError(f"No dtype available for {nbits}-bit codebooks")
+
+
+def pack_int_data(data: torch.IntTensor, nbits: int) -> torch.IntTensor:
+    data[data >= 2 ** (nbits - 1)] -= 2**nbits
+    return data.to(get_int_dtype(nbits))
+
+
+def unpack_int_data(data: torch.IntTensor, nbits: int) -> torch.IntTensor:
+    return data.to(torch.int64) % (2**nbits)
+
+
 @functools.lru_cache()
 def maybe_script(fn: callable) -> callable:
     """Apply torch.jit.script to function unless one is using TPU. TPU does not support torch.jit.script."""
