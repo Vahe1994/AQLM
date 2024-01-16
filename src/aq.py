@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from tqdm.auto import trange
 
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
-from src.utils import ellipsis, get_int_dtype, maybe_script
+from src.utils import ellipsis, get_int_dtype, maybe_script, pack_int_data, unpack_int_data
 
 
 class QuantizedLinear(nn.Module):
@@ -127,8 +127,8 @@ class QuantizedLinear(nn.Module):
                 self.scales.data = scales
             else:
                 scales_clusters, scales_indices, _ = fit_kmeans_1d(scales.flatten(1, -1), k=2**self.scale_nbits)
-                self.scales_clusters = nn.Parameter(scales_clusters, requires_grad=True)
-                self.scales_indices = nn.Parameter(scales_indices, requires_grad=False)
+                self.scales_clusters.data = scales_clusters
+                self.scales_indices = pack_int_data(scales_indices, self.scale_nbits)
 
             weight_for_init = (weight_groupwise / scales).swapaxes(1, 2).reshape_as(reference_weight)
             del weight_groupwise
@@ -141,7 +141,7 @@ class QuantizedLinear(nn.Module):
                 codebook_size=self.codebook_size,
                 **init_kwargs,
             )
-            self.codes.data = codes
+            self.codes.data = pack_int_data(codes, self.nbits_per_codebook)
             self.codebooks.data = codebooks
             if self.bias is not None and bias is not None:
                 self.bias.data = bias
@@ -210,7 +210,7 @@ class QuantizedLinear(nn.Module):
 
         """
         weight = _dequantize_weight(
-            self.codes[selection].to(torch.int64) % (2**self.nbits_per_codebook),
+            unpack_int_data(self.codes[selection], self.nbits_per_codebook),
             self.get_codebooks(),
             self.get_scales()[selection],
         )
