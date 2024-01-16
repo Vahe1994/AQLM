@@ -61,11 +61,13 @@ def get_int_dtype(nbits: int) -> torch.dtype:
     raise ValueError(f"No dtype available for {nbits}-bit codebooks")
 
 
+@torch.inference_mode()
 def pack_int_data(data: torch.IntTensor, nbits: int) -> torch.IntTensor:
     data[data >= 2 ** (nbits - 1)] -= 2**nbits
     return data.to(get_int_dtype(nbits))
 
 
+@torch.inference_mode()
 def unpack_int_data(data: torch.IntTensor, nbits: int) -> torch.IntTensor:
     return data.to(torch.int64) % (2**nbits)
 
