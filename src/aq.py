@@ -111,6 +111,7 @@ class QuantizedLinear(nn.Module):
         self,
         *,
         reference_weight: torch.Tensor,
+        bias: Optional[torch.Tensor],
         **init_kwargs,
     ):
         assert reference_weight.shape == (self.out_features, self.in_features)
@@ -151,6 +152,8 @@ class QuantizedLinear(nn.Module):
             )
             self.codes.data = codes
             self.codebooks.data = codebooks
+            if self.bias is not None and bias is not None:
+                self.bias.data = bias
 
     def get_codebooks(self) -> torch.Tensor:
         """Get quantization codebooks or reconstruct them from second level quantization (see codebook_values_nbits)"""
