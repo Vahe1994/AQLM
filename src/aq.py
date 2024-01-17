@@ -7,8 +7,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tqdm.auto import trange
 
+from src.inference import FinalizedQuantizedLinear
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
-from src.utils import ellipsis, maybe_script
+from src.utils import ellipsis, maybe_script, pack_int_data
 
 
 class QuantizedLinear(nn.Module):
@@ -21,6 +22,29 @@ class QuantizedLinear(nn.Module):
     def forward(self, input: torch.Tensor):
         # TODO[aqlm] this can be optimized! maybe integrate with QuantizedLinear?
         return F.linear(input, self.quantized_weight(), self.bias)
+
+    @torch.no_grad()
+    def finalize(self) -> FinalizedQuantizedLinear:
+        assert self.quantized_weight is not None, "Can't finalize an unprocessed layer"
+        finalized_quantized_linear = FinalizedQuantizedLinear(
+            self.in_features,
+            self.out_features,
+            self.quantized_weight.in_group_size,
+            self.quantized_weight.out_group_size,
+            self.quantized_weight.num_codebooks,
+            self.quantized_weight.nbits_per_codebook,
+            self.bias is not None,
+            device=torch.device("meta"),
+            codebook_value_nbits=self.quantized_weight.codebook_value_nbits,
+            codebook_value_num_groups=self.quantized_weight.codebook_value_num_groups,
+            scale_nbits=self.quantized_weight.scale_nbits,
+        )
+
+        finalized_quantized_linear.codes.data = pack_int_data(self.quantized_weight.codes)
+        finalized_quantized_linear.codebooks.data = self.quantized_weight.get_codebooks()
+        finalized_quantized_linear.scales.data = self.quantized_weight.get_scales()
+        if self.bias is not None:
+            finalized_quantized_linear.bias.data = self.bias.data
 
 
 class QuantizedWeight(nn.Module):
