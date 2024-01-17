@@ -6,6 +6,7 @@ import os
 from typing import Callable, Iterator, Optional, Sequence
 
 import torch
+import torch.nn.functional as F
 
 ellipsis = type(...)
 
@@ -126,3 +127,33 @@ def iterate_minibatches(
             prev_batch = batch if isinstance(batch, (list, tuple)) and len(tensors) > 1 else batch[0]
             del batch
         yield prev_batch
+
+
+@maybe_script
+def _dequantize_weight(
+    codes: torch.Tensor, codebooks: torch.Tensor, scales: Optional[torch.Tensor] = None
+) -> torch.Tensor:
+    """
+    Decode float weights from quantization codes. Differentiable.
+    :param codes: tensor of integer quantization codes, shape [*dims, num_out_groups, num_in_groups, num_codebooks]
+    :param codebooks: tensor of vectors for each quantization code, [num_codebooks, codebook_size, out_group_size, in_group_size]
+    :param scales: weight will be multiplied by this factor, must be broadcastble with [*dims, out_groups, num_in_groups, out_group_size, in_group_size]
+    :return: reconstructed weight tensor of shape [*dims, num_in_groups*group_size]
+    """
+    num_out_groups, num_in_groups, num_codebooks = codes.shape[-3:]
+    num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
+    out_features = num_out_groups * out_group_size
+    in_features = num_in_groups * in_group_size
+    codebook_offsets = torch.arange(
+        0, num_codebooks * codebook_size, codebook_size, device=codes.device
+    )  # shape: [num_codebooks]
+    reconstructed_weight_flat = F.embedding_bag(
+        codes.flatten(0, -2) + codebook_offsets, codebooks.flatten(0, 1).flatten(-2, -1), mode="sum"
+    )  # [prod(dims) * num_out_groups * num_in_groups, out_group_size * in_group_size]
+
+    reconstructed_weight_groupwise = reconstructed_weight_flat.view(
+        list(codes.shape[:-3]) + [num_out_groups, num_in_groups, out_group_size, in_group_size]
+    )
+    if scales is not None:
+        reconstructed_weight_groupwise = reconstructed_weight_groupwise.mul(scales)
+    return reconstructed_weight_groupwise.swapaxes(-3, -2).reshape(list(codes.shape[:-3]) + [out_features, in_features])

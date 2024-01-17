@@ -150,6 +150,33 @@ def get_inps(
     return inps, forward_args
 
 
+def update_config(model: PreTrainedModel, args):
+    old_config = model.config
+    old_config_type = type(old_config)
+
+    class AqlmConfig(old_config_type):
+        def __init__(
+            self,
+            nbits_per_codebook: int = 16,
+            num_codebooks: int = 1,
+            out_group_size: int = 1,
+            in_group_size: int = 8,
+            **kwargs,
+        ):
+            super().__init__(**kwargs)
+            self.aqlm = {
+                "nbits_per_codebook": nbits_per_codebook,
+                "num_codebooks": num_codebooks,
+                "out_group_size": out_group_size,
+                "in_group_size": in_group_size,
+            }
+
+    new_config = AqlmConfig(args.nbits_per_codebook, args.num_codebooks, args.out_group_size, args.in_group_size)
+
+    new_config = AqlmConfig.update(old_config.to_dict())
+    model.config = new_config
+
+
 @torch.no_grad()
 def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
     assert not torch.backends.cuda.matmul.allow_tf32
@@ -161,6 +188,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
     model.config.use_cache = False
 
     quantizers = {}
+    replaced_linears = []  #  [(submodule, child_name, new_linear), ...]
     overall_bits = 0
     model_number_of_params = 0
     layers = get_layers(model)
@@ -205,6 +233,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                         for child_name, child_module in submodule.named_children():
                             if child_module is aq_handlers[sublayer_name].layer:
                                 setattr(submodule, child_name, new_linear)
+                                replaced_linears.append((submodule, child_name, new_linear))
                                 found_original = True  # note: do not break to handle tied layers
 
                     assert found_original, f"could not find {sublayer_name}"
@@ -249,21 +278,12 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
 
     print("=====================\nFinal stats:")
     if args.save:
-        os.makedirs(args.save, exist_ok=True)
-        config_dict = model.config.to_dict()
-        config_dict["aqlm"] = {
-            "nbits_per_codebook": args.nbits_per_codebook,
-            "num_codebooks": args.num_codebooks,
-            "out_group_size": args.out_group_size,
-            "in_group_size": args.in_group_size,
-            "codebook_value_nbits": args.codebook_value_nbits,
-            "codebook_value_num_groups": args.codebook_value_num_groups,
-            "scale_nbits": args.scale_nbits,
-        }
-        with open(os.path.join(args.save, "config.json"), "w") as config_file:
-            json.dump(config_dict, config_file)
+        for (submodule, child_name, quantized_linear) in replaced_linears:
+            setattr(submodule, child_name, quantized_linear.finalize())
 
-        torch.save(model.state_dict(), os.path.join(args.save, "pytorch_model.bin"))
+        update_config(model, args)
+        print(model.config)
+        model.save_pretrained(args.save)
 
     if args.wandb:
         wandb.log({"max_cuda_mem_quantize": round(torch.cuda.max_memory_allocated() / 1e9, 2)})

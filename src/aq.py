@@ -9,7 +9,7 @@ from tqdm.auto import trange
 
 from src.inference import FinalizedQuantizedLinear
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
-from src.utils import ellipsis, maybe_script, pack_int_data
+from src.utils import _dequantize_weight, ellipsis, maybe_script, pack_int_data
 
 
 class QuantizedLinear(nn.Module):
@@ -35,16 +35,17 @@ class QuantizedLinear(nn.Module):
             self.quantized_weight.nbits_per_codebook,
             self.bias is not None,
             device=torch.device("meta"),
-            codebook_value_nbits=self.quantized_weight.codebook_value_nbits,
-            codebook_value_num_groups=self.quantized_weight.codebook_value_num_groups,
-            scale_nbits=self.quantized_weight.scale_nbits,
         )
 
-        finalized_quantized_linear.codes.data = pack_int_data(self.quantized_weight.codes)
-        finalized_quantized_linear.codebooks.data = self.quantized_weight.get_codebooks()
-        finalized_quantized_linear.scales.data = self.quantized_weight.get_scales()
+        finalized_quantized_linear.codes = torch.nn.Parameter(
+            pack_int_data(self.quantized_weight.codes, self.quantized_weight.nbits_per_codebook), requires_grad=False
+        )
+        finalized_quantized_linear.codebooks = torch.nn.Parameter(self.quantized_weight.get_codebooks())
+        finalized_quantized_linear.scales = torch.nn.Parameter(self.quantized_weight.get_scales())
         if self.bias is not None:
-            finalized_quantized_linear.bias.data = self.bias.data
+            finalized_quantized_linear.bias = torch.nn.Parameter(self.bias.data)
+
+        return finalized_quantized_linear
 
 
 class QuantizedWeight(nn.Module):
@@ -384,36 +385,6 @@ def beam_search_optimal_codes(
 
                 progressbar.desc = info
     return beam_codes[0]
-
-
-@maybe_script
-def _dequantize_weight(
-    codes: torch.Tensor, codebooks: torch.Tensor, scales: Optional[torch.Tensor] = None
-) -> torch.Tensor:
-    """
-    Decode float weights from quantization codes. Differentiable.
-    :param codes: tensor of integer quantization codes, shape [*dims, num_out_groups, num_in_groups, num_codebooks]
-    :param codebooks: tensor of vectors for each quantization code, [num_codebooks, codebook_size, out_group_size, in_group_size]
-    :param scales: weight will be multiplied by this factor, must be broadcastble with [*dims, out_groups, num_in_groups, out_group_size, in_group_size]
-    :return: reconstructed weight tensor of shape [*dims, num_in_groups*group_size]
-    """
-    num_out_groups, num_in_groups, num_codebooks = codes.shape[-3:]
-    num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
-    out_features = num_out_groups * out_group_size
-    in_features = num_in_groups * in_group_size
-    codebook_offsets = torch.arange(
-        0, num_codebooks * codebook_size, codebook_size, device=codes.device
-    )  # shape: [num_codebooks]
-    reconstructed_weight_flat = F.embedding_bag(
-        codes.flatten(0, -2) + codebook_offsets, codebooks.flatten(0, 1).flatten(-2, -1), mode="sum"
-    )  # [prod(dims) * num_out_groups * num_in_groups, out_group_size * in_group_size]
-
-    reconstructed_weight_groupwise = reconstructed_weight_flat.view(
-        list(codes.shape[:-3]) + [num_out_groups, num_in_groups, out_group_size, in_group_size]
-    )
-    if scales is not None:
-        reconstructed_weight_groupwise = reconstructed_weight_groupwise.mul(scales)
-    return reconstructed_weight_groupwise.swapaxes(-3, -2).reshape(list(codes.shape[:-3]) + [out_features, in_features])
 
 
 @maybe_script
