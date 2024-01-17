@@ -172,8 +172,7 @@ def update_config(model: PreTrainedModel, args):
             }
 
     new_config = AqlmConfig(args.nbits_per_codebook, args.num_codebooks, args.out_group_size, args.in_group_size)
-
-    new_config = AqlmConfig.update(old_config.to_dict())
+    new_config.update(old_config.to_dict())
     model.config = new_config
 
 
