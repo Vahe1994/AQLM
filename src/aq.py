@@ -8,143 +8,96 @@ import torch.nn.functional as F
 from tqdm.auto import trange
 
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
-from src.utils import ellipsis, get_int_dtype, maybe_script, pack_int_data, unpack_int_data
+from src.utils import ellipsis, maybe_script
 
 
 class QuantizedLinear(nn.Module):
+    def __init__(self, quantized_weight, bias: Optional[nn.Parameter]):
+        super().__init__()
+        self.out_features, self.in_features = quantized_weight.out_features, quantized_weight.in_features
+        self.quantized_weight = quantized_weight
+        self.bias = bias
+
+    def forward(self, input: torch.Tensor):
+        # TODO[aqlm] this can be optimized! maybe integrate with QuantizedLinear?
+        return F.linear(input, self.quantized_weight(), self.bias)
+
+
+class QuantizedWeight(nn.Module):
     EPS = 1e-9
 
     def __init__(
         self,
-        in_features: int,
-        out_features: int,
+        *,
+        XTX: torch.Tensor,
+        reference_weight: torch.Tensor,
         in_group_size: int,
         out_group_size: int,
         num_codebooks: int,
-        nbits_per_codebook: int,
-        bias=True,
-        device=None,
-        dtype=None,
-        # VERY optional parameters
+        nbits_per_codebook: int = 8,
         codebook_value_nbits: int = 16,
         codebook_value_num_groups: int = 1,
         scale_nbits: int = 0,
         straight_through_gradient: Optional[bool] = None,
+        **init_kwargs,
     ):
-        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-
+        self.out_features, self.in_features = reference_weight.shape
         assert self.in_features % in_group_size == 0
         assert self.out_features % out_group_size == 0
-        num_out_groups = out_features // out_group_size
-        num_in_groups = in_features // in_group_size
+
         self.out_group_size, self.in_group_size = out_group_size, in_group_size
         self.num_codebooks = num_codebooks
         self.nbits_per_codebook = nbits_per_codebook
-        self.codebook_size = 2**nbits_per_codebook
-
-        # VERY optional parameters
+        self.codebook_size = codebook_size = 2**nbits_per_codebook
         self.codebook_value_nbits = codebook_value_nbits
         self.codebook_value_num_groups = codebook_value_num_groups
-        self.scale_nbits = scale_nbits
+        self.codebook_value_clusters = None
+
+        self.scales = self.scales_clusters = self.scales_indices = None
+        if straight_through_gradient is None and scale_nbits > 0:
+            straight_through_gradient = scale_nbits >= 6
         self.straight_through_gradient = straight_through_gradient
+        self.scale_nbits = scale_nbits
 
-        # CODES & CODEBOOKS
-        self.codebooks = nn.Parameter(
-            torch.empty((num_codebooks, self.codebook_size, out_group_size, in_group_size), **factory_kwargs),
-            requires_grad=True,
-        )  # [num_codebooks, codebook_size, out_group_size, in_group_size]
-        self.codes = nn.Parameter(
-            torch.empty(
-                (num_out_groups, num_in_groups, num_codebooks), device=device, dtype=get_int_dtype(nbits_per_codebook)
-            ),
-            requires_grad=False,
-        )  #  [num_out_groups, num_in_groups, num_codebooks]
-
-        # SCALES
-        self.scales_are_lossless = (
-            self.scale_nbits == 0
-            or self.scale_nbits >= 16
-            or (self.scale_nbits > 0 and 2**self.scale_nbits >= num_in_groups)
-        )
-        if self.scales_are_lossless or self.straight_through_gradient:
-            if self.scale_nbits > 0:
-                scales = torch.empty((num_out_groups, num_in_groups, 1, 1), **factory_kwargs)
-            else:
-                scales = torch.empty((num_out_groups, 1, 1, 1), **factory_kwargs)
-            self.scales = nn.Parameter(
-                scales, requires_grad=True
-            )  #  [num_out_groups, num_in_groups, 1, 1] if scale_nbits > 0 else [num_out_groups, 1, 1, 1]
-        else:
-            if self.scale_nbits > 0:
-                scales_clusters = torch.empty((2**self.scale_nbits, num_in_groups), **factory_kwargs)
-            else:
-                scales_clusters = torch.empty((2**self.scale_nbits, 1), **factory_kwargs)
-            scale_indices = torch.empty((num_out_groups, 1), device=device, dtype=get_int_dtype(scale_nbits))
-
-            self.scales_clusters = nn.Parameter(
-                scales_clusters, requires_grad=True
-            )  #  [2**self.scale_nbits, num_in_groups] if scale_nbits > 0 else [2**self.scale_nbits, 1]
-            self.scales_indices = nn.Parameter(scale_indices, requires_grad=False)  #  [num_out_groups, 1]
-
-        # BIAS
-        if bias:
-            self.bias = nn.Parameter(torch.empty(out_features, **factory_kwargs))
-        else:
-            self.register_parameter("bias", None)
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        return F.linear(input, self.reconstruct_weight(), self.bias)
-
-    def initialize(
-        self,
-        *,
-        reference_weight: torch.Tensor,
-        bias: Optional[torch.Tensor],
-        **init_kwargs,
-    ):
-        assert reference_weight.shape == (self.out_features, self.in_features)
         with torch.no_grad():
             weight_groupwise = reference_weight.reshape(
-                self.out_features // self.out_group_size,
-                self.out_group_size,
-                self.in_features // self.in_group_size,
-                self.in_group_size,
+                self.out_features // out_group_size, out_group_size, self.in_features // in_group_size, in_group_size
             ).swapaxes(
                 1, 2
             )  # [num_out_groups, num_in_groups, out_group_size, in_group_size]
 
-            if self.scale_nbits > 0:
+            if scale_nbits > 0:
                 scales = weight_groupwise.norm(dim=(2, 3), keepdim=True) + self.EPS
             else:
                 scales = weight_groupwise.flatten(1, -1).norm(dim=-1).view(-1, 1, 1, 1) + self.EPS
-            # shape [num_out_groups, num_in_groups, 1, 1] if scale_nbits > 0 else [num_out_groups, 1, 1, 1]
+            # shape [num_out_groups, num_in_groups, 1, 1] if scale_nbits > 0 else [num_out_groups, num_in_groups, 1, 1]
 
+            self.scales_are_lossless = scale_nbits == 0 or scale_nbits >= 16 or (2**scale_nbits >= scales.shape[1])
             if self.scales_are_lossless or self.straight_through_gradient:
                 # ^-- this checks if scales can be preserved losslessly
-                self.scales.data = scales
+                self.scales = nn.Parameter(scales, requires_grad=True)
             else:
-                scales_clusters, scales_indices, _ = fit_kmeans_1d(scales.flatten(1, -1), k=2**self.scale_nbits)
-                self.scales_clusters.data = scales_clusters
-                self.scales_indices.data = pack_int_data(scales_indices, self.scale_nbits)
+                scales_clusters, scales_indices, _ = fit_kmeans_1d(scales.flatten(1, -1), k=2**scale_nbits)
+                self.scales_clusters = nn.Parameter(scales_clusters, requires_grad=True)
+                self.scales_indices = nn.Parameter(scales_indices, requires_grad=False)
 
             weight_for_init = (weight_groupwise / scales).swapaxes(1, 2).reshape_as(reference_weight)
             del weight_groupwise
 
-            codes, codebooks = init_aq_kmeans(
-                weight_for_init,
-                num_codebooks=self.num_codebooks,
-                out_group_size=self.out_group_size,
-                in_group_size=self.in_group_size,
-                codebook_size=self.codebook_size,
-                **init_kwargs,
-            )
-            self.codes.data = pack_int_data(codes, self.nbits_per_codebook)
-            self.codebooks.data = codebooks
-            if self.bias is not None and bias is not None:
-                self.bias.data = bias
+        codes, codebooks = init_aq_kmeans(
+            weight_for_init,
+            num_codebooks=num_codebooks,
+            out_group_size=out_group_size,
+            in_group_size=in_group_size,
+            codebook_size=self.codebook_size,
+            **init_kwargs,
+        )
+
+        self.codebooks = nn.Parameter(
+            codebooks, requires_grad=True
+        )  # [num_codebooks, codebook_size, out_group_size, in_group_size]
+        self.codes = nn.Parameter(codes, requires_grad=False)  #  [num_out_groups, num_in_groups, num_codebooks]
 
     def get_codebooks(self) -> torch.Tensor:
         """Get quantization codebooks or reconstruct them from second level quantization (see codebook_values_nbits)"""
@@ -198,11 +151,9 @@ class QuantizedLinear(nn.Module):
                 dequantized_scales = dequantized_scales + (self.scales - self.scales.detach())
             return dequantized_scales
         else:  # train scale codebook only
-            return self.scales_clusters.gather(1, unpack_int_data(self.scales_indices, self.scale_nbits))[
-                :, :, None, None
-            ]
+            return self.scales_clusters.gather(1, self.scales_indices)[:, :, None, None]
 
-    def reconstruct_weight(self, selection: Union[slice, ellipsis, torch.Tensor] = ...):
+    def forward(self, selection: Union[slice, ellipsis, torch.Tensor] = ...):
         """
         Differentably reconstruct the weight (or parts thereof) from compressed components
         :param selection: By default, reconstruct the entire weight. If selection is specified, this method will instead
@@ -211,11 +162,7 @@ class QuantizedLinear(nn.Module):
             Formally, the indices must be in range [ 0 , self.out_features // self.out_group_size )
 
         """
-        weight = _dequantize_weight(
-            unpack_int_data(self.codes[selection], self.nbits_per_codebook),
-            self.get_codebooks(),
-            self.get_scales()[selection],
-        )
+        weight = _dequantize_weight(self.codes[selection], self.get_codebooks(), self.get_scales()[selection])
         return weight
 
     @torch.no_grad()
@@ -241,16 +188,13 @@ class QuantizedLinear(nn.Module):
         :param kwargs: any additional keyword arguments are forwarded to beam_search_optimal_codes function
         :returns: the updated codes
         """
-        self.codes[selection] = pack_int_data(
-            beam_search_optimal_codes(
-                XTX=XTX,
-                reference_weight=reference_weight,
-                codebooks=self.get_codebooks(),
-                prev_codes=unpack_int_data(self.codes[selection], self.nbits_per_codebook),
-                scales=self.get_scales()[selection],
-                **kwargs,
-            ),
-            self.nbits_per_codebook,
+        self.codes[selection] = beam_search_optimal_codes(
+            XTX=XTX,
+            reference_weight=reference_weight,
+            codebooks=self.get_codebooks(),
+            prev_codes=self.codes[selection],
+            scales=self.get_scales()[selection],
+            **kwargs,
         )
         return self.codes[selection]
 

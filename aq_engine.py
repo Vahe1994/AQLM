@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 from torch.nn.parallel.scatter_gather import Gather
 
-from src.aq import QuantizedLinear
+from src.aq import QuantizedWeight
 from src.utils import ellipsis
 
 
@@ -24,7 +24,7 @@ class AQEngine(nn.Module):
         self.register_buffer(
             "XTX", torch.zeros((self.columns, self.columns), dtype=accumultor_dtype, device=self.device)
         )
-        self.quantized_weight: Optional[QuantizedLinear] = None
+        self.quantized_weight: Optional[QuantizedWeight] = None
         self.nsamples = 0
 
     @torch.no_grad()
@@ -42,27 +42,20 @@ class AQEngine(nn.Module):
         self.XTX += inp.matmul(inp.t())
 
     @torch.enable_grad()
-    def quantize(self, *, args: Namespace, verbose: bool = True) -> QuantizedLinear:
+    def quantize(self, *, args: Namespace, verbose: bool = True) -> QuantizedWeight:
         """create a QuantizedLinear with specified args based on the collected hessian (XTX) data"""
         assert isinstance(args.devices, (list, tuple)) and len(args.devices) >= 1, f"Found devices = {args.devices}"
         assert args.devices[0] == self.device, (args.devices[0], self.XTX.device)
-
-        self.quantized_weight = QuantizedLinear(
-            in_features=self.layer.weight.shape[1],
-            out_features=self.layer.weight.shape[0],
+        self.quantized_weight = QuantizedWeight(
+            XTX=self.XTX.to(device=self.device, dtype=torch.float32),
+            reference_weight=self.layer.weight.detach().to(device=self.device, dtype=torch.float32),
             out_group_size=args.out_group_size,
             in_group_size=args.in_group_size,
             num_codebooks=args.num_codebooks,
             nbits_per_codebook=args.nbits_per_codebook,
-            bias=self.layer.bias is not None,
-            device=self.device,
             codebook_value_nbits=args.codebook_value_nbits,
             codebook_value_num_groups=args.codebook_value_num_groups,
             scale_nbits=args.scale_nbits,
-        )
-        self.quantized_weight.initialize(
-            reference_weight=self.layer.weight.detach().to(device=self.device, dtype=torch.float32),
-            bias=self.layer.bias.detach() if self.layer.bias is not None else None,
             max_iter=args.init_max_iter,
             max_points_per_centroid=args.init_max_points_per_centroid,
             devices=args.devices,
@@ -123,7 +116,7 @@ class AQEngine(nn.Module):
             Formally, the indices must be in range [ 0 , self.out_features // self.out_group_size )
         """
         assert self.quantized_weight is not None, "must be called inside / after AQUtil.quantize"
-        quantized_weight = self.quantized_weight.reconstruct_weight(selection)
+        quantized_weight = self.quantized_weight(selection)
 
         if isinstance(selection, ellipsis):
             reference_weight = self.layer.weight.detach().to(quantized_weight.dtype)
