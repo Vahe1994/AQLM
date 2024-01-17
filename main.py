@@ -729,7 +729,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--distill_lr",
         type=float,
-        default=1e-4,
+        default=1e-6,
         help="distillation learning rate",
     )
     parser.add_argument(
@@ -737,12 +737,6 @@ if __name__ == "__main__":
         type=int,
         default=100,
         help="Run this many passes over training data when doing distillation",
-    )
-    parser.add_argument(
-        "--distill_relative_mse_tolerance",
-        type=float,
-        default=None,
-        help="Stop fine-tuning (distillation) when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)",
     )
     parser.add_argument(
         "--distill_batch_size",

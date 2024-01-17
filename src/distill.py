@@ -78,11 +78,10 @@ def distill_logits(model, dataloader, teacher_hiddens, args):
     ):
         # prepare batch indices
         batch_indices_epoch = torch.randperm(num_samples)[:epoch_samples].chunk(local_batches_per_epoch)
-        # reset number of accumulated steps
+        # reset number of accumulated steps and losses
         steps_accumulated = 0
-        # reset loss numerator and denominator
-        loss_numerator = 0
-        loss_denominator = 0 
+        loss_accumulated = 0
+        epoch_loss = 0
 
         for batch_indices in batch_indices_epoch:
             # convert tensor to list
@@ -96,35 +95,27 @@ def distill_logits(model, dataloader, teacher_hiddens, args):
             # get student outputs
             with torch.autocast(device_type='cuda', enabled=args.distill_amp):
                 student_logits = model(inputs).logits
-                loss = kl_div_loss(student_logits, teacher_logits, args.distill_temperature)
-            loss.div(num_accumulation_steps).backward()
+                loss = kl_div_loss(student_logits, teacher_logits, args.distill_temperature) / num_accumulation_steps
+
+            loss.backward()
             steps_accumulated += 1
 
             if not torch.isfinite(loss).item():
                 raise ValueError(f"Distillation loss is {loss}")
             
-            loss_numerator += loss.item()
-            loss_denominator += 1
+            loss_accumulated += loss.item()
+            epoch_loss += (num_accumulation_steps / local_batches_per_epoch) * loss.item()
 
             if steps_accumulated == num_accumulation_steps:
                 opt.step()
                 opt.zero_grad()
+                # log stats if requested
+                if step % args.print_frequency == 0:
+                    print(f"step={step}\tloss={loss_accumulated:.10f}\t")
+                # reset step and losses
                 steps_accumulated = 0
+                loss_accumulated = 0
                 step += 1
-            else:
-                continue
-
-            if step % args.print_frequency == 0:
-                print(f"epoch={epoch}\tstep={step}\tloss={loss_numerator / loss_denominator:.10f}\t")
-
-        if step != args.print_frequency == 0:
-            print(f"epoch={epoch}\tstep={step}\tloss={loss_numerator / loss_denominator:.10f}\t")
-
-        if args.distill_relative_mse_tolerance is not None:
-            epoch_loss = loss_numerator / loss_denominator
-            if epoch_loss / previous_best_loss > (1.0 - args.distill_relative_mse_tolerance):
-                print(f"Early stopping on epoch {epoch}.")
-                return
-            previous_best_loss = min(epoch_loss, previous_best_loss)
+        print(f"epoch={epoch}\tloss={epoch_loss:.10f}\t")
     # set student back to eval
     model.eval()
