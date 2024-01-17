@@ -192,23 +192,24 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
 
             for sublayer_name in aq_handlers.keys():
                 print(f"Quantizing module {sublayer_name} of layer {layer_index}")
-                quantized_linear = aq_handlers[sublayer_name].quantize(args=args, verbose=True)
+                quantized_weight = aq_handlers[sublayer_name].quantize(args=args, verbose=True)
 
                 with torch.no_grad():
                     assert aq_handlers[sublayer_name].layer.weight in set(
                         layer.parameters()
                     )  # test that this is not a replica
 
+                    new_linear = QuantizedLinear(quantized_weight, aq_handlers[sublayer_name].layer.bias)
                     found_original = False
                     for submodule in layer.modules():
                         for child_name, child_module in submodule.named_children():
                             if child_module is aq_handlers[sublayer_name].layer:
-                                setattr(submodule, child_name, quantized_linear)
+                                setattr(submodule, child_name, new_linear)
                                 found_original = True  # note: do not break to handle tied layers
 
                     assert found_original, f"could not find {sublayer_name}"
 
-                weight_avg_bits = quantized_linear.estimate_nbits_per_parameter()
+                weight_avg_bits = quantized_weight.estimate_nbits_per_parameter()
                 overall_bits += int(weight_avg_bits * torch.numel(aq_handlers[sublayer_name].layer.weight.data))
                 model_number_of_params += torch.numel(aq_handlers[sublayer_name].layer.weight.data)
                 print("curent_avg_bits", overall_bits / model_number_of_params)
