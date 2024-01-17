@@ -52,9 +52,6 @@ def get_metadata(in_path: os.PathLike) -> dict:
         "num_codebooks": quant_args["num_codebooks"],
         "out_group_size": quant_args["out_group_size"],
         "in_group_size": quant_args["in_group_size"],
-        "codebook_value_nbits": quant_args["codebook_value_nbits"],
-        "codebook_value_num_groups": quant_args["codebook_value_num_groups"],
-        "scale_nbits": quant_args["scale_nbits"],
     }
 
 
