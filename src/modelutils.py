@@ -8,7 +8,7 @@ from transformers import AutoConfig, AutoModelForCausalLM
 
 MODEL_ERROR_MSG = "Unsupported model type {} - only 'llama', 'Yi', 'opt' and 'falcon' are supported"
 FALCON_TYPES = ("falcon", "refinedweb", "refinedwebmodel")
-LLAMA_LIKE = ("llama", "Yi", "mistral")
+LLAMA_LIKE = ("llama", "Yi", "mistral", "mixtral")
 
 
 @contextmanager
@@ -119,6 +119,7 @@ def find_sublayers(module, layers=(nn.Conv2d, nn.Linear)):
 
 def get_sequential_groups(model):
     if model.config.model_type in LLAMA_LIKE:
+        assert "mixtral" in model.config.model_type
         return [
             ["self_attn.k_proj", "self_attn.v_proj", "self_attn.q_proj"],
             ["self_attn.o_proj"],
