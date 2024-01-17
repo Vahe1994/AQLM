@@ -181,13 +181,16 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             sequential = get_sequential_groups(model)
         else:
             sequential = [list(find_sublayers(layer).keys())]
-
         for names in sequential:
             if len(args.devices) == 1:
                 assert len(inps) == len(outs) == 1  # number of per-device inputs/outputs
-                aq_handlers = init_aq_engines(layer, names, inps[0], outs[0], **forward_args)
+                aq_handlers = init_aq_engines(
+                    layer, [name for name in names if "gate" not in name], inps[0], outs[0], **forward_args
+                )
             else:
-                aq_handlers = init_aq_engines_parallel(args.devices, layer, names, inps, outs, **forward_args)
+                aq_handlers = init_aq_engines_parallel(
+                    args.devices, layer, [name for name in names if "gate" not in name], inps, outs, **forward_args
+                )
 
             for sublayer_name in aq_handlers.keys():
                 print(f"Quantizing module {sublayer_name} of layer {layer_index}")
