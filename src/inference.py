@@ -6,8 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.aq import _dequantize_weight
-from src.utils import ellipsis, get_int_dtype, unpack_int_data
+from src.utils import _dequantize_weight, ellipsis, get_int_dtype, unpack_int_data
 
 
 class FinalizedQuantizedLinear(nn.Module):
@@ -22,10 +21,6 @@ class FinalizedQuantizedLinear(nn.Module):
         bias=True,
         device=None,
         dtype=None,
-        # VERY optional parameters
-        codebook_value_nbits: int = 16,
-        codebook_value_num_groups: int = 1,
-        scale_nbits: int = 0,
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -40,11 +35,6 @@ class FinalizedQuantizedLinear(nn.Module):
         self.num_codebooks = num_codebooks
         self.nbits_per_codebook = nbits_per_codebook
         self.codebook_size = 2**nbits_per_codebook
-
-        # VERY optional parameters
-        self.codebook_value_nbits = codebook_value_nbits
-        self.codebook_value_num_groups = codebook_value_num_groups
-        self.scale_nbits = scale_nbits
 
         # CODES & CODEBOOKS
         self.codebooks = nn.Parameter(
