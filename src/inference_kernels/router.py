@@ -16,10 +16,7 @@ def forward_pass_quantized_linear(
     bias: Optional[torch.Tensor],
 ) -> torch.Tensor:
     if input.is_cuda:
-        matmul_result = triton_gemm(input, codes, codebooks, scales)
-        if bias is not None:
-            matmul_result += bias
-        return matmul_result
+        return triton_gemm(input, codes, codebooks, scales, bias)
     else:
         dequantized_weight = _dequantize_weight(
             unpack_int_data(codes, codebooks.shape[0].bit_length() - 1),
