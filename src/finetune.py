@@ -65,9 +65,7 @@ def finetune_groupwise(
 
     print(f"Fine-tuning {sum(param.numel() for param in differentiable_parameters)} parameters")
     opt = torch.optim.Adam(
-        differentiable_parameters, 
-        lr=args.finetune_lr, 
-        betas=(args.finetune_adam_beta1, args.finetune_adam_beta2)
+        differentiable_parameters, lr=args.finetune_lr, betas=(args.finetune_adam_beta1, args.finetune_adam_beta2)
     )
 
     # backup best parameters
