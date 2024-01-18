@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 import triton
 import triton.language as tl
@@ -19,6 +21,7 @@ from torch.autograd import Function
         "in_group_size",
         "num_input_groups",
         "num_input_groups_next_power_of_2",
+        "has_bias",
         "compute_in_fp32",
     ],
 )
@@ -29,6 +32,7 @@ def _aqlm_gemv_simple(
     codes_i16_ptr,
     codebooks_ptr,
     scales_ptr,
+    bias_ptr,
     in_features: tl.constexpr,
     out_features: tl.constexpr,
     num_codebooks: tl.constexpr,
@@ -38,6 +42,7 @@ def _aqlm_gemv_simple(
     num_input_groups: tl.constexpr,
     num_input_groups_next_power_of_2: tl.constexpr,
     compute_in_fp32: tl.constexpr,
+    has_bias: tl.constexpr,
     UNUSED: tl.constexpr,
 ):
     # variables ending with "_i" mean "for i-th output unit"
@@ -104,10 +109,14 @@ def _aqlm_gemv_simple(
     if out_group_size == 1:
         scale = tl.load(scales_ptr + pid).to(weights_i.dtype)  # scalar
         output_i = tl.sum(weights_i * input_vec) * scale
+        if bias_ptr:
+            output_i += tl.load(bias_ptr + pid).to(weights_i.dtype)
         tl.store(output_vec_ptr + pid, output_i.to(input_vec.dtype))
     else:
-        output_i = tl.sum(tl.sum(weights_i * input_vec, axis=2), axis=0)  # [out_group_size]
+        output_i = tl.sum(tl.sum(weights_i, axis=2) * input_vec, axis=0)  # [out_group_size]
         output_i *= tl.load(scales_ptr + pid).to(weights_i.dtype)
+        if bias_ptr:
+            output_i += tl.load(bias_ptr + pid).to(weights_i.dtype)
         tl.store(output_vec_ptr + pid * out_group_size + tl.arange(0, out_group_size), output_i.to(input_vec.dtype))
 
 
@@ -120,6 +129,7 @@ def aqlm_gemv_simple(
     codes_i16: torch.ShortTensor,
     codebooks: torch.Tensor,
     scales: torch.Tensor,
+    bias: Optional[torch.Tensor],
     compute_in_fp32: bool = True,
 ):
 
@@ -142,6 +152,7 @@ def aqlm_gemv_simple(
         codes_i16,
         codebooks,
         scales,
+        bias,
         in_features,
         out_features,
         num_codebooks,
@@ -151,6 +162,7 @@ def aqlm_gemv_simple(
         num_input_groups,
         next_power_of_2(num_input_groups),
         compute_in_fp32,
+        bias is not None,
     )
 
     return output_vec
@@ -161,10 +173,14 @@ def aqlm_gemm_stupid(
     codes_i16: torch.ShortTensor,
     codebooks: torch.Tensor,
     scales: torch.Tensor,
+    bias: Optional[torch.Tensor],
     compute_in_fp32: bool = True,
 ):
     original_shape = input.shape
     input = input.reshape(-1, original_shape[-1])
     return torch.cat(
-        [aqlm_gemv_simple(input_vec.unsqueeze(0), codes_i16, codebooks, scales, compute_in_fp32) for input_vec in input]
+        [
+            aqlm_gemv_simple(input_vec.unsqueeze(0), codes_i16, codebooks, scales, bias, compute_in_fp32)
+            for input_vec in input
+        ]
     ).reshape(original_shape[:-1] + (-1,))
