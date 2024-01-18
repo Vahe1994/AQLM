@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import time
 from argparse import Namespace
 from itertools import chain
@@ -193,6 +194,16 @@ def update_config(model: PreTrainedModel, args):
     model.__class__.__name__ = model.__class__.__name__ + "_AQLM"
 
 
+def add_inference_code(model: PreTrainedModel, save_path: os.PathLike):
+    model_type = model.config.model_type
+
+    shutil.copytree(f"./transformers/common", save_path, dirs_exist_ok=True)
+    if os.path.isdir(f"./transformers/{model_type}"):
+        shutil.copytree(f"./transformers/{model_type}", save_path, dirs_exist_ok=True)
+    else:
+        print(f"No predefined PreTrainedModel exists for {model_type}. You'll have to copy-paste some code yourself.")
+
+
 @torch.no_grad()
 def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
     assert not torch.backends.cuda.matmul.allow_tf32
@@ -298,8 +309,8 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             setattr(submodule, child_name, quantized_linear.finalize())
 
         update_config(model, args)
-        print(model.config)
         model.save_pretrained(args.save)
+        add_inference_code(model, args.save)
 
     if args.wandb:
         wandb.log({"max_cuda_mem_quantize": round(torch.cuda.max_memory_allocated() / 1e9, 2)})
