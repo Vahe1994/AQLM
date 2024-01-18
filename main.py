@@ -732,7 +732,7 @@ if __name__ == "__main__":
         "--distill_loss",
         type=str,
         default="l2",
-        choices=["l2", "cosine"],
+        choices=["l2", "l2_norm", "cosine"],
         help="Distillation loss",
     )
     parser.add_argument(
