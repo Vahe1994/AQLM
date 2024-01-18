@@ -693,10 +693,7 @@ if __name__ == "__main__":
         default=0.95,
         help="Finetuning adam_beta2",
     )
-    parser.add_argument(
-        "--finetune_keep_best",
-        action="store_true"
-    )
+    parser.add_argument("--finetune_keep_best", action="store_true")
     parser.add_argument(
         "--finetune_momentum",
         type=float,
@@ -715,10 +712,7 @@ if __name__ == "__main__":
         default=0.95,
         help="Finetuning adam_beta2",
     )
-    parser.add_argument(
-        "--finetune_keep_best",
-        action="store_true"
-    )
+    parser.add_argument("--finetune_keep_best", action="store_true")
     parser.add_argument(
         "--local_batch_size",
         type=int,

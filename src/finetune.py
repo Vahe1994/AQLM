@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import warnings
 from argparse import Namespace
-from copy import deepcopy
 from collections import defaultdict
+from copy import deepcopy
 from typing import Any, Dict, Iterator, List, Sequence, Tuple
 
 import torch
