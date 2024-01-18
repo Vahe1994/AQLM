@@ -655,25 +655,25 @@ if __name__ == "__main__":
         "--finetune_max_epochs",
         type=int,
         default=1000,
-        help="Run this many passes over training data when doing global optimization; no means skip GO",
+        help="Run this many passes over training data when doing finetuning; no means skip",
     )
     parser.add_argument(
         "--finetune_lr",
         type=float,
         default=1e-5,
-        help="global optimization learning rate",
+        help="Finetuning learning rate",
     )
     parser.add_argument(
         "--finetune_relative_mse_tolerance",
         type=float,
         default=None,
-        help="Stop fine-tuning (GO) when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)",
+        help="Stop finetuning when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)",
     )
     parser.add_argument(
         "--finetune_batch_size",
         type=int,
         default=1,
-        help="(fine-tuning only) train on batches of this many sequences, globally across all GPUs",
+        help="(finetuning only) train on batches of this many sequences, globally across all GPUs",
     )
     parser.add_argument(
         "--finetune_momentum",
@@ -701,7 +701,7 @@ if __name__ == "__main__":
         "--local_batch_size",
         type=int,
         default=None,
-        help="(fine-tuning only) Per-device and per-forward-pass batch size used to accumulate global --batch_size",
+        help="(finetuning only) Per-device and per-forward-pass batch size used to accumulate global --batch_size",
     )
     parser.add_argument(
         "--print_frequency",
@@ -709,7 +709,6 @@ if __name__ == "__main__":
         default=10,
         help="Print Adam progress after each print_frequency updates",
     )
-
     parser.add_argument("--wandb", action="store_true", help="Whether to use wandb or store locally.")
     parser.add_argument(
         "--no_quant",
