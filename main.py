@@ -14,7 +14,8 @@ from aq_engine import AQEngine
 from src.aq import QuantizedLinear
 from src.datautils import get_loaders
 from src.finetune import finetune_groupwise
-from src.distill import cache_teacher_hiddens, distill_logits
+# from src.distill import cache_teacher_hiddens, distill_logits
+from src.distill import cache_teacher_activations, distill_activations
 from src.modelutils import (
     FALCON_TYPES,
     find_sublayers,
@@ -28,7 +29,6 @@ from src.utils import using_tf32, maybe_get_0th_element
 
 try:
     import wandb
-
     has_wandb = True
 except ModuleNotFoundError:
     has_wandb = False
@@ -69,14 +69,16 @@ def distill_model(model, args) -> None:
         seqlen=model.seqlen,
     )
     # cache teacher logits
-    teacher_hiddens = cache_teacher_hiddens(teacher_model, dataloader, args)
+    # teacher_hiddens = cache_teacher_hiddens(teacher_model, dataloader, args)
+    teacher_activations = cache_teacher_activations(teacher_model, dataloader, args)
     # delete teacher
     del teacher_model
     torch.cuda.empty_cache()
     # place student on device
     model = model.to(device)
     # distill student
-    distill_logits(model, dataloader, teacher_hiddens, args)
+    # distill_logits(model, dataloader, teacher_hiddens, args)
+    distill_activations(model, dataloader, teacher_activations, args)
 
 
 @torch.no_grad()
@@ -725,6 +727,20 @@ if __name__ == "__main__":
         "--distill",
         action="store_true",
         help="Whether to apply KD."
+    )
+    parser.add_argument(
+        "--distill_loss",
+        type=str,
+        default="l2",
+        choices=["l2", "cosine"],
+        help="Distillation loss",
+    )
+    parser.add_argument(
+        "--distill_layers",
+        nargs="+",
+        type=int,
+        default=[-1],
+        help="Layers used in distillation",
     )
     parser.add_argument(
         "--distill_lr",

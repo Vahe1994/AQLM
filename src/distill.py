@@ -1,48 +1,83 @@
-from typing import List, Iterable
+from collections import defaultdict
+from typing import List, Dict, Iterable, Sequence
 from tqdm import trange
 
 import torch
 import torch.nn.functional as F
 
-from .utils import maybe_get_0th_element
+try:
+    import wandb
+    has_wandb = True
+except ModuleNotFoundError:
+    has_wandb = False
+
+from src.utils import maybe_get_0th_element
 
 
-def kl_div_loss(student_logits, teacher_hiddens, temperature):
-    "Kullback-Leibler divergence loss"
-    num_tokens = student_logits.numel() / student_logits.size(-1)
-    return (
-        F.kl_div(
-            input=F.log_softmax(student_logits / temperature, dim=-1),
-            target=F.log_softmax(teacher_hiddens / temperature, dim=-1),
-            log_target=True,
-            reduction="sum",
-        )
-        * (temperature ** 2)
-        / num_tokens
-    )
+class DistillationWrapper:
+
+    def __init__(self, model, layer_ids: Sequence[int]) -> None:
+        self.model = model
+        self.hooks = {}
+        self.activations = {}
+        for layer_id in layer_ids:
+            def cache_output(l_id):
+                def _hook(mod, inp, out):
+                    self.activations[l_id] = maybe_get_0th_element(out)
+                return _hook
+
+            self.hooks[layer_id] = model.model.layers[layer_id].register_forward_hook(cache_output(layer_id))
+
+    def __call__(self, *input_args, **input_kwargs) -> Dict[str, torch.Tensor]:
+        self.model(*input_args, **input_kwargs)
+        return self.activations
+
+    def free(self):
+        # remove hooks
+        for _, hook in self.hooks.items():
+            hook.remove()
+        # clean dict with activations
+        self.activations.clear()
+        torch.cuda.empty_cache()
 
 
-def _extract_into_tensor(tensor_list: List[torch.Tensor], indices: Iterable[int]):
+def _extract_into_tensor(tensor_list: List[torch.Tensor], indices: Iterable[int], device=None):
     extracted_items = [maybe_get_0th_element(tensor_list[i]) for i in indices]
-    return torch.cat(extracted_items, axis=0)
+    return torch.cat(extracted_items, dim=0).to(device)
+
+
+def _extract_into_tensor_dict(tensor_dict: List[Dict[str, torch.Tensor]], indices: Iterable[int], device=None):
+    extracted_dicts = defaultdict(list)
+    for i in indices:
+        for k, v in tensor_dict[i].items():
+            extracted_dicts[k].append(v)
+    # concatenate tensors
+    return {k: torch.cat(v, dim=0).to(device) for k, v in extracted_dicts.items()}
 
 
 @torch.inference_mode()
-def cache_teacher_hiddens(teacher_model, dataloader, args) -> List[torch.Tensor]:
-    cached_teacher_hiddens = []
+def cache_teacher_activations(teacher_model, dataloader, args) -> List[Dict[str, torch.Tensor]]:
+    cached_teacher_activations = []
     # get device
     device = maybe_get_0th_element(args.devices)
+    # create wrapper
+    teacher_wrapper = DistillationWrapper(teacher_model, args.distill_layers)
 
-    for i in trange(len(dataloader),  total=len(dataloader), desc='Caching teacher outputs', leave=False):
+    for i in trange(len(dataloader),  total=len(dataloader), desc='Caching teacher activations', leave=False):
         batch = maybe_get_0th_element(dataloader[i]).to(device)
         # get activations
-        teacher_hiddens = teacher_model.model(batch).last_hidden_state
-        cached_teacher_hiddens.append(teacher_hiddens.cpu())
+        teacher_activations = teacher_wrapper(batch)
+        # add to dict
+        cached_teacher_activations.append({k: v.cpu() for k, v in teacher_activations.items()})
+        # clear
+        teacher_wrapper.activations.clear()   
 
-    return cached_teacher_hiddens
+    teacher_wrapper.free()
+
+    return cached_teacher_activations
 
 
-def distill_logits(model, dataloader, teacher_hiddens, args):
+def distill_activations(model, dataloader, teacher_activations, args):
     # set model into train mode
     model.train()
     # cast model to float
@@ -58,6 +93,19 @@ def distill_logits(model, dataloader, teacher_hiddens, args):
         lr=args.distill_lr,
         betas=(args.distill_adam_beta1, args.distill_adam_beta2)
     )
+    # create wrapper
+    wrapper = DistillationWrapper(model, args.distill_layers)
+    # prepare loss_fn
+    if args.distill_loss == 'l2':
+        loss_fn = F.mse_loss
+    elif args.distill_loss == 'cosine':
+        def cosine_distance(x, y):
+            x_n = x.div(x.norm(dim=-1, keepdim=True))
+            y_n = y.div(y.norm(dim=-1, keepdim=True))
+            return (x_n * y_n).sum(dim=-1).mean().mul(-0.5).add(0.5)
+        loss_fn = cosine_distance
+    else:
+        raise ValueError(f"Unknown loss_fn {args.distill_loss}")
 
     num_samples = len(dataloader)
     epoch_samples = num_samples - num_samples % args.distill_batch_size # number of samples in epoch
@@ -65,7 +113,6 @@ def distill_logits(model, dataloader, teacher_hiddens, args):
     num_accumulation_steps = args.distill_batch_size // args.distill_local_batch_size
 
     step = 0
-    previous_best_loss = float("inf")
 
     if args.distill_gradient_checkpointing:
         model.gradient_checkpointing_enable()
@@ -87,15 +134,16 @@ def distill_logits(model, dataloader, teacher_hiddens, args):
             # convert tensor to list
             batch_indices = batch_indices.tolist()
             # prepare inputs
-            inputs = _extract_into_tensor(dataloader, batch_indices).to(device)
+            inputs = _extract_into_tensor(dataloader, batch_indices, device)
             # prepare targets
-            pre_targets = _extract_into_tensor(teacher_hiddens, batch_indices).to(device)
-            with torch.no_grad():
-                teacher_logits = model.lm_head(pre_targets.float())
+            targets =_extract_into_tensor_dict(teacher_activations, batch_indices, device)
             # get student outputs
             with torch.autocast(device_type='cuda', enabled=args.distill_amp):
-                student_logits = model(inputs).logits
-                loss = kl_div_loss(student_logits, teacher_logits, args.distill_temperature) / num_accumulation_steps
+                outputs = wrapper(inputs)
+                loss = 0
+                for layer_id in outputs:
+                   loss += loss_fn(outputs[layer_id], targets[layer_id].float())
+                loss.div_(num_accumulation_steps).div_(len(outputs))
 
             loss.backward()
             steps_accumulated += 1
@@ -111,11 +159,16 @@ def distill_logits(model, dataloader, teacher_hiddens, args):
                 opt.zero_grad()
                 # log stats if requested
                 if step % args.print_frequency == 0:
-                    print(f"step={step}\tloss={loss_accumulated:.10f}\t")
+                    print(f"step={step}\tloss={loss_accumulated:.4f}\t")
+                    if args.wandb:
+                        assert has_wandb
+                        wandb.log({'distillation/loss': loss_accumulated, 'distillation/step': step})
                 # reset step and losses
                 steps_accumulated = 0
                 loss_accumulated = 0
                 step += 1
-        print(f"epoch={epoch}\tloss={epoch_loss:.10f}\t")
+        print(f"epoch={epoch}\tloss={epoch_loss:.4f}\t")
+    # reset student wrapper
+    wrapper.free()
     # set student back to eval
     model.eval()
