@@ -98,7 +98,7 @@ def distill_activations(model, dataloader, teacher_activations, args):
     # prepare loss_fn
     if args.distill_loss == 'l2':
         loss_fn = F.mse_loss
-    if args.distill_loss == 'l2_norm':
+    elif args.distill_loss == 'l2_norm':
         loss_fn = lambda x, y: (x - y).pow(2).mean() / y.pow(2).mean()
     elif args.distill_loss == 'cosine':
         def cosine_distance(x, y):
