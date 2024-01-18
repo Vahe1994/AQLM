@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from src.inference_kernels.router import forward_pass_quantized_linear
 from src.utils import _dequantize_weight, ellipsis, get_int_dtype, unpack_int_data
 
 
@@ -60,20 +61,4 @@ class FinalizedQuantizedLinear(nn.Module):
             self.register_parameter("bias", None)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        return F.linear(input, self.reconstruct_weight(), self.bias)
-
-    def reconstruct_weight(self, selection: Union[slice, ellipsis, torch.Tensor] = ...):
-        """
-        Differentably reconstruct the weight (or parts thereof) from compressed components
-        :param selection: By default, reconstruct the entire weight. If selection is specified, this method will instead
-            reconstruct a portion of weight for the corresponding output dimensions (used for parallelism).
-            The indices / slices must correspond to output channels (if out_group_size==1) or groups (if > 1).
-            Formally, the indices must be in range [ 0 , self.out_features // self.out_group_size )
-
-        """
-        weight = _dequantize_weight(
-            unpack_int_data(self.codes[selection], self.nbits_per_codebook),
-            self.codebooks,
-            self.scales[selection],
-        )
-        return weight
+        return forward_pass_quantized_linear(input, self.codes, self.codebooks, self.scales, self.bias)
