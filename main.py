@@ -9,7 +9,6 @@ import torch
 import torch.nn as nn
 from tqdm import trange
 from tqdm.auto import trange
-from transformers import PreTrainedModel
 
 from aq_engine import AQEngine
 from src.aq import QuantizedLinear
@@ -25,6 +24,7 @@ from src.modelutils import (
     get_sequential_groups,
 )
 from src.utils import using_tf32
+from transformers import PreTrainedModel
 
 try:
     import wandb
@@ -153,27 +153,44 @@ def get_inps(
 def update_config(model: PreTrainedModel, args):
     old_config = model.config
     old_config_type = type(old_config)
+    old_model_type = old_config.model_type
+    new_model_type = f"{old_model_type}_aqlm"
 
     class AqlmConfig(old_config_type):
+        model_type = new_model_type
+
         def __init__(
             self,
-            nbits_per_codebook: int = 16,
-            num_codebooks: int = 1,
-            out_group_size: int = 1,
-            in_group_size: int = 8,
+            aqlm: dict[str, int] = {
+                "nbits_per_codebook": 16,
+                "num_codebooks": 1,
+                "out_group_size": 8,
+                "in_group_size": 1,
+            },
             **kwargs,
         ):
             super().__init__(**kwargs)
-            self.aqlm = {
-                "nbits_per_codebook": nbits_per_codebook,
-                "num_codebooks": num_codebooks,
-                "out_group_size": out_group_size,
-                "in_group_size": in_group_size,
-            }
+            self.aqlm = aqlm
 
-    new_config = AqlmConfig(args.nbits_per_codebook, args.num_codebooks, args.out_group_size, args.in_group_size)
-    new_config.update(old_config.to_dict())
+    config_dict = old_config.to_dict()
+    config_dict["auto_map"] = {
+        f"AutoConfig": f"configuration_{new_model_type}.{old_config.__class__.__name__}",
+        "AutoModelForCausalLM": f"modeling_{new_model_type}.{model.__class__.__name__}",
+    }
+    del config_dict["_name_or_path"]
+
+    new_config = AqlmConfig(
+        {
+            "nbits_per_codebook": args.nbits_per_codebook,
+            "num_codebooks": args.num_codebooks,
+            "out_group_size": args.out_group_size,
+            "in_group_size": args.in_group_size,
+        }
+    )
+    new_config.update(config_dict)
+
     model.config = new_config
+    model.__class__.__name__ = model.__class__.__name__ + "_AQLM"
 
 
 @torch.no_grad()

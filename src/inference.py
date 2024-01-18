@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.inference_kernels.router import forward_pass_quantized_linear
+from src.inference_kernels.kernel_selector import forward_pass_quantized_linear
 from src.utils import _dequantize_weight, ellipsis, get_int_dtype, unpack_int_data
 
 
