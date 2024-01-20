@@ -34,16 +34,18 @@ class QuantizedLinear(nn.Module):
             self.quantized_weight.num_codebooks,
             self.quantized_weight.nbits_per_codebook,
             self.bias is not None,
-            device=torch.device("meta"),
+            device=self.quantized_weight.codes.device,
         )
 
-        finalized_quantized_linear.codes = torch.nn.Parameter(
-            pack_int_data(self.quantized_weight.codes, self.quantized_weight.nbits_per_codebook), requires_grad=False
-        )
-        finalized_quantized_linear.codebooks = torch.nn.Parameter(self.quantized_weight.get_codebooks())
-        finalized_quantized_linear.scales = torch.nn.Parameter(self.quantized_weight.get_scales())
+        state_dict = {
+            "codes": pack_int_data(self.quantized_weight.codes.clone(), self.quantized_weight.nbits_per_codebook),
+            "codebooks": self.quantized_weight.get_codebooks().clone(),
+            "scales": self.quantized_weight.get_scales().clone(),
+        }
         if self.bias is not None:
-            finalized_quantized_linear.bias = torch.nn.Parameter(self.bias.data)
+            state_dict["bias"] = self.bias.clone()
+
+        finalized_quantized_linear.load_state_dict(state_dict)
 
         return finalized_quantized_linear
 
