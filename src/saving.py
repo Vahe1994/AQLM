@@ -67,3 +67,6 @@ def save_fresh_model(model: PreTrainedModel, replaced_linears: list[tuple[nn.Mod
     update_config(model, args)
     model.save_pretrained(args.save)
     add_inference_code(model, args.save)
+
+    for (submodule, child_name, quantized_linear) in replaced_linears:
+        setattr(submodule, child_name, quantized_linear)
