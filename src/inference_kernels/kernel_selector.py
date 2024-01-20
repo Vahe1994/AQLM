@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.inference_kernels.triton_kernel import aqlm_gemm_stupid as triton_gemm
+from src.inference_kernels.triton_kernel import triton_matmul
 from src.utils import _dequantize_weight, unpack_int_data
 
 
@@ -16,7 +16,7 @@ def forward_pass_quantized_linear(
     bias: Optional[torch.Tensor],
 ) -> torch.Tensor:
     if input.is_cuda:
-        return triton_gemm(input, codes, codebooks, scales, bias)
+        return triton_matmul(input, codes, codebooks, scales, bias)
     else:
         dequantized_weight = _dequantize_weight(
             unpack_int_data(codes, codebooks.shape[0].bit_length() - 1),
