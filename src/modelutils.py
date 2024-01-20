@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import torch
 import torch.nn as nn
 from tqdm import trange
+
 from transformers import AutoConfig, AutoModelForCausalLM
 
 MODEL_ERROR_MSG = "Unsupported model type {} - only 'llama', 'Yi', 'opt' and 'falcon' are supported"
