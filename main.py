@@ -514,7 +514,6 @@ if __name__ == "__main__":
         "--model_seqlen",
         type=int,
         default=4096,
-        choices=[2048, 4096],
         help="Model seqlen and calibration data context length.",
     )
     parser.add_argument("--load", type=str, default=None, help="Path to load quantized statistics.")
@@ -645,7 +644,7 @@ if __name__ == "__main__":
         "--finetune_max_epochs",
         type=int,
         default=1000,
-        help="Run this many passes over training data when doing finetuning; no means skip",
+        help="Run this many passes over training data when doing finetuning; No finetuning if set to 0.",
     )
     parser.add_argument(
         "--finetune_lr",
