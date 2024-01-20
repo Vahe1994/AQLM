@@ -5,20 +5,21 @@ import re
 import torch
 from tqdm.auto import trange
 
+from src.saving import add_inference_code, update_config
 from src.utils import pack_int_data
 from transformers import AutoConfig, PretrainedConfig
 
 
 def get_num_layers(config) -> int:
-    match config["model_type"]:
+    match config.model_type:
         case "llama" | "mistral":
-            return config["num_hidden_layers"]
+            return config.num_hidden_layers
         case unknown_type:
             raise NotImplementedError(f"Can't get number of layers for {unknown_type}")
 
 
 def get_layers_prefix(config) -> str:
-    match config["model_type"]:
+    match config.model_type:
         case "llama" | "mistral":
             return "model.layers"
         case unknown_type:
@@ -77,11 +78,15 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    config_dict, _ = PretrainedConfig.get_config_dict(args.model)
+    old_config = AutoConfig.from_pretrained(args.model)
+    print(type(old_config))
     metadata = get_metadata(args.in_path)
-    config_dict["aqlm"] = metadata
-    with open(os.path.join(args.out_path, "config.json"), "w") as config_file:
-        json.dump(config_dict, config_file, indent=4)
 
-    state_dict = get_converted_state_dict(config_dict, metadata["nbits_per_codebook"], args.in_path)
+    add_inference_code(old_config.model_type, args.out_path)
+
+    state_dict = get_converted_state_dict(old_config, metadata["nbits_per_codebook"], args.in_path)
     torch.save(state_dict, os.path.join(args.out_path, "pytorch_model.bin"))
+
+    new_config = update_config(old_config, metadata)
+    with open(os.path.join(args.out_path, "config.json"), "w") as config_file:
+        json.dump(new_config.to_dict(), config_file, indent=4)
