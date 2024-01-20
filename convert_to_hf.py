@@ -4,9 +4,9 @@ import re
 
 import torch
 from tqdm.auto import trange
-from transformers import AutoConfig, PretrainedConfig
 
 from src.utils import pack_int_data
+from transformers import AutoConfig, PretrainedConfig
 
 
 def get_num_layers(config) -> int:

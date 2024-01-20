@@ -135,7 +135,7 @@ def forward_pass_quantized_linear(
     bias: Optional[torch.Tensor],
 ) -> torch.Tensor:
     if input.is_cuda:
-        return aqlm_gemm_stupid(input, codes, codebooks, scales, bias)
+        return triton_matmul(input, codes, codebooks, scales, bias)
     else:
         dequantized_weight = _dequantize_weight(
             unpack_int_data(codes, codebooks.shape[0].bit_length() - 1),
@@ -160,7 +160,6 @@ def forward_pass_quantized_linear(
         "in_group_size",
         "num_input_groups",
         "num_input_groups_next_power_of_2",
-        "has_bias",
         "compute_in_fp32",
     ],
 )
@@ -168,7 +167,7 @@ def forward_pass_quantized_linear(
 def _aqlm_gemv_simple(
     input_vec_ptr,
     output_vec_ptr,
-    codes_i16_ptr,
+    codes_ptr,
     codebooks_ptr,
     scales_ptr,
     bias_ptr,
@@ -181,7 +180,6 @@ def _aqlm_gemv_simple(
     num_input_groups: tl.constexpr,
     num_input_groups_next_power_of_2: tl.constexpr,
     compute_in_fp32: tl.constexpr,
-    has_bias: tl.constexpr,
     UNUSED: tl.constexpr,
 ):
     # variables ending with "_i" mean "for i-th output unit"
@@ -203,7 +201,7 @@ def _aqlm_gemv_simple(
     # Stage 2: load integer codes for the active row
     # [in_features // in_group_size, num_codebooks]
     codes_i_ptrs = (
-        codes_i16_ptr
+        codes_ptr
         + pid * num_input_groups * num_codebooks
         + tl.arange(0, num_input_groups_next_power_of_2)[:, None] * num_codebooks
         + tl.arange(0, num_codebooks)[None, :]
@@ -211,15 +209,12 @@ def _aqlm_gemv_simple(
     codes_i_mask_1d = tl.arange(0, num_input_groups_next_power_of_2) < num_input_groups
 
     codes_i = tl.load(codes_i_ptrs, mask=codes_i_mask_1d[:, None])  # [in_features//in_group_size, num_codebooks]
-    if codes_i.dtype == tl.int16:
-        codes_i = codes_i.to(tl.int32)
-        codes_i = (codes_i) + (codes_i < 0) * codebook_size  # aka 2 ** nbits_per_codebook
-        # ^-- (because codes are int16 tensors that contain uint data)
+    codes_i = codes_i.to(tl.int32)
+    codes_i = (codes_i) + (codes_i < 0) * codebook_size  # aka 2 ** nbits_per_codebook
+    # ^-- (because codes are int16 tensors that contain uint data)
 
-        # The following alternative does not work:
-        #     codes_i = codes_i.to(tl.int32) % codebook_size # aka 2 ** nbits_per_codebook
-    else:
-        codes_i = codes_i.to(tl.int32)
+    # The following alternative does not work:
+    #     codes_i = codes_i.to(tl.int32) % codebook_size # aka 2 ** nbits_per_codeboo
 
     # shift codes_i so that codebooks after 0th point to correct indices in codebooks_ptr
     codes_i += tl.arange(0, num_codebooks)[None, :] * codebook_size  # aka 2 ** nbits_per_codebook
@@ -280,7 +275,7 @@ def aqlm_gemv_simple(
     assert input_vec.ndim == 2 and input_vec.shape[0] == 1, "do reshape; now!"
     assert scales.shape == (out_features // out_group_size, 1, 1, 1)
     assert in_features % in_group_size == 0
-    assert codebooks.shape[1] == 2**16
+    assert codebooks.shape[1] < 2**32
 
     output_vec = torch.empty(1, out_features, device=device, dtype=dtype)
     # 1D launch kernel where each block computes output unit
@@ -301,7 +296,6 @@ def aqlm_gemv_simple(
         num_input_groups,
         next_power_of_2(num_input_groups),
         compute_in_fp32,
-        bias is not None,
     )
 
     return output_vec
@@ -315,11 +309,67 @@ def aqlm_gemm_stupid(
     bias: Optional[torch.Tensor],
     compute_in_fp32: bool = True,
 ):
-    original_shape = input.shape
-    input = input.reshape(-1, original_shape[-1])
-    return torch.cat(
-        [
-            aqlm_gemv_simple(input_vec.unsqueeze(0), codes_i16, codebooks, scales, bias, compute_in_fp32)
-            for input_vec in input
-        ]
-    ).reshape(original_shape[:-1] + (-1,))
+    device, dtype = codebooks.device, codebooks.dtype
+    num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
+    in_features = input.shape[1]
+    out_features = codes_i16.shape[0] * out_group_size
+    num_input_groups = codes_i16.shape[1]
+    assert input.ndim == 2
+    assert scales.shape == (out_features // out_group_size, 1, 1, 1)
+    assert in_features % in_group_size == 0
+    assert codebooks.shape[1] < 2**32
+
+    output = torch.empty(input.shape[0], out_features, device=device, dtype=dtype)
+    for i in range(input.shape[0]):
+        # 1D launch kernel where each block computes output unit
+        grid = lambda META: (out_features // out_group_size,)
+        _aqlm_gemv_simple[grid](
+            input[i],
+            output[i],
+            codes_i16,
+            codebooks,
+            scales,
+            bias,
+            in_features,
+            out_features,
+            num_codebooks,
+            codebook_size,
+            out_group_size,
+            in_group_size,
+            num_input_groups,
+            next_power_of_2(num_input_groups),
+            compute_in_fp32,
+        )
+
+    return output
+
+
+def triton_matmul(
+    input: torch.Tensor,
+    codes: torch.IntTensor,
+    codebooks: torch.Tensor,
+    scales: torch.Tensor,
+    bias: Optional[torch.Tensor],
+    compute_in_fp32: bool = True,
+) -> torch.Tensor:
+    input_shape = input.shape
+    input = input.reshape(-1, input_shape[-1])
+
+    if input.shape[0] == 1:
+        return aqlm_gemv_simple(
+            input,
+            codes,
+            codebooks,
+            scales,
+            bias,
+            compute_in_fp32,
+        ).reshape(input_shape[:-1] + (-1,))
+    else:
+        return aqlm_gemm_stupid(
+            input,
+            codes,
+            codebooks,
+            scales,
+            bias,
+            compute_in_fp32,
+        ).reshape(input_shape[:-1] + (-1,))
