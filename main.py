@@ -196,7 +196,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                 print(f"Quantizing module {sublayer_name} of layer {layer_index}")
                 if "mixtral" in model.config.model_type.lower() and args.mix_compression:
                     print("mix_compression")
-                    assert args.nbits_per_codebook!=16
+                    assert args.nbits_per_codebook==16
                     if " .self_attn" in sublayer_name.lower():
                         args.num_codebooks=2
                     else:
