@@ -185,11 +185,11 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             if len(args.devices) == 1:
                 assert len(inps) == len(outs) == 1  # number of per-device inputs/outputs
                 aq_handlers = init_aq_engines(
-                    layer, [name for name in names if "gate" not in name], inps[0], outs[0], **forward_args
+                    layer, [name for name in names if ((".gate" not in name) and ("mixtral" in model.config.model_type.lower()))], inps[0], outs[0], **forward_args
                 )
             else:
                 aq_handlers = init_aq_engines_parallel(
-                    args.devices, layer, [name for name in names if "gate" not in name], inps, outs, **forward_args
+                    args.devices, layer, [name for name in names if ((".gate" not in name) and ("mixtral" in model.config.model_type.lower()))], inps, outs, **forward_args
                 )
 
             for sublayer_name in aq_handlers.keys():
