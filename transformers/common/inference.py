@@ -188,11 +188,11 @@ def _aqlm_gemv_simple(
     # Stage 1: load input data
     input_vec = tl.load(
         input_vec_ptr
-        + tl.arange(0, num_input_groups_next_power_of_2)[:, None, None] * in_group_size
-        + tl.arange(0, in_group_size)[None, None, :],
-        mask=tl.arange(0, num_input_groups_next_power_of_2)[:, None, None] < num_input_groups,
+        + tl.arange(0, num_input_groups_next_power_of_2)[:, None, None, None] * in_group_size
+        + tl.arange(0, in_group_size)[None, None, None, :],
+        mask=tl.arange(0, num_input_groups_next_power_of_2)[:, None, None, None] < num_input_groups,
     )
-    # [in_features//in_group_size, 1, group_size]
+    # [in_features//in_group_size, 1, 1, group_size]
     # Note: we could simply load input_vec then reshape
     #     input_vec = tl.load(input_vec_ptr + tl.arange(0, in_features))  # [in_features]
     #     input_vec = tl.view(input_vec, [num_input_groups, 1, in_group_size])
@@ -237,8 +237,6 @@ def _aqlm_gemv_simple(
         weights_i = weights_i.to(tl.float32)
         input_vec = input_vec.to(tl.float32)
     # ^-- [in_features // in_group_size, num_codebooks, out_group_size, in_group_size]
-    weights_i = tl.sum(weights_i, axis=1)  # sum codebooks as per additive quantization
-    # ^-- [in_features // in_group_size, out_group_size, in_group_size]
 
     if out_group_size == 1:
         scale = tl.load(scales_ptr + pid).to(weights_i.dtype)  # scalar
