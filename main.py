@@ -194,6 +194,13 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
 
             for sublayer_name in aq_handlers.keys():
                 print(f"Quantizing module {sublayer_name} of layer {layer_index}")
+                if "mixtral" in model.config.model_type.lower() and args.mix_compression:
+                    print("mix_compression")
+                    assert args.nbits_per_codebook!=16
+                    if " .self_attn" in sublayer_name.lower():
+                        args.num_codebooks=2
+                    else:
+                        args.num_codebooks=1
                 quantized_weight = aq_handlers[sublayer_name].quantize(args=args, verbose=True)
 
                 with torch.no_grad():
@@ -541,6 +548,11 @@ if __name__ == "__main__":
         "--skip_out_loss",
         action="store_true",
         help="Whether to skip computation of out loss.",
+    )
+    parser.add_argument(
+        "--mix_compression",
+        action="store_true",
+        help="Compress .self_attn in 4 bits, .block_sparse_moe.experts to 2.3 for mixtral.",
     )
     parser.add_argument(
         "--offload_activations",
