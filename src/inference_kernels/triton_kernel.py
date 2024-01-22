@@ -22,6 +22,7 @@ from torch.autograd import Function
         "num_input_groups",
         "num_input_groups_next_power_of_2",
         "compute_in_fp32",
+        "has_bias",
     ],
 )
 @triton.jit
@@ -41,6 +42,7 @@ def _aqlm_gemv_simple(
     num_input_groups: tl.constexpr,
     num_input_groups_next_power_of_2: tl.constexpr,
     compute_in_fp32: tl.constexpr,
+    has_bias: tl.constexpr,
     UNUSED: tl.constexpr,
 ):
     # variables ending with "_i" mean "for i-th output unit"
@@ -102,13 +104,13 @@ def _aqlm_gemv_simple(
     if out_group_size == 1:
         scale = tl.load(scales_ptr + pid).to(weights_i.dtype)  # scalar
         output_i = tl.sum(weights_i * input_vec) * scale
-        if bias_ptr:
+        if has_bias:
             output_i += tl.load(bias_ptr + pid).to(weights_i.dtype)
         tl.store(output_vec_ptr + pid, output_i.to(input_vec.dtype))
     else:
         output_i = tl.sum(tl.sum(weights_i, axis=2) * input_vec, axis=0)  # [out_group_size]
         output_i *= tl.load(scales_ptr + pid).to(weights_i.dtype)
-        if bias_ptr:
+        if has_bias:
             output_i += tl.load(bias_ptr + pid).to(weights_i.dtype)
         tl.store(output_vec_ptr + pid * out_group_size + tl.arange(0, out_group_size), output_i.to(input_vec.dtype))
 
@@ -155,6 +157,7 @@ def aqlm_gemv_simple(
         num_input_groups,
         next_power_of_2(num_input_groups),
         compute_in_fp32,
+        bias is not None,
     )
 
     return output_vec
@@ -198,6 +201,7 @@ def aqlm_gemm_stupid(
             num_input_groups,
             next_power_of_2(num_input_groups),
             compute_in_fp32,
+            bias is not None,
         )
 
     return output
