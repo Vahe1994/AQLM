@@ -546,7 +546,6 @@ if __name__ == "__main__":
         "--model_seqlen",
         type=int,
         default=4096,
-        choices=[2048, 4096],
         help="Model seqlen and calibration data context length.",
     )
     parser.add_argument("--load", type=str, default=None, help="Path to load quantized statistics.")
