@@ -83,6 +83,8 @@ def finetune_groupwise(
     differentiable_parameters_by_name = {name: param for name, param in layer.named_parameters() if param.requires_grad}
     param_names, differentiable_parameters = zip(*differentiable_parameters_by_name.items())
     differentiable_parameters = nn.ParameterList(differentiable_parameters)
+    for param in differentiable_parameters:
+        param.grad = torch.zeros_like(param)
     if replicas:
         replacement_tables = _make_parameter_replacement_tables(layer, replicas, param_names, differentiable_parameters)
 
@@ -159,6 +161,7 @@ def finetune_groupwise(
                 return layer  # early stopping; no updates after last epoch's beam search
             previous_best_loss = min(epoch_loss, previous_best_loss)
 
+    opt.zero_grad(set_to_none=True)
     return layer
 
 

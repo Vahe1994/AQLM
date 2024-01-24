@@ -9,6 +9,7 @@ from tqdm.auto import trange
 
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
 from src.utils import ellipsis, maybe_script
+from torch.utils.checkpoint import  checkpoint
 
 
 class QuantizedLinear(nn.Module):
@@ -17,10 +18,15 @@ class QuantizedLinear(nn.Module):
         self.out_features, self.in_features = quantized_weight.out_features, quantized_weight.in_features
         self.quantized_weight = quantized_weight
         self.bias = bias
+        self.use_checkpoint = False
 
-    def forward(self, input: torch.Tensor):
+    def _forward(self, input: torch.Tensor):
         # TODO[aqlm] this can be optimized! maybe integrate with QuantizedLinear?
         return F.linear(input, self.quantized_weight(), self.bias)
+    def forward(self, input: torch.Tensor):
+        if self.use_checkpoint and torch.is_grad_enabled():
+            return checkpoint(self._forward, input, preserve_rng_state=False, determinism_check="none")
+        return self._forward(input)
 
 
 class QuantizedWeight(nn.Module):

@@ -209,6 +209,8 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                     )  # test that this is not a replica
 
                     new_linear = QuantizedLinear(quantized_weight, aq_handlers[sublayer_name].layer.bias)
+                    new_linear.use_checkpoint = True
+                    print("ENABLED CHECKPOINTING FOR", sublayer_name)
                     found_original = False
                     for submodule in layer.modules():
                         for child_name, child_module in submodule.named_children():
@@ -231,6 +233,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                 layer = finetune_groupwise(layer=layer, inps=inps, outs=outs, args=args, **forward_args)
             layer = layer.to(dtype=layer_dtype_original)
             print("FINISHED FINETUNING")
+
         if args.save:
             os.makedirs(args.save, exist_ok=True)
             layer_save_path = os.path.join(args.save, f"{layer_index}.pth")
