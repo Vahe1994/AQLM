@@ -197,10 +197,11 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                 if "mixtral" in model.config.model_type.lower() and args.mix_compression:
                     print("mix_compression")
                     assert args.nbits_per_codebook==16
-                    if " .self_attn" in sublayer_name.lower():
+                    if "self_attn" in sublayer_name.lower():
                         args.num_codebooks=2
                     else:
                         args.num_codebooks=1
+                    print(sublayer_name.lower()," num codebooks",args.num_codebooks)
                 quantized_weight = aq_handlers[sublayer_name].quantize(args=args, verbose=True)
 
                 with torch.no_grad():
