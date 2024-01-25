@@ -514,7 +514,6 @@ if __name__ == "__main__":
         "--model_seqlen",
         type=int,
         default=4096,
-        choices=[2048, 4096],
         help="Model seqlen and calibration data context length.",
     )
     parser.add_argument("--load", type=str, default=None, help="Path to load quantized statistics.")
@@ -549,7 +548,6 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to run in true sequential model.",
     )
-
     parser.add_argument(
         "--num_codebooks",
         type=int,
@@ -574,7 +572,6 @@ if __name__ == "__main__":
         default=8,
         help="How many input features are quantized together",
     )
-
     parser.add_argument(
         "--scale_nbits",
         type=int,
@@ -613,7 +610,6 @@ if __name__ == "__main__":
         default=None,
         help="During K-means initialzation, sample (this_many * 2 ^ nbits_per_codebook) points for training K-means",
     )
-
     parser.add_argument(
         "--lr",
         type=float,
@@ -626,7 +622,6 @@ if __name__ == "__main__":
         default=1,
         help="Keep top-(this_many) best candidates for each codebook when finding optimal codes",
     )
-
     parser.add_argument(
         "--max_epochs",
         type=int,
@@ -649,32 +644,44 @@ if __name__ == "__main__":
         "--finetune_max_epochs",
         type=int,
         default=1000,
-        help="Run this many passes over training data when doing global optimization; no means skip GO",
+        help="Run this many passes over training data when doing finetuning; No finetuning if set to 0.",
     )
     parser.add_argument(
         "--finetune_lr",
         type=float,
         default=1e-5,
-        help="global optimization learning rate",
+        help="Finetuning learning rate",
     )
     parser.add_argument(
         "--finetune_relative_mse_tolerance",
         type=float,
         default=None,
-        help="Stop fine-tuning (GO) when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)",
+        help="Stop finetuning when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)",
     )
-
     parser.add_argument(
         "--finetune_batch_size",
         type=int,
         default=1,
-        help="(fine-tuning only) train on batches of this many sequences, globally across all GPUs",
+        help="(finetuning only) train on batches of this many sequences, globally across all GPUs",
     )
+    parser.add_argument(
+        "--finetune_adam_beta1",
+        type=float,
+        default=0.9,
+        help="Finetuning adam_beta1",
+    )
+    parser.add_argument(
+        "--finetune_adam_beta2",
+        type=float,
+        default=0.95,
+        help="Finetuning adam_beta2",
+    )
+    parser.add_argument("--finetune_keep_best", action="store_true")
     parser.add_argument(
         "--local_batch_size",
         type=int,
         default=None,
-        help="(fine-tuning only) Per-device and per-forward-pass batch size used to accumulate global --batch_size",
+        help="(finetuning only) Per-device and per-forward-pass batch size used to accumulate global --batch_size",
     )
     parser.add_argument(
         "--print_frequency",
@@ -682,7 +689,6 @@ if __name__ == "__main__":
         default=10,
         help="Print Adam progress after each print_frequency updates",
     )
-
     parser.add_argument("--wandb", action="store_true", help="Whether to use wandb or store locally.")
     parser.add_argument(
         "--no_quant",

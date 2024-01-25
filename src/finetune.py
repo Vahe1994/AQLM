@@ -3,6 +3,7 @@ from __future__ import annotations
 import warnings
 from argparse import Namespace
 from collections import defaultdict
+from copy import deepcopy
 from typing import Any, Dict, Iterator, List, Sequence, Tuple
 
 import torch
@@ -63,7 +64,13 @@ def finetune_groupwise(
         replacement_tables = _make_parameter_replacement_tables(layer, replicas, param_names, differentiable_parameters)
 
     print(f"Fine-tuning {sum(param.numel() for param in differentiable_parameters)} parameters")
-    opt = torch.optim.Adam(differentiable_parameters, lr=args.finetune_lr, betas=(0.9, 0.95), amsgrad=True)
+    opt = torch.optim.Adam(
+        differentiable_parameters, lr=args.finetune_lr, betas=(args.finetune_adam_beta1, args.finetune_adam_beta2)
+    )
+
+    # backup best parameters
+    if args.finetune_keep_best:
+        best_parameters = deepcopy(differentiable_parameters)
 
     assert args.finetune_batch_size % len(args.devices) == 0, "batch_size must be divisible by the number of GPUs"
 
@@ -122,6 +129,11 @@ def finetune_groupwise(
 
         if args.finetune_relative_mse_tolerance is not None:
             epoch_loss = loss_numerator / loss_denominator
+            if args.finetune_keep_best:
+                if epoch_loss / previous_best_loss < 1.0:
+                    best_parameters = deepcopy(differentiable_parameters)
+                else:
+                    differentiable_parameters = best_parameters
             if epoch_loss / previous_best_loss > (1.0 - args.finetune_relative_mse_tolerance):
                 return layer  # early stopping; no updates after last epoch's beam search
             previous_best_loss = min(epoch_loss, previous_best_loss)
