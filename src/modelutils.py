@@ -150,13 +150,19 @@ def read_quant_weight_from_file(load_path, block_i, layer_name, device):
     return torch.load(load_path + "/" + str(block_i) + "/" + layer_name, map_location=device)
 
 
-def load_linear_layers(layer, quant_layer):
+def load_linear_layers(layer, quant_layer,model):
     for submodule in layer.modules():
         for child_name, child_module in submodule.named_children():
             if isinstance(child_module, (nn.Conv2d, nn.Linear)) or "norm" in child_name:
                 for quant_submodule in quant_layer.modules():
                     for quant_child_name, quant_child_module in quant_submodule.named_children():
                         if quant_child_name == child_name:
+                            if (".gate" in child_name.lower()) and ("mixtral" in model.config.model_type.lower()):
+                                print("gate", child_name)
+                                child_module.weight.data = quant_child_module.weight.data.to(
+                                    child_module.weight.dtype
+                                ).to(child_module.weight.device)
+                                continue
                             if "norm" in child_name and not isinstance(child_module, (nn.Conv2d, nn.Linear)):
                                 print("norm", child_name)
                                 child_module.weight.data = quant_child_module.weight.data.to(
@@ -180,7 +186,7 @@ def load_dequantized_model(model, load_path):
         print("layer", layer_index)
         layer = layers[layer_index]
         quant_layer = torch.load(os.path.join(load_path, str(layer_index) + ".pth"), map_location="cpu")
-        layers[layer_index] = load_linear_layers(layer, quant_layer)
+        layers[layer_index] = load_linear_layers(layer, quant_layer,model)
     model.load_state_dict(torch.load(load_path + "/not_quantized_weights.pt"), strict=False)
     return model
 
