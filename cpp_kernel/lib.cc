@@ -59,12 +59,8 @@ void triple_for_specific(
     int *n_threads
 )
 {
-    #pragma GCC ivdep
     for (int j = 0; j < num_input_groups; ++j) {
-        #pragma GCC ivdep
         for (int i = 0; i < 8192; ++i) {
-            #pragma GCC unroll 4
-            #pragma GCC ivdep
             for (int c = 0; c < 4; ++c) {
                 output_vec[i] += lut[
                     j * 4 * 256 + 
