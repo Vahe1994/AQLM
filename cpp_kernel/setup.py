@@ -20,7 +20,7 @@ except AttributeError:
 ext = Extension("_bindings",
                 ["lib.i", "lib.cc"],
                 include_dirs=[numpy_include],
-                extra_compile_args=["-fopenmp", "-ffast-math", "-Ofast", "-march=native"],
+                extra_compile_args=["-fopenmp", "-funroll-loops", "-O3", "-mfpmath=sse", "-march=native"],
                 extra_link_args=['-lgomp'],
                 swig_opts=['-threads']
                 )
