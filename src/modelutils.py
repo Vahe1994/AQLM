@@ -194,5 +194,5 @@ def load_quantized_model(model, load_path):
             os.path.join(load_path, str(layer_index) + ".pth"),
             map_location=model.model.layers[layer_index].input_layernorm.weight.device,
         )
-    model.load_state_dict(torch.load(os.path.join(load_path, "/not_quantized_weights.pt")), strict=False)
+    model.load_state_dict(torch.load(load_path + "/not_quantized_weights.pt"), strict=False)
     return model
