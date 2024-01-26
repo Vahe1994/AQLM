@@ -11,7 +11,7 @@ sys.path.append("./lm-evaluation-harness")
 import lm_eval.models
 from lm_eval import evaluator, tasks, utils
 
-from src.modelutils import load_dequantized_model
+from src.modelutils import load_quantized_model
 
 try:
     import wandb
@@ -115,7 +115,7 @@ def main():
 
     if args.load:
         print("Loading quantized model ...")
-        lm.model = load_dequantized_model(lm.model, args.load)
+        lm.model = load_quantized_model(lm.model, args.load)
         lm.model.seqlen = args.model_seqlen
 
     results = evaluator.simple_evaluate(
