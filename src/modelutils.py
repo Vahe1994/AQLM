@@ -157,7 +157,7 @@ def load_linear_layers(layer, quant_layer,model):
                 for quant_submodule in quant_layer.modules():
                     for quant_child_name, quant_child_module in quant_submodule.named_children():
                         if quant_child_name == child_name:
-                            if (".gate" in child_name.lower()) and ("mixtral" in model.config.model_type.lower()):
+                            if ("gate" in child_name.lower()) and ("mixtral" in model.config.model_type.lower()):
                                 print("gate", child_name)
                                 child_module.weight.data = quant_child_module.weight.data.to(
                                     child_module.weight.dtype
