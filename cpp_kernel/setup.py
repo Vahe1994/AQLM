@@ -8,7 +8,8 @@ from distutils      import sysconfig
 import numpy
 import os
 
-os.environ['CC'] = 'g++ -std=c++11'
+os.environ['CC'] = 'icpx'
+os.environ['CXX'] = 'icpx'
 
 # Obtain the numpy include directory.  This logic works across numpy versions.
 try:
@@ -20,9 +21,7 @@ except AttributeError:
 ext = Extension("_bindings",
                 ["lib.i", "lib.cc"],
                 include_dirs=[numpy_include],
-                extra_compile_args=["-fopenmp", "-funroll-loops", "-O3", "-mfpmath=sse", "-march=native"],
-                extra_link_args=['-lgomp'],
-                swig_opts=['-threads']
+                extra_compile_args=["-Ofast", "-mavx", "-fprofile-ml-use", "-march=native", "-xHost"],
                 )
 
 # setup
