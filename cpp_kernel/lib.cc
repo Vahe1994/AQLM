@@ -24,7 +24,7 @@ void triple_for(
     int *n_threads
 )
 {
-    if (8192 == out_features && 4 == num_codebooks && codebook_size == 256) {
+    if (8192 == out_features && 4 == num_codebooks && codebook_size == 256 && num_input_groups == 512) {
         triple_for_specific(
             num_input_groups, num_codebooks, codebook_size, lut,
             num_input_groups_again, out_features, num_codebooks_again, b_alt,
@@ -59,7 +59,7 @@ void triple_for_specific(
     int *n_threads
 )
 {
-    for (int j = 0; j < num_input_groups; ++j) {
+    for (int j = 0; j < 512; ++j) {
         for (int i = 0; i < 8192; ++i) {
             for (int c = 0; c < 4; ++c) {
                 output_vec[i] += lut[
@@ -68,7 +68,7 @@ void triple_for_specific(
                     b_alt[
                         j * 4 * 8192 + 
                         i * 4 + 
-                        i
+                        c
                     ]
                 ];
             }

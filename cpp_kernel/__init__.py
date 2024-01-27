@@ -49,7 +49,7 @@ def triple_for(lut, b_alt, n_jobs=None):
     assert lut.dtype == np.float32
     assert b_alt.dtype == np.uint8
         
-    out_features = b_alt.shape[-1]
+    out_features = b_alt.shape[-2]
     output_vec = np.zeros(out_features, dtype=np.float32)
     _bindings.triple_for(
         lut, b_alt, output_vec, n_jobs
