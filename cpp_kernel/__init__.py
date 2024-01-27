@@ -28,18 +28,6 @@ if True or not os.path.exists(osp.join(package_abspath, "_bindings.so")):
 from . import _bindings
 
 
-def sum(A, B):
-    assert A.shape == B.shape
-    assert A.dtype == np.float32 and B.dtype == np.float32
-    result = np.empty_like(A)
-    
-    _bindings.sum(
-        A, B, result, 32
-    )
-    
-    return result
-
-
 def triple_for(lut, b_alt, n_jobs=None):
     n_jobs = n_jobs or cpu_count()
     if n_jobs < 0:
