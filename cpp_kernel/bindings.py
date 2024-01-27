@@ -59,9 +59,6 @@ class _SwigNonDynamicMeta(type):
 
 
 
-def sum(size_A, size_B, size_result, n_threads):
-    return _bindings.sum(size_A, size_B, size_result, n_threads)
-
 def triple_for(num_input_groups, num_input_groups_again, output_vec_size, n_threads):
     return _bindings.triple_for(num_input_groups, num_input_groups_again, output_vec_size, n_threads)
 

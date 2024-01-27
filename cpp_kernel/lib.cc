@@ -3,20 +3,6 @@
 #include "lib.h"
 
 
-void sum(
-    int size_A, float* A,
-    int size_B, float* B,
-    int size_result, float* result,
-    int *n_threads
-)
-{
-    #pragma omp parallel for num_threads(*n_threads)
-    for(int i=0; i < size_A; i++){
-        result[i] = A[i] + B[i];
-    }
-}
-
-
 void triple_for(
     int num_input_groups, int num_codebooks, int codebook_size, float* lut,
     int num_input_groups_again, int out_features, int num_codebooks_again, uint8_t* b_alt,
@@ -33,7 +19,6 @@ void triple_for(
         );
         return;
     }
-    throw std::overflow_error("AAA");
     
     for (int j = 0; j < num_input_groups; ++j) {
         for (int i = 0; i < out_features; ++i) {
