@@ -103,21 +103,3 @@ def iterate_minibatches(
             prev_batch = batch if isinstance(batch, (list, tuple)) and len(tensors) > 1 else batch[0]
             del batch
         yield prev_batch
-
-
-def get_int_dtype(nbits: int) -> torch.dtype:
-    if nbits <= 8:
-        return torch.int8
-    if nbits <= 16:
-        return torch.int16
-    if nbits <= 32:
-        return torch.int32
-    if nbits <= 64:
-        return torch.int64
-    raise ValueError(f"No dtype available for {nbits}-bit codebooks")
-
-
-@torch.inference_mode()
-def pack_int_data(data: torch.IntTensor, nbits: int) -> torch.IntTensor:
-    data[data >= 2 ** (nbits - 1)] -= 2**nbits
-    return data.to(get_int_dtype(nbits))
