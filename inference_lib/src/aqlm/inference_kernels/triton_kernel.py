@@ -127,7 +127,6 @@ def aqlm_gemv_simple(
     bias: Optional[torch.Tensor],
     compute_in_fp32: bool = True,
 ):
-
     device, dtype = codebooks.device, codebooks.dtype
     num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
     in_features = input_vec.shape[1]
