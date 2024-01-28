@@ -1,0 +1,2 @@
+include src/aqlm/cuda/*.cpp
+include src/aqlm/cuda/*.cu
