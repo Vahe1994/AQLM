@@ -25,6 +25,7 @@ from typing import List, Optional, Tuple, Union
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
+from aqlm import QuantizedLinear
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers.activations import ACT2FN
@@ -53,7 +54,6 @@ from transformers.utils import (
 from transformers.utils.import_utils import is_torch_fx_available
 
 from .configuration_llama_aqlm import LlamaConfig
-from .inference import FinalizedQuantizedLinear
 
 if is_flash_attn_2_available():
     from flash_attn import flash_attn_func, flash_attn_varlen_func
@@ -246,9 +246,9 @@ class LlamaMLP(nn.Module):
         self.config = config
         self.hidden_size = config.hidden_size
         self.intermediate_size = config.intermediate_size
-        self.gate_proj = FinalizedQuantizedLinear(self.hidden_size, self.intermediate_size, bias=False, **config.aqlm)
-        self.up_proj = FinalizedQuantizedLinear(self.hidden_size, self.intermediate_size, bias=False, **config.aqlm)
-        self.down_proj = FinalizedQuantizedLinear(self.intermediate_size, self.hidden_size, bias=False, **config.aqlm)
+        self.gate_proj = QuantizedLinear(self.hidden_size, self.intermediate_size, bias=False, **config.aqlm)
+        self.up_proj = QuantizedLinear(self.hidden_size, self.intermediate_size, bias=False, **config.aqlm)
+        self.down_proj = QuantizedLinear(self.intermediate_size, self.hidden_size, bias=False, **config.aqlm)
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, x):
@@ -314,16 +314,16 @@ class LlamaAttention(nn.Module):
                 f" and `num_heads`: {self.num_heads})."
             )
 
-        self.q_proj = FinalizedQuantizedLinear(
+        self.q_proj = QuantizedLinear(
             self.hidden_size, self.num_heads * self.head_dim, bias=config.attention_bias, **config.aqlm
         )
-        self.k_proj = FinalizedQuantizedLinear(
+        self.k_proj = QuantizedLinear(
             self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias, **config.aqlm
         )
-        self.v_proj = FinalizedQuantizedLinear(
+        self.v_proj = QuantizedLinear(
             self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias, **config.aqlm
         )
-        self.o_proj = FinalizedQuantizedLinear(
+        self.o_proj = QuantizedLinear(
             self.num_heads * self.head_dim, self.hidden_size, bias=config.attention_bias, **config.aqlm
         )
         self._init_rope()
