@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from tqdm import trange
 from tqdm.auto import trange
+from transformers import PreTrainedModel
 
 from aq_engine import AQEngine
 from src.aq import QuantizedLinear
@@ -22,9 +23,7 @@ from src.modelutils import (
     get_model_head,
     get_sequential_groups,
 )
-from src.saving import save_fresh_model
 from src.utils import using_tf32
-from transformers import PreTrainedModel
 
 try:
     import wandb
@@ -161,7 +160,6 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
     model.config.use_cache = False
 
     quantizers = {}
-    replaced_linears = []  #  [(submodule, child_name, new_linear), ...]
     overall_bits = 0
     model_number_of_params = 0
     layers = get_layers(model)
@@ -206,7 +204,6 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                         for child_name, child_module in submodule.named_children():
                             if child_module is aq_handlers[sublayer_name].layer:
                                 setattr(submodule, child_name, new_linear)
-                                replaced_linears.append((submodule, child_name, new_linear))
                                 found_original = True  # note: do not break to handle tied layers
 
                     assert found_original, f"could not find {sublayer_name}"
@@ -224,6 +221,11 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                 layer = finetune_groupwise(layer=layer, inps=inps, outs=outs, args=args, **forward_args)
             layer = layer.to(dtype=layer_dtype_original)
             print("FINISHED FINETUNING")
+        if args.save:
+            os.makedirs(args.save, exist_ok=True)
+            layer_save_path = os.path.join(args.save, f"{layer_index}.pth")
+            print(f"Saving layer {layer_index}... to {layer_save_path}")
+            torch.save(layer, layer_save_path)
 
         if len(args.devices) == 1:
             assert len(inps) == len(outs) == 1
@@ -251,7 +253,15 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
 
     print("=====================\nFinal stats:")
     if args.save:
-        save_fresh_model(model, replaced_linears, args)
+        torch.save(vars(args), args.save + "/args.pt")
+        already_saved_weights = set()
+        for layer in get_layers(model):
+            for param in layer.parameters():
+                already_saved_weights.add(param)
+        not_quantized_weights = {
+            name: param for name, param in model.named_parameters() if param not in already_saved_weights
+        }
+        torch.save(not_quantized_weights, args.save + "/not_quantized_weights.pt")
 
     if args.wandb:
         wandb.log({"max_cuda_mem_quantize": round(torch.cuda.max_memory_allocated() / 1e9, 2)})
@@ -504,7 +514,6 @@ if __name__ == "__main__":
         "--model_seqlen",
         type=int,
         default=4096,
-        choices=[2048, 4096],
         help="Model seqlen and calibration data context length.",
     )
     parser.add_argument("--load", type=str, default=None, help="Path to load quantized statistics.")
@@ -539,7 +548,6 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to run in true sequential model.",
     )
-
     parser.add_argument(
         "--num_codebooks",
         type=int,
@@ -564,7 +572,6 @@ if __name__ == "__main__":
         default=8,
         help="How many input features are quantized together",
     )
-
     parser.add_argument(
         "--scale_nbits",
         type=int,
@@ -603,7 +610,6 @@ if __name__ == "__main__":
         default=None,
         help="During K-means initialzation, sample (this_many * 2 ^ nbits_per_codebook) points for training K-means",
     )
-
     parser.add_argument(
         "--lr",
         type=float,
@@ -616,7 +622,6 @@ if __name__ == "__main__":
         default=1,
         help="Keep top-(this_many) best candidates for each codebook when finding optimal codes",
     )
-
     parser.add_argument(
         "--max_epochs",
         type=int,
@@ -639,32 +644,44 @@ if __name__ == "__main__":
         "--finetune_max_epochs",
         type=int,
         default=1000,
-        help="Run this many passes over training data when doing global optimization; no means skip GO",
+        help="Run this many passes over training data when doing finetuning; No finetuning if set to 0.",
     )
     parser.add_argument(
         "--finetune_lr",
         type=float,
         default=1e-5,
-        help="global optimization learning rate",
+        help="Finetuning learning rate",
     )
     parser.add_argument(
         "--finetune_relative_mse_tolerance",
         type=float,
         default=None,
-        help="Stop fine-tuning (GO) when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)",
+        help="Stop finetuning when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)",
     )
-
     parser.add_argument(
         "--finetune_batch_size",
         type=int,
         default=1,
-        help="(fine-tuning only) train on batches of this many sequences, globally across all GPUs",
+        help="(finetuning only) train on batches of this many sequences, globally across all GPUs",
     )
+    parser.add_argument(
+        "--finetune_adam_beta1",
+        type=float,
+        default=0.9,
+        help="Finetuning adam_beta1",
+    )
+    parser.add_argument(
+        "--finetune_adam_beta2",
+        type=float,
+        default=0.95,
+        help="Finetuning adam_beta2",
+    )
+    parser.add_argument("--finetune_keep_best", action="store_true")
     parser.add_argument(
         "--local_batch_size",
         type=int,
         default=None,
-        help="(fine-tuning only) Per-device and per-forward-pass batch size used to accumulate global --batch_size",
+        help="(finetuning only) Per-device and per-forward-pass batch size used to accumulate global --batch_size",
     )
     parser.add_argument(
         "--print_frequency",
@@ -672,7 +689,6 @@ if __name__ == "__main__":
         default=10,
         help="Print Adam progress after each print_frequency updates",
     )
-
     parser.add_argument("--wandb", action="store_true", help="Whether to use wandb or store locally.")
     parser.add_argument(
         "--no_quant",
