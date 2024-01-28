@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from tqdm import trange
 from tqdm.auto import trange
+from transformers import PreTrainedModel
 
 from aq_engine import AQEngine
 from src.aq import QuantizedLinear
@@ -22,9 +23,7 @@ from src.modelutils import (
     get_model_head,
     get_sequential_groups,
 )
-from src.saving import save_fresh_model
 from src.utils import using_tf32
-from transformers import PreTrainedModel
 
 try:
     import wandb
@@ -161,7 +160,6 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
     model.config.use_cache = False
 
     quantizers = {}
-    replaced_linears = []  #  [(submodule, child_name, new_linear), ...]
     overall_bits = 0
     model_number_of_params = 0
     layers = get_layers(model)
@@ -206,7 +204,6 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                         for child_name, child_module in submodule.named_children():
                             if child_module is aq_handlers[sublayer_name].layer:
                                 setattr(submodule, child_name, new_linear)
-                                replaced_linears.append((submodule, child_name, new_linear))
                                 found_original = True  # note: do not break to handle tied layers
 
                     assert found_original, f"could not find {sublayer_name}"
@@ -224,6 +221,11 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                 layer = finetune_groupwise(layer=layer, inps=inps, outs=outs, args=args, **forward_args)
             layer = layer.to(dtype=layer_dtype_original)
             print("FINISHED FINETUNING")
+        if args.save:
+            os.makedirs(args.save, exist_ok=True)
+            layer_save_path = os.path.join(args.save, f"{layer_index}.pth")
+            print(f"Saving layer {layer_index}... to {layer_save_path}")
+            torch.save(layer, layer_save_path)
 
         if len(args.devices) == 1:
             assert len(inps) == len(outs) == 1
@@ -251,7 +253,15 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
 
     print("=====================\nFinal stats:")
     if args.save:
-        save_fresh_model(model, replaced_linears, args)
+        torch.save(vars(args), args.save + "/args.pt")
+        already_saved_weights = set()
+        for layer in get_layers(model):
+            for param in layer.parameters():
+                already_saved_weights.add(param)
+        not_quantized_weights = {
+            name: param for name, param in model.named_parameters() if param not in already_saved_weights
+        }
+        torch.save(not_quantized_weights, args.save + "/not_quantized_weights.pt")
 
     if args.wandb:
         wandb.log({"max_cuda_mem_quantize": round(torch.cuda.max_memory_allocated() / 1e9, 2)})
