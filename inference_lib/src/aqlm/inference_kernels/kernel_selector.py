@@ -4,8 +4,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.inference_kernels.triton_kernel import triton_matmul
-from src.utils import _dequantize_weight, unpack_int_data
+from aqlm.utils import _dequantize_weight, unpack_int_data
+
+from .triton_kernel import triton_matmul
 
 
 def forward_pass_quantized_linear(
