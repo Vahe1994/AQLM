@@ -1,16 +1,12 @@
 """ Core mathematics for Additive Quantization (AQ): initialization, reconstruction and beam search"""
-import random
-from typing import List, Optional, Tuple, Union
-
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-from src.inference_kernels.kernel_selector import forward_pass_quantized_linear
-from src.utils import _dequantize_weight, ellipsis, get_int_dtype, unpack_int_data
+from aqlm.inference_kernels import forward_pass_quantized_linear
+from aqlm.utils import get_int_dtype
 
 
-class FinalizedQuantizedLinear(nn.Module):
+class QuantizedLinear(nn.Module):
     def __init__(
         self,
         in_features: int,
