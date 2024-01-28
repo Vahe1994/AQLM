@@ -47,7 +47,7 @@ class QuantizedLinear(nn.Module):
         # SCALES
         self.scales = nn.Parameter(
             torch.empty((num_out_groups, 1, 1, 1), **factory_kwargs), requires_grad=True
-        )  #  [num_out_groups, num_in_groups, 1, 1] if scale_nbits > 0 else [num_out_groups, 1, 1, 1]
+        )  #  [num_out_groups, 1, 1, 1]
 
         # BIAS
         if bias:

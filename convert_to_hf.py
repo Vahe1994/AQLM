@@ -35,13 +35,15 @@ def get_converted_state_dict(config, nbits: int, in_path: os.PathLike) -> dict:
     for i in trange(num_layers):
         layer = torch.load(os.path.join(in_path, f"{i}.pth"))
         for name, p in layer.named_parameters():
-            if not torch.is_floating_point(p.data):
+            if torch.is_floating_point(p.data):
+                p.data = p.data.half()
+            else:
                 p.data = pack_int_data(p.data, nbits)
             name = re.sub("quantized_weight.", "", name)
             state_dict[f"{layers_prefix}.{i}.{name}"] = p.data
 
     for key, value in torch.load(os.path.join(in_path, "not_quantized_weights.pt")).items():
-        state_dict[key] = value
+        state_dict[key] = value.half()
 
     return state_dict
 
