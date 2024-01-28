@@ -156,19 +156,19 @@ def load_linear_layers(layer, quant_layer, model):
         for child_name, child_module in submodule.named_children():
             print(child_name, "child_name", mixtral_layer_ident)
             if isinstance(child_module, (nn.Conv2d, nn.Linear)) or "norm" in child_name:
-                if child_module in mixtral_layer_ident:
-                    mixtral_layer_ident[child_module] += 1
+                if child_name in mixtral_layer_ident:
+                    mixtral_layer_ident[child_name] += 1
                 else:
-                    mixtral_layer_ident[child_module] = 1
+                    mixtral_layer_ident[child_name] = 1
                 quant_count = 0
                 print("Finding to dequantize ", child_module)
                 for quant_submodule in quant_layer.modules():
                     for quant_child_name, quant_child_module in quant_submodule.named_children():
                         if quant_child_name == child_name:
                             quant_count += 1
-                            if quant_count != mixtral_layer_ident[child_module]:
+                            if quant_count != mixtral_layer_ident[child_name]:
                                 continue
-                            print(child_module, quant_count)
+                            print(child_name, quant_count)
                             if ("gate" in child_name.lower()) and ("mixtral" in model.config.model_type.lower()):
                                 print("gate", child_name)
                                 child_module.weight.data = quant_child_module.weight.data.to(
