@@ -169,6 +169,9 @@ def load_linear_layers(layer, quant_layer, model):
                             if quant_count != mixtral_layer_ident[child_name]:
                                 continue
                             print(child_name, quant_count)
+                            print(child_name, child_module)
+                            print(quant_child_name, quant_child_module)
+
                             if ("gate" in child_name.lower()) and ("mixtral" in model.config.model_type.lower()):
                                 print("gate", child_name)
                                 child_module.weight.data = quant_child_module.weight.data.to(
