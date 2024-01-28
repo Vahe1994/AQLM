@@ -161,7 +161,7 @@ def load_linear_layers(layer, quant_layer, model):
                 else:
                     mixtral_layer_ident[child_name] = 1
                 quant_count = 0
-                print("Finding to dequantize ", child_module)
+                print("Finding to dequantize ", child_name)
                 for quant_submodule in quant_layer.modules():
                     for quant_child_name, quant_child_module in quant_submodule.named_children():
                         if quant_child_name == child_name:
