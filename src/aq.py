@@ -5,11 +5,11 @@ from typing import List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 from tqdm.auto import trange
 
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
 from src.utils import ellipsis, maybe_script
-from torch.utils.checkpoint import  checkpoint
 
 
 class QuantizedLinear(nn.Module):
@@ -23,9 +23,12 @@ class QuantizedLinear(nn.Module):
     def _forward(self, input: torch.Tensor):
         # TODO[aqlm] this can be optimized! maybe integrate with QuantizedLinear?
         return F.linear(input, self.quantized_weight(), self.bias)
+
     def forward(self, input: torch.Tensor):
         if self.use_checkpoint and torch.is_grad_enabled():
-            return checkpoint(self._forward, input, use_reentrant=False, preserve_rng_state=False, determinism_check="none")
+            return checkpoint(
+                self._forward, input, use_reentrant=False, preserve_rng_state=False, determinism_check="none"
+            )
         return self._forward(input)
 
 

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import warnings
 from argparse import Namespace
-from copy import deepcopy
 from collections import defaultdict
+from copy import deepcopy
 from typing import Any, Dict, Iterator, List, Sequence, Tuple
 
 import torch
@@ -16,23 +16,13 @@ from src.utils import iterate_minibatches
 
 
 def _create_optimizer(params: Sequence[torch.Tensor], args) -> torch.optim.Optimizer:
-    if args.finetune_optimizer == 'sgd':
-        return torch.optim.SGD(
-            params,
-            lr=args.finetune_lr, 
-            momentum=(args.finetune_momentum)
-        )
-    if args.finetune_optimizer == 'adam':
-        return torch.optim.Adam(
-            params, 
-            lr=args.finetune_lr, 
-            betas=(args.finetune_adam_beta1, args.finetune_adam_beta2)
-        )
-    elif args.finetune_optimizer == 'adamax':
+    if args.finetune_optimizer == "sgd":
+        return torch.optim.SGD(params, lr=args.finetune_lr, momentum=(args.finetune_momentum))
+    if args.finetune_optimizer == "adam":
+        return torch.optim.Adam(params, lr=args.finetune_lr, betas=(args.finetune_adam_beta1, args.finetune_adam_beta2))
+    elif args.finetune_optimizer == "adamax":
         return torch.optim.Adamax(
-            params, 
-            lr=args.finetune_lr, 
-            betas=(args.finetune_adam_beta1, args.finetune_adam_beta2)
+            params, lr=args.finetune_lr, betas=(args.finetune_adam_beta1, args.finetune_adam_beta2)
         )
     else:
         raise ValueError("Unknown optimizer")

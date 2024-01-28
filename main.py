@@ -185,23 +185,40 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             if len(args.devices) == 1:
                 assert len(inps) == len(outs) == 1  # number of per-device inputs/outputs
                 aq_handlers = init_aq_engines(
-                    layer, [name for name in names if ((".gate" not in name.lower()) or ("mixtral" not in model.config.model_type.lower()))], inps[0], outs[0], **forward_args
+                    layer,
+                    [
+                        name
+                        for name in names
+                        if ((".gate" not in name.lower()) or ("mixtral" not in model.config.model_type.lower()))
+                    ],
+                    inps[0],
+                    outs[0],
+                    **forward_args,
                 )
             else:
                 aq_handlers = init_aq_engines_parallel(
-                    args.devices, layer, [name for name in names if ((".gate" not in name.lower()) or ("mixtral" not in model.config.model_type.lower()))], inps, outs, **forward_args
+                    args.devices,
+                    layer,
+                    [
+                        name
+                        for name in names
+                        if ((".gate" not in name.lower()) or ("mixtral" not in model.config.model_type.lower()))
+                    ],
+                    inps,
+                    outs,
+                    **forward_args,
                 )
 
             for sublayer_name in aq_handlers.keys():
                 print(f"Quantizing module {sublayer_name} of layer {layer_index}")
                 if "mixtral" in model.config.model_type.lower() and args.mix_compression:
                     print("mix_compression")
-                    assert args.nbits_per_codebook==16
+                    assert args.nbits_per_codebook == 16
                     if "self_attn" in sublayer_name.lower():
-                        args.num_codebooks=2
+                        args.num_codebooks = 2
                     else:
-                        args.num_codebooks=1
-                    print(sublayer_name.lower()," num codebooks",args.num_codebooks)
+                        args.num_codebooks = 1
+                    print(sublayer_name.lower(), " num codebooks", args.num_codebooks)
                 quantized_weight = aq_handlers[sublayer_name].quantize(args=args, verbose=True)
 
                 with torch.no_grad():
@@ -712,10 +729,7 @@ if __name__ == "__main__":
         default=0.95,
         help="Finetuning adam_beta2",
     )
-    parser.add_argument(
-        "--finetune_keep_best",
-        action="store_true"
-    )
+    parser.add_argument("--finetune_keep_best", action="store_true")
     parser.add_argument(
         "--local_batch_size",
         type=int,
