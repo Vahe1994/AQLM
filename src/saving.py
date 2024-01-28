@@ -48,7 +48,6 @@ def update_config(old_config: PretrainedConfig, aqlm_metadata: dict[str, int]):
 
 
 def add_inference_code(model_type: str, save_path: os.PathLike):
-    shutil.copytree(f"./transformers/common", save_path, dirs_exist_ok=True)
     if os.path.isdir(f"./transformers/{model_type}"):
         shutil.copytree(f"./transformers/{model_type}", save_path, dirs_exist_ok=True)
     else:
