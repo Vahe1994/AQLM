@@ -151,12 +151,17 @@ def read_quant_weight_from_file(load_path, block_i, layer_name, device):
 
 
 def load_linear_layers(layer, quant_layer,model):
+    mixtral_layer_ident = 0 #TODO Please do correct in the main code
     for submodule in layer.modules():
         for child_name, child_module in submodule.named_children():
+            mixtral_layer_ident += 1
             if isinstance(child_module, (nn.Conv2d, nn.Linear)) or "norm" in child_name:
+                mixtral_quant_layer_ident=0
                 for quant_submodule in quant_layer.modules():
                     for quant_child_name, quant_child_module in quant_submodule.named_children():
-                        if quant_child_name == child_name:
+                        mixtral_quant_layer_ident+=1
+                        if quant_child_name == child_name and mixtral_quant_layer_ident == mixtral_layer_ident:
+                            print(child_name,mixtral_layer_ident)
                             if ("gate" in child_name.lower()) and ("mixtral" in model.config.model_type.lower()):
                                 print("gate", child_name)
                                 child_module.weight.data = quant_child_module.weight.data.to(
