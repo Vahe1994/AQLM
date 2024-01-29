@@ -1,7 +1,7 @@
 import time
 import torch
 
-import codebook_cuda
+from aqlm.cuda.cuda_kernel import CUDA_KERNEL
 
 def benchmark(f, warmup=1, iter=10):
     for i in range(warmup + iter):
@@ -56,10 +56,10 @@ for model, layers in MODELS.items():
         C = torch.zeros((M, 1), dtype=torch.half, device=DEV)
 
         C_ref = torch.matmul(A_ref, B)
-        codebook_cuda.code16_matvec(A, B, C, codebook)
+        CUDA_KERNEL.code16_matvec(A, B, C, codebook)
         print(torch.mean(torch.abs(C - C_ref)) / torch.mean(torch.abs(C_ref)))
 
         dense += benchmark(lambda: torch.matmul(A_ref, B, out=C))
-        quant += benchmark(lambda: codebook_cuda.code16_matvec(A, B, C, codebook))
+        quant += benchmark(lambda: CUDA_KERNEL.code16_matvec(A, B, C, codebook))
     print(model, dense / quant)
 
