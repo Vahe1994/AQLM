@@ -50,16 +50,18 @@ for model, layers in MODELS.items():
     quant = 0
     for K, M in layers:
         A = torch.randint(2 ** 16, (M, K // 8), dtype=torch.int, device=DEV)
+        # A_ref = torch.vstack([(codebook[A[i] & 0xff] + codebook[256 + (A[i] >> 8)]).flatten().unsqueeze(0) for i in range(M)])
         A_ref = torch.vstack([codebook[A[i]].flatten().unsqueeze(0) for i in range(M)])
         A = A.to(torch.int16)
         B = torch.randn((K, 1), dtype=torch.half, device=DEV)
         C = torch.zeros((M, 1), dtype=torch.half, device=DEV)
 
         C_ref = torch.matmul(A_ref, B)
-        CUDA_KERNEL.code16_matvec(A, B, C, codebook)
+        CUDA_KERNEL.code1x16_matvec(A, B, C, codebook)
         print(torch.mean(torch.abs(C - C_ref)) / torch.mean(torch.abs(C_ref)))
 
         dense += benchmark(lambda: torch.matmul(A_ref, B, out=C))
-        quant += benchmark(lambda: CUDA_KERNEL.code16_matvec(A, B, C, codebook))
+        quant += benchmark(lambda: CUDA_KERNEL.code1x16_matvec(A, B, C, codebook))
+        # quant += benchmark(lambda: codebook_cuda.code2x8_matvec(A, B, C, codebook))
     print(model, dense / quant)
 

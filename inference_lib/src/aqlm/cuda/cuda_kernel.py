@@ -32,7 +32,7 @@ def cuda_gemm_stupid(
 
     output = torch.zeros(input.shape[0], out_features, device=device, dtype=dtype)
     for i in range(input.shape[0]):
-        CUDA_KERNEL.code16_matvec(
+        CUDA_KERNEL.code1x16_matvec(
             codes.squeeze(2), input[i].unsqueeze(-1), output[i].unsqueeze(-1), codebooks.squeeze(0, 2)
         )
     output *= scales.flatten().unsqueeze(0)
