@@ -16,20 +16,24 @@ def forward_pass_quantized_linear(
     bias: Optional[torch.Tensor],
 ) -> torch.Tensor:
     num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
-    if cuda_kernel_applicable(input.is_cuda, num_codebooks, codebook_size, out_group_size, in_group_size):
-        from aqlm.cuda.cuda_kernel import cuda_matmul
+    match (input.is_cuda, num_codebooks, codebook_size, out_group_size, in_group_size):
+        case (True, 1, 65536, 1, 8):
+            from aqlm.cuda.cuda_kernel import cuda_gemm_1x16
 
-        return cuda_matmul(input, codes, codebooks, scales, bias)
+            return cuda_gemm_1x16(input, codes, codebooks, scales, bias)
+        case (True, 2, 256, 1, 8):
+            from aqlm.cuda.cuda_kernel import cuda_gemm_2x8
 
-    if triton_kernel_applicable(input.is_cuda):
-        return triton_matmul(input, codes, codebooks, scales, bias)
-
-    dequantized_weight = _dequantize_weight(
-        unpack_int_data(codes, codebooks.shape[0].bit_length() - 1),
-        codebooks,
-        scales,
-    )
-    return F.linear(input, dequantized_weight, bias)
+            return cuda_gemm_2x8(input, codes, codebooks, scales, bias)
+        case (True, _, _, _, _):
+            return triton_matmul(input, codes, codebooks, scales, bias)
+        case _:
+            dequantized_weight = _dequantize_weight(
+                unpack_int_data(codes, codebooks.shape[0].bit_length() - 1),
+                codebooks,
+                scales,
+            )
+            return F.linear(input, dequantized_weight, bias)
 
 
 def cuda_kernel_applicable(

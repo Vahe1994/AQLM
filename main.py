@@ -8,7 +8,6 @@ import torch
 import torch.nn as nn
 from tqdm import trange
 from tqdm.auto import trange
-from transformers import PreTrainedModel
 
 from aq_engine import AQEngine
 from src.aq import QuantizedLinear
@@ -24,6 +23,7 @@ from src.modelutils import (
     get_sequential_groups,
 )
 from src.utils import using_tf32
+from transformers import PreTrainedModel
 
 try:
     import wandb
