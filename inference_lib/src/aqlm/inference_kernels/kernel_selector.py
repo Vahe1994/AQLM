@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from aqlm.utils import _dequantize_weight, unpack_int_data
 
+from .numba import numba_gemm_lut
 from .triton_kernel import triton_matmul
 
 
@@ -27,6 +28,8 @@ def forward_pass_quantized_linear(
             return cuda_gemm_2x8(input, codes, codebooks, scales, bias)
         case (True, _, _, _, _):
             return triton_matmul(input, codes, codebooks, scales, bias)
+        case (False, _, 256, 1, _):
+            return numba_gemm_lut(input, codes, codebooks, scales, bias)
         case _:
             dequantized_weight = _dequantize_weight(
                 unpack_int_data(codes, codebooks.shape[0].bit_length() - 1),
