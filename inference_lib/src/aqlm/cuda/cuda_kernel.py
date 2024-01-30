@@ -62,7 +62,7 @@ def cuda_gemm_2x8(
     assert scales.shape == (out_features // out_group_size, 1, 1, 1)
     assert in_features % in_group_size == 0
     assert codebook_size == 2**8
-    assert num_codebooks == 1
+    assert num_codebooks == 2
     assert codes.dtype == torch.int8
     assert input.dtype == torch.float16 and codebooks.dtype == torch.float16
 
