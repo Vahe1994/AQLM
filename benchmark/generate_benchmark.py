@@ -8,7 +8,6 @@ from tqdm import trange
 import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoConfig
-from transformers.modeling_utils import no_init_weights
 
 
 if __name__ == "__main__":
@@ -58,17 +57,27 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
 
-def make_shared_model(model, device='cuda'):
-    num_layers = len(model.model.layers)
-    layer = model.model.layers[0].to(device)
-    model.model.layers = nn.ModuleList([])
-    model = model.to(device)
-    for i in trange(num_layers, desc='Copying block parameters'):
+def load_model(model_name, device='cuda'):
+    return AutoModelForCausalLM.from_pretrained(
+        model_name,
+        trust_remote_code=True,
+        torch_dtype="auto",
+    ).to(device)
+
+
+def load_shared_model(model_name, device='cuda'):
+    config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+    num_layers = config.num_hidden_layers
+    config.num_hidden_layers = 1
+    model = AutoModelForCausalLM.from_config(config, trust_remote_code=True, torch_dtype=torch.float16).to(device)
+    layer = model.model.layers[0]
+    for i in trange(1, num_layers, desc='Copying block parameters'):
         new_layer = type(layer)(model.config, i).to(device)
         for new_layer_param, layer_param in zip(new_layer.parameters(), layer.parameters()):
             new_layer_param.data = layer_param.data
         new_layer.self_attn.layer_idx = i
         model.model.layers.append(new_layer)
+    return model
 
 
 if __name__ == "__main__":
@@ -78,17 +87,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(add_help=True)
 
     config = AutoConfig.from_pretrained(args.model, trust_remote_code=True)
-    with no_init_weights():
-        aqlm_model = AutoModelForCausalLM.from_config(
-            config,
-            trust_remote_code=True,
-            torch_dtype=torch.float16,
-        )
 
     if args.replicate_first_block:
-        make_shared_model(aqlm_model, device)
+        aqlm_model = load_shared_model(args.model, device)
     else: 
-        aqlm_model = aqlm_model.to(device)
+        aqlm_model = load_model(args.model, device)
 
     prompt = torch.randint(low=0, high=aqlm_model.config.vocab_size, size=(1, args.input_length), device=device)
 
