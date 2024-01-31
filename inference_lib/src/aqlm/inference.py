@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from aqlm.inference_kernels import forward_pass_quantized_linear
 from aqlm.utils import get_int_dtype
+from aqlm.cuda.cuda_kernel import CUDA_KERNEL
 
 
 class QuantizedLinear(nn.Module):
@@ -56,10 +57,10 @@ class QuantizedLinear(nn.Module):
             self.register_parameter("bias", None)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        if (
-            not input.is_cuda
-            and self.codebook_size == 256
-            and self.codes.shape[0] == self.out_features // self.out_group_size
-        ):
-            self.codes.data = torch.permute(self.codes.data, (1, 0, 2)).contiguous()  #  TODO: fix this thing
-        return forward_pass_quantized_linear(input, self.codes, self.codebooks, self.scales, self.bias)
+        # if (
+        #     not input.is_cuda
+        #     and self.codebook_size == 256
+        #     and self.codes.shape[0] == self.out_features // self.out_group_size
+        # ):
+        #     self.codes.data = torch.permute(self.codes.data, (1, 0, 2)).contiguous()  #  TODO: fix this thing
+        return CUDA_KERNEL.code1x16_matmat(input, self.codes.data, self.codebooks.data, self.scales.data)
