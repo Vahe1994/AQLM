@@ -7,7 +7,8 @@ from tqdm import trange
 
 import torch
 import torch.nn as nn
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoConfig
+from transformers.modeling_utils import no_init_weights
 
 
 if __name__ == "__main__":
@@ -76,12 +77,13 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(add_help=True)
 
-    aqlm_model = AutoModelForCausalLM.from_pretrained(
-        args.model, 
-        trust_remote_code=True, 
-        torch_dtype="auto",
-        low_cpu_mem_usage=args.low_cpu_mem_usage
-    )
+    config = AutoConfig.from_pretrained(args.model, trust_remote_code=True)
+    with no_init_weights():
+        aqlm_model = AutoModelForCausalLM.from_config(
+            config,
+            trust_remote_code=True,
+            torch_dtype=torch.float16,
+        )
 
     if args.replicate_first_block:
         make_shared_model(aqlm_model, device)
