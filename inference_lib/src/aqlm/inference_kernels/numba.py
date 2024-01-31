@@ -32,6 +32,7 @@ def numba_gemm_lut(
     kernel_key = (in_group_size, out_features, in_features, num_codebooks)
     if kernel_key not in COMPILED_KERNELS:
         print(f"Compiling {kernel_key=}")
+
         @numba.njit(nopython=True, parallel=False)
         def numba_gemv_lut_(x, codebooks, codes_alt, scales):
             lut = x.reshape(-1, in_group_size) @ codebooks.reshape(-1, in_group_size).T
@@ -54,7 +55,7 @@ def numba_gemm_lut(
             compiled_kernel(
                 input[i].numpy(),
                 codebooks.numpy(),
-                codes.view(torch.uint8).numpy(), # torch.permute(codes.view(torch.uint8), (1, 0, 2)).contiguous().numpy(),
+                codes.view(torch.uint8).numpy(),
                 scales.numpy(),
             )
         )
