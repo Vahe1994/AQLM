@@ -46,7 +46,7 @@ if __name__ == "__main__":
         help="Output length.",
     )
     parser.add_argument(
-        "--replicate_first_block",
+        "--real_model",
         action="store_true",
     )
     parser.add_argument(
@@ -88,10 +88,10 @@ if __name__ == "__main__":
 
     config = AutoConfig.from_pretrained(args.model, trust_remote_code=True)
 
-    if args.replicate_first_block:
-        aqlm_model = load_shared_model(args.model, device)
-    else: 
+    if args.real_model:
         aqlm_model = load_model(args.model, device)
+    else: 
+        aqlm_model = load_shared_model(args.model, device)
 
     prompt = torch.randint(low=0, high=aqlm_model.config.vocab_size, size=(1, args.input_length), device=device)
 
