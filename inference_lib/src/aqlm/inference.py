@@ -34,11 +34,11 @@ class QuantizedLinear(nn.Module):
 
         # CODES & CODEBOOKS
         self.codebooks = nn.Parameter(
-            torch.empty((num_codebooks, self.codebook_size, out_group_size, in_group_size), **factory_kwargs),
+            torch.rand((num_codebooks, self.codebook_size, out_group_size, in_group_size), **factory_kwargs) / 1e5,
             requires_grad=True,
         )  # [num_codebooks, codebook_size, out_group_size, in_group_size]
         self.codes = nn.Parameter(
-            torch.empty(
+            torch.zeros(
                 (num_out_groups, num_in_groups, num_codebooks), device=device, dtype=get_int_dtype(nbits_per_codebook)
             ),
             requires_grad=False,
@@ -46,7 +46,7 @@ class QuantizedLinear(nn.Module):
 
         # SCALES
         self.scales = nn.Parameter(
-            torch.empty((num_out_groups, 1, 1, 1), **factory_kwargs), requires_grad=True
+            torch.ones((num_out_groups, 1, 1, 1), **factory_kwargs), requires_grad=True
         )  #  [num_out_groups, 1, 1, 1]
 
         # BIAS
@@ -56,4 +56,10 @@ class QuantizedLinear(nn.Module):
             self.register_parameter("bias", None)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
+        if (
+            not input.is_cuda
+            and self.codebook_size == 256
+            and self.codes.shape[0] == self.out_features // self.out_group_size
+        ):
+            self.codes.data = torch.permute(self.codes.data, (1, 0, 2)).contiguous()  #  TODO: fix this thing
         return forward_pass_quantized_linear(input, self.codes, self.codebooks, self.scales, self.bias)
