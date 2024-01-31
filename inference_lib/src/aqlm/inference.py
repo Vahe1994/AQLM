@@ -34,11 +34,11 @@ class QuantizedLinear(nn.Module):
 
         # CODES & CODEBOOKS
         self.codebooks = nn.Parameter(
-            torch.empty((num_codebooks, self.codebook_size, out_group_size, in_group_size), **factory_kwargs),
+            torch.rand((num_codebooks, self.codebook_size, out_group_size, in_group_size), **factory_kwargs) / 1e5,
             requires_grad=True,
         )  # [num_codebooks, codebook_size, out_group_size, in_group_size]
         self.codes = nn.Parameter(
-            torch.empty(
+            torch.zeros(
                 (num_out_groups, num_in_groups, num_codebooks), device=device, dtype=get_int_dtype(nbits_per_codebook)
             ),
             requires_grad=False,
@@ -46,7 +46,7 @@ class QuantizedLinear(nn.Module):
 
         # SCALES
         self.scales = nn.Parameter(
-            torch.empty((num_out_groups, 1, 1, 1), **factory_kwargs), requires_grad=True
+            torch.ones((num_out_groups, 1, 1, 1), **factory_kwargs), requires_grad=True
         )  #  [num_out_groups, 1, 1, 1]
 
         # BIAS
