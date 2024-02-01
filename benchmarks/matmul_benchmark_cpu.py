@@ -11,7 +11,6 @@ import time
 from torch import nn
 import torch.nn.functional as F
 
-from aqlm.inference_kernels.numba import numba_gemm_lut
 from aqlm.utils import _dequantize_weight, unpack_int_data, pack_int_data
 
 def benchmark(f, warmup=10, iter=10):
@@ -89,7 +88,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--benchmark_iters",
         type=int,
-        default=10,
+        default=1000,
         help="Number of benchmark iterations.",
     )
     parser.add_argument(
@@ -134,14 +133,14 @@ if __name__ == "__main__":
         dense = 0
         quant = 0
         for in_features, out_features in layers:
-            in_group_size, num_codebooks, nbits_per_codebook = args.in_group_size, args.num_codebooks, args.nbits_per_codebook
+            in_group_size, num_codebooks, nbits_per_codebook, num_input_groups = args.in_group_size, args.num_codebooks, args.nbits_per_codebook, in_features//args.in_group_size
             @numba.njit(parallel=True)
-            def numba_gemv_lut_(x, codebooks, codes_alt, scales):
+            def aqlm_gemv_lut(x, codebooks, codes_alt, scales):
                 lut = x.reshape(-1, in_group_size) @ codebooks.reshape(-1, in_group_size).T
                 lut = lut.reshape(-1, num_codebooks, 2 ** nbits_per_codebook)
 
                 output_vec = np.zeros(out_features, dtype=x.dtype)
-                for j in numba.prange(in_features//in_group_size):
+                for j in numba.prange(num_input_groups):
                     for i in range(out_features):
                         for c in range(num_codebooks):
                             output_vec[i] += lut[j, c, codes_alt[j, i, c]]
@@ -159,13 +158,13 @@ if __name__ == "__main__":
             weight = _dequantize_weight(unpack_int_data(torch.permute(codes, (1, 0, 2)), args.nbits_per_codebook), codebooks, scales).contiguous()
             
             output_ref = F.linear(input, weight)
-            output = numba_gemv_lut_(input.numpy(), codebooks.numpy(), codes.numpy(), scales.numpy())
+            output = aqlm_gemv_lut(input.numpy(), codebooks.numpy(), codes.numpy(), scales.numpy())
             if args.log_error:
                 print(f"Relative error: {(torch.mean(torch.abs(output_ref - output)) / torch.mean(torch.abs(output_ref))).item():.2e}")
 
             dense += benchmark(lambda: F.linear(input, weight, out=output_ref), args.warmup_iters, args.benchmark_iters)
-            input, codebooks, codes, scales = input.numpy(), codebooks.numpy(), codes.numpy(), scales.numpy()
-            quant += benchmark(lambda: numba_gemv_lut_(input, codebooks, codes, scales), args.warmup_iters, args.benchmark_iters)
+            input, codebooks, codes, scales = input.numpy(), codebooks.squeeze(-2).numpy(), codes.view(torch.uint8).numpy(), scales.numpy()
+            quant += benchmark(lambda: aqlm_gemv_lut(input, codebooks, codes, scales), args.warmup_iters, args.benchmark_iters)
             
         print(f"{model}: Dense forward = {dense * 1e3:.2f} ms")
         print(f"{model}: Quant forward = {quant * 1e3:.2f} ms")
