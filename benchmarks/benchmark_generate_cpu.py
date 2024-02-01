@@ -110,4 +110,4 @@ if __name__ == "__main__":
     t_e = time.perf_counter()
 
     tokens_per_second = args.benchmark_iters * args.output_length / (t_e - t_s) 
-    print(f"<Tokens per second> = {tokens_per_second:.2f}")
+    print(f"<Tokens per second> = {tokens_per_second:.3f}")
