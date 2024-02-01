@@ -118,4 +118,7 @@ if __name__ == "__main__":
 
             dense += benchmark(lambda: torch.matmul(A_ref, B, out=C), args.warmup_iters, args.benchmark_iters)
             quant += benchmark(lambda: CUDA_KERNEL.code1x16_matvec(A, B, C, codebook), args.warmup_iters, args.benchmark_iters)
+        
+        print(f"{model}: Dense forward = {dense * 1e6:.0f} mus")
+        print(f"{model}: Quant forward = {quant * 1e6:.0f} mus")
         print(f"{model}: Speedup relative to dense = {(dense / quant):.3f}")
