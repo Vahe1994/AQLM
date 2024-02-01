@@ -7,7 +7,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import torch
-torch.set_num_threads(1)
+torch.set_num_threads(8)
 from torch import nn
 
 from transformers import AutoModelForCausalLM, AutoConfig

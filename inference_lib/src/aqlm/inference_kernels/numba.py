@@ -33,7 +33,7 @@ def numba_gemm_lut(
     if kernel_key not in COMPILED_KERNELS:
         print(f"Compiling {kernel_key=}")
 
-        @numba.njit(parallel=False)
+        @numba.njit(parallel=True)
         def numba_gemv_lut_(x, codebooks, codes_alt, scales):
             lut = x.reshape(-1, in_group_size) @ codebooks.reshape(-1, in_group_size).T
             lut = lut.reshape(-1, num_codebooks, codebook_size)
