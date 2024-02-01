@@ -227,8 +227,9 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                     )  # test that this is not a replica
 
                     new_linear = QuantizedLinear(quantized_weight, aq_handlers[sublayer_name].layer.bias)
-                    new_linear.use_checkpoint = True
-                    print("ENABLED CHECKPOINTING FOR", sublayer_name)
+                    if args.use_checkpointing:
+                        new_linear.use_checkpoint = True
+                        print("ENABLED CHECKPOINTING FOR", sublayer_name)
                     found_original = False
                     for submodule in layer.modules():
                         for child_name, child_module in submodule.named_children():
@@ -637,6 +638,11 @@ if __name__ == "__main__":
         type=int,
         default=100,
         help="Number of K-Means iterations used to initialize codebooks and codes",
+    )
+    parser.add_argument(
+        "--use_checkpointing",
+        action="store_true",
+        help="Whether to use checkpoining in finetuning",
     )
     parser.add_argument(
         "--use_faiss",
