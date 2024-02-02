@@ -1,8 +1,11 @@
 import argparse
 import time
 import torch
+from torch import nn
+import torch.nn.functional as F
 
 from aqlm.inference import CUDA_KERNEL
+from aqlm.utils import _dequantize_weight, unpack_int_data, pack_int_data
 
 
 def benchmark(f, warmup=10, iter=10):
@@ -96,28 +99,51 @@ if __name__ == "__main__":
         "--fuse",
         action="store_true",
     )
+    parser.add_argument(
+        "--nbits_per_codebook",
+        type=int,
+        default=16,
+        help="Number of bits per codebook.",
+    )
+    parser.add_argument(
+        "--num_codebooks",
+        type=int,
+        default=1,
+        help="Number of num_codebooks.",
+    )
+    parser.add_argument(
+        "--in_group_size",
+        type=int,
+        default=8,
+        help="Input group size.",
+    )
 
     args = parser.parse_args()
-
-    codebook = torch.randn((2 ** 16, 8), dtype=torch.half, device=device)
 
     for model, layers in MODELS['fuse' if args.fuse else 'no-fuse'].items():
         dense = 0
         quant = 0
-        for K, M in layers:
-            A = torch.randint(2 ** 16, (M, K // 8), dtype=torch.int, device=device)
-            A_ref = torch.vstack([codebook[A[i]].flatten().unsqueeze(0) for i in range(M)])
-            A = A.to(torch.int16)
-            B = torch.randn((K, 1), dtype=torch.half, device=device)
-            C = torch.zeros((M, 1), dtype=torch.half, device=device)
+        for in_features, out_features in layers:
+            input = torch.randn((1, 1, in_features), dtype=torch.half, device=device)  #  [..., in_features]
+            codes = pack_int_data(
+                torch.randint(2 ** args.nbits_per_codebook, (out_features, in_features // args.in_group_size, args.num_codebooks), device=device),  #  [num_out_groups, num_in_groups, num_codebooks]
+                args.nbits_per_codebook,
+            )
+            codebooks = torch.randn((args.num_codebooks, 2 ** args.nbits_per_codebook, 1, args.in_group_size), dtype=torch.half, device=device)  #  [num_codebooks, codebook_size, out_group_size, in_group_size]
+            scales = torch.randn((out_features, 1, 1, 1), dtype=torch.half, device=device)  #  [num_out_groups, 1, 1, 1]
 
-            C_ref = torch.matmul(A_ref, B)
-            CUDA_KERNEL.code1x16_matvec(A, B, C, codebook)
+            weight = _dequantize_weight(unpack_int_data(codes, args.nbits_per_codebook), codebooks, scales).contiguous()
+            
+            output_ref = F.linear(input, weight)
+            
+            matmul = CUDA_KERNEL.code1x16_matmat if args.nbits_per_codebook == 16 else CUDA_KERNEL.code2x8_matmat
+            
+            output = matmul(input, codes, codebooks, scales)
             if args.log_error:
-                print(f"Relative error: {(torch.mean(torch.abs(C - C_ref)) / torch.mean(torch.abs(C_ref))).item():.2e}")
+                print(f"Relative error: {(torch.mean(torch.abs(output_ref - output)) / torch.mean(torch.abs(output_ref))).item():.2e}")
 
-            dense += benchmark(lambda: torch.matmul(A_ref, B, out=C), args.warmup_iters, args.benchmark_iters)
-            quant += benchmark(lambda: CUDA_KERNEL.code1x16_matvec(A, B, C, codebook), args.warmup_iters, args.benchmark_iters)
+            dense += benchmark(lambda: F.linear(input, weight, out=output_ref), args.warmup_iters, args.benchmark_iters)
+            quant += benchmark(lambda: matmul(input, codes, codebooks, scales), args.warmup_iters, args.benchmark_iters)
         
         print(f"{model}: Dense forward = {dense * 1e6:.0f} mus")
         print(f"{model}: Quant forward = {quant * 1e6:.0f} mus")

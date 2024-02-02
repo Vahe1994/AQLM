@@ -125,5 +125,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("code1x16_matvec", &code1x16_matvec, "1x16 (2bit) codebook matrix-vector product.");
   m.def("code1x16_matmat", &code1x16_matmat, "1x16 (2bit) codebook matrix-matrix product.");
   m.def("code2x8_matvec", &code2x8_matvec, "2x8 (2bit) codebook matrix-vector product.");
-  m.def("code2x8_matmat", &code1x16_matmat, "2x8 (2bit) codebook matrix-matrix product.");
+  m.def("code2x8_matmat", &code2x8_matmat, "2x8 (2bit) codebook matrix-matrix product.");
 }
