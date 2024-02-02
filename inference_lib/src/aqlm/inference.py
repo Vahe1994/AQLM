@@ -76,7 +76,10 @@ class QuantizedLinear(nn.Module):
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         if input.is_cuda:
-            return CUDA_KERNEL.code1x16_matmat(input, self.codes.data, self.codebooks.data, self.scales.data)
+            if self.nbits_per_codebook == 16:
+                return CUDA_KERNEL.code1x16_matmat(input, self.codes.data, self.codebooks.data, self.scales.data)
+            else:
+                return CUDA_KERNEL.code2x8_matmat(input, self.codes.data, self.codebooks.data, self.scales.data)
         else:
             if self.numpied_codes is None:
                 self.numpied_codes = torch.permute(self.codes.data, (1, 0, 2)).contiguous().view(torch.uint8).numpy()
