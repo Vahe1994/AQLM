@@ -2,6 +2,8 @@
 import torch
 import torch.nn as nn
 
+from aqlm.utils import get_int_dtype
+
 # CPU
 import numpy as np
 import numba
@@ -109,15 +111,3 @@ class QuantizedLinear(nn.Module):
             return torch.from_numpy(
                 compiled_kernel(input.reshape(-1, self.in_features).numpy(), self.numpied_codes, self.numpied_codebooks, self.numpied_scales).reshape(input.shape[:-1] + (-1,))
             )
-
-
-def get_int_dtype(nbits: int) -> torch.dtype:
-    if nbits <= 8:
-        return torch.int8
-    if nbits <= 16:
-        return torch.int16
-    if nbits <= 32:
-        return torch.int32
-    if nbits <= 64:
-        return torch.int64
-    raise ValueError(f"No dtype available for {nbits}-bit codebooks")
