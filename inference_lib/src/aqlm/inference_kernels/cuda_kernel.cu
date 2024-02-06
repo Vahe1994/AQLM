@@ -145,7 +145,7 @@ inline int ceildiv(int a, int b) {
   return (a + b - 1) / b;
 }
 
-const int THREAD_M = 32;
+const int THREAD_M = 16;
 
 void  code1x16_matvec_cuda(
   const void* __restrict__ A,
