@@ -20,9 +20,9 @@ def forward_pass_quantized_linear(
             
             return CUDA_KERNEL.code1x16_matmat(input, codes, codebooks, scales) + (bias if bias is not None else 0)
         case (True, 2, 256, 1, 8):
-            from .cuda_kernel import cuda_gemm_2x8
-
-            return cuda_gemm_2x8(input, codes, codebooks, scales, bias)
+            from .cuda_kernel import CUDA_KERNEL
+            
+            return CUDA_KERNEL.code2x8_matmat(input, codes, codebooks, scales) + (bias if bias is not None else 0)
         case (True, _, _, _, _):
             from .triton_kernel import triton_matmul
 
