@@ -25,40 +25,15 @@ def benchmark(f, warmup=10, iter=10):
 
 
 MODELS = {
-    "fuse": {
-        "Llama 2 7B": [(4096, 3 * 4096), (4096, 4096), (4096, 2 * 11008), (11008, 4096)],
-        "Llama 2 13B": [(5120, 3 * 5120), (5120, 5120), (5120, 2 * 13824), (13824, 5120)],
-        "Llama 2 70B": [(8192, int(1.25 * 8192)), (8192, 8192), (8192, 2 * 28672), (28672, 8192)],
-    },
-    "no-fuse": {
-        "Llama 2 7B": [
-            # (4096, 4096),
-            # (4096, 4096),
-            # (4096, 4096),
-            # (4096, 4096),
-            # (4096, 11008),
-            (4096, 11008),
-            # (11008, 4096)
-        ],
-        "Llama 2 13B": [
-            # (5120, 5120),
-            # (5120, 5120),
-            # (5120, 5120),
-            # (5120, 5120),
-            # (5120, 13824),
-            (5120, 13824),
-            # (13824, 5120)
-        ],
-        "Llama 2 70B": [
-            # (8192, 8192),
-            # (8192, 1024),
-            # (8192, 1024),
-            # (8192, 8192),
-            # (8192, 28672),
-            (8192, 28672),
-            # (28672, 8192)
-        ],
-    },
+    "Llama 2 7B": [
+        (4096, 11008),  #  gate_proj shape
+    ],
+    "Llama 2 13B": [
+        (5120, 13824),  #  gate_proj shape
+    ],
+    "Llama 2 70B": [
+        (8192, 28672),  #  gate_proj shape
+    ],
 }
 
 
@@ -79,10 +54,6 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--log_error",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--fuse",
         action="store_true",
     )
     parser.add_argument(
@@ -115,7 +86,7 @@ if __name__ == "__main__":
     numba.set_num_threads(args.nthreads)
     torch.set_num_threads(args.nthreads)
 
-    for model, layers in MODELS["fuse" if args.fuse else "no-fuse"].items():
+    for model, layers in MODELS.items():
         dense = 0
         quant = 0
         for in_features, out_features in layers:

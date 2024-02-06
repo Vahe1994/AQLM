@@ -16,9 +16,9 @@ def forward_pass_quantized_linear(
     num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
     match (input.is_cuda, num_codebooks, codebook_size, out_group_size, in_group_size):
         case (True, 1, 65536, 1, 8):
-            from .cuda_kernel import cuda_gemm_1x16
-
-            return cuda_gemm_1x16(input, codes, codebooks, scales, bias)
+            from .cuda_kernel import CUDA_KERNEL
+            
+            return CUDA_KERNEL.code1x16_matmat(input, codes, codebooks, scales) + (bias if bias is not None else 0)
         case (True, 2, 256, 1, 8):
             from .cuda_kernel import cuda_gemm_2x8
 
