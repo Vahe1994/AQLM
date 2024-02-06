@@ -100,7 +100,7 @@ if __name__ == "__main__":
         if i == args.warmup_iters - 1:
             torch.cuda.synchronize()
             t_s = time.perf_counter()
-    torch.cuda.synchronize()
+    torch.cuda.synchronize(device)
     t_e = time.perf_counter()
 
     tokens_per_second = args.benchmark_iters * args.output_length / (t_e - t_s)
