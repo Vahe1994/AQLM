@@ -1,2 +1,2 @@
-include src/aqlm/cuda/*.cpp
-include src/aqlm/cuda/*.cu
+include src/aqlm/inference_kernels/*.cpp
+include src/aqlm/inference_kernels/*.cu
