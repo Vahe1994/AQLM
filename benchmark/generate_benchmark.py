@@ -98,7 +98,7 @@ if __name__ == "__main__":
     for i in range(args.warmup_iters + args.benchmark_iters):
         output = aqlm_model.generate(prompt, min_new_tokens=args.output_length, max_new_tokens=args.output_length)
         if i == args.warmup_iters - 1:
-            torch.cuda.synchronize()
+            torch.cuda.synchronize(device)
             t_s = time.perf_counter()
     torch.cuda.synchronize(device)
     t_e = time.perf_counter()
