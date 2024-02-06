@@ -31,15 +31,15 @@ def numba_gemm_lut(
 
     kernel_key = (in_group_size, out_features, in_features, num_codebooks)
     if kernel_key not in COMPILED_KERNELS:
-        print(f"Compiling {kernel_key=}")
+        print(f"Compiling AQLM numba kernel with parameters: {kernel_key=}")
 
-        @numba.njit(nopython=True, parallel=False)
+        @numba.njit(parallel=True)
         def numba_gemv_lut_(x, codebooks, codes_alt, scales):
             lut = x.reshape(-1, in_group_size) @ codebooks.reshape(-1, in_group_size).T
             lut = lut.reshape(-1, num_codebooks, codebook_size)
 
             output_vec = np.zeros(out_features, dtype=x.dtype)
-            for j in range(num_input_groups):
+            for j in numba.prange(num_input_groups):
                 for i in range(out_features):
                     for c in range(num_codebooks):
                         output_vec[i] += lut[j, c, codes_alt[j, i, c]]

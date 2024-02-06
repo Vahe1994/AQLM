@@ -1,17 +1,18 @@
 import os
-os.environ["OMP_NUM_THREADS"]="1"
-os.environ["MKL_NUM_THREADS"]="1"
 
-import numpy as np
-import numba
-import torch
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
 
 import argparse
 import time
-from torch import nn
-import torch.nn.functional as F
 
-from aqlm.utils import _dequantize_weight, unpack_int_data, pack_int_data
+import numba
+import numpy as np
+import torch
+import torch.nn.functional as F
+from aqlm.utils import _dequantize_weight, pack_int_data, unpack_int_data
+from torch import nn
+
 
 def benchmark(f, warmup=10, iter=10):
     for i in range(warmup + iter):
@@ -24,28 +25,13 @@ def benchmark(f, warmup=10, iter=10):
 
 
 MODELS = {
-    'fuse': {
-        'Llama 2 7B': [
-            (4096, 3 * 4096),
-            (4096, 4096),
-            (4096, 2 * 11008),
-            (11008, 4096)
-        ],
-        'Llama 2 13B': [
-            (5120, 3 * 5120),
-            (5120, 5120),
-            (5120, 2 * 13824),
-            (13824, 5120)
-        ],
-        'Llama 2 70B': [
-            (8192, int(1.25 * 8192)),
-            (8192, 8192),
-            (8192, 2 * 28672),
-            (28672, 8192)
-        ],
+    "fuse": {
+        "Llama 2 7B": [(4096, 3 * 4096), (4096, 4096), (4096, 2 * 11008), (11008, 4096)],
+        "Llama 2 13B": [(5120, 3 * 5120), (5120, 5120), (5120, 2 * 13824), (13824, 5120)],
+        "Llama 2 70B": [(8192, int(1.25 * 8192)), (8192, 8192), (8192, 2 * 28672), (28672, 8192)],
     },
-    'no-fuse': {
-        'Llama 2 7B': [
+    "no-fuse": {
+        "Llama 2 7B": [
             # (4096, 4096),
             # (4096, 4096),
             # (4096, 4096),
@@ -54,7 +40,7 @@ MODELS = {
             (4096, 11008),
             # (11008, 4096)
         ],
-        'Llama 2 13B': [
+        "Llama 2 13B": [
             # (5120, 5120),
             # (5120, 5120),
             # (5120, 5120),
@@ -63,7 +49,7 @@ MODELS = {
             (5120, 13824),
             # (13824, 5120)
         ],
-        'Llama 2 70B': [
+        "Llama 2 70B": [
             # (8192, 8192),
             # (8192, 1024),
             # (8192, 1024),
@@ -72,7 +58,7 @@ MODELS = {
             (8192, 28672),
             # (28672, 8192)
         ],
-    }
+    },
 }
 
 
@@ -125,19 +111,25 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    
+
     numba.set_num_threads(args.nthreads)
     torch.set_num_threads(args.nthreads)
 
-    for model, layers in MODELS['fuse' if args.fuse else 'no-fuse'].items():
+    for model, layers in MODELS["fuse" if args.fuse else "no-fuse"].items():
         dense = 0
         quant = 0
         for in_features, out_features in layers:
-            in_group_size, num_codebooks, nbits_per_codebook, num_input_groups = args.in_group_size, args.num_codebooks, args.nbits_per_codebook, in_features//args.in_group_size
+            in_group_size, num_codebooks, nbits_per_codebook, num_input_groups = (
+                args.in_group_size,
+                args.num_codebooks,
+                args.nbits_per_codebook,
+                in_features // args.in_group_size,
+            )
+
             @numba.njit(parallel=True)
             def aqlm_gemv_lut(x, codebooks, codes_alt, scales):
                 lut = x.reshape(-1, in_group_size) @ codebooks.reshape(-1, in_group_size).T
-                lut = lut.reshape(-1, num_codebooks, 2 ** nbits_per_codebook)
+                lut = lut.reshape(-1, num_codebooks, 2**nbits_per_codebook)
 
                 output_vec = np.zeros(out_features, dtype=x.dtype)
                 for j in numba.prange(num_input_groups):
@@ -146,26 +138,41 @@ if __name__ == "__main__":
                             output_vec[i] += lut[j, c, codes_alt[j, i, c]]
                 output_vec *= scales.flatten()
                 return output_vec
-            
+
             input = torch.randn((1, in_features), dtype=torch.float32)  #  [..., in_features]
             codes = pack_int_data(
-                torch.randint(2 ** args.nbits_per_codebook, (in_features // args.in_group_size, out_features, args.num_codebooks)),  #  [num_in_groups, num_out_groups, num_codebooks]
+                torch.randint(
+                    2**args.nbits_per_codebook, (in_features // args.in_group_size, out_features, args.num_codebooks)
+                ),  #  [num_in_groups, num_out_groups, num_codebooks]
                 args.nbits_per_codebook,
             )
-            codebooks = torch.randn((args.num_codebooks, 2 ** args.nbits_per_codebook, 1, args.in_group_size), dtype=torch.float32)  #  [num_codebooks, codebook_size, out_group_size, in_group_size]
+            codebooks = torch.randn(
+                (args.num_codebooks, 2**args.nbits_per_codebook, 1, args.in_group_size), dtype=torch.float32
+            )  #  [num_codebooks, codebook_size, out_group_size, in_group_size]
             scales = torch.randn((out_features, 1, 1, 1), dtype=torch.float32)  #  [num_out_groups, 1, 1, 1]
 
-            weight = _dequantize_weight(unpack_int_data(torch.permute(codes, (1, 0, 2)), args.nbits_per_codebook), codebooks, scales).contiguous()
-            
+            weight = _dequantize_weight(
+                unpack_int_data(torch.permute(codes, (1, 0, 2)), args.nbits_per_codebook), codebooks, scales
+            ).contiguous()
+
             output_ref = F.linear(input, weight)
             output = aqlm_gemv_lut(input.numpy(), codebooks.numpy(), codes.numpy(), scales.numpy())
             if args.log_error:
-                print(f"Relative error: {(torch.mean(torch.abs(output_ref - output)) / torch.mean(torch.abs(output_ref))).item():.2e}")
+                print(
+                    f"Relative error: {(torch.mean(torch.abs(output_ref - output)) / torch.mean(torch.abs(output_ref))).item():.2e}"
+                )
 
             dense += benchmark(lambda: F.linear(input, weight, out=output_ref), args.warmup_iters, args.benchmark_iters)
-            input, codebooks, codes, scales = input.numpy(), codebooks.squeeze(-2).numpy(), codes.view(torch.uint8).numpy(), scales.numpy()
-            quant += benchmark(lambda: aqlm_gemv_lut(input, codebooks, codes, scales), args.warmup_iters, args.benchmark_iters)
-            
+            input, codebooks, codes, scales = (
+                input.numpy(),
+                codebooks.squeeze(-2).numpy(),
+                codes.view(torch.uint8).numpy(),
+                scales.numpy(),
+            )
+            quant += benchmark(
+                lambda: aqlm_gemv_lut(input, codebooks, codes, scales), args.warmup_iters, args.benchmark_iters
+            )
+
         print(f"{model}: Dense forward = {dense * 1e3:.2f} ms")
         print(f"{model}: Quant forward = {quant * 1e3:.2f} ms")
         print(f"{model}: Speedup relative to dense = {(dense / quant):.3f}")
