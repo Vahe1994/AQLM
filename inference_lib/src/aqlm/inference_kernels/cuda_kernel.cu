@@ -96,7 +96,7 @@ __global__ void Code2x8MatVec(
     int4 dec = codebook[i];
     #pragma unroll
     for (int j = 0; j < 8; j++)
-      sh_code[8 * threadIdx.x + (j + lane) % 8] = dec;
+      sh_code[8 * i + (j + lane) % 8] = dec;
   }
   __syncthreads();
 
