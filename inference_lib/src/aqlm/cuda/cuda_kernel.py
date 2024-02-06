@@ -7,7 +7,7 @@ from torch.utils.cpp_extension import load
 CUDA_FOLDER = os.path.dirname(os.path.abspath(__file__))
 CUDA_KERNEL = load(
     name="codebook_cuda",
-    sources=[os.path.join(CUDA_FOLDER, "codebook_cuda.cpp"), os.path.join(CUDA_FOLDER, "codebook_cuda_kernel.cu")],
+    sources=[os.path.join(CUDA_FOLDER, "cuda_kernel.cpp"), os.path.join(CUDA_FOLDER, "cuda_kernel.cu")],
 )
 
 
