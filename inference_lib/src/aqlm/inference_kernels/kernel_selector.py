@@ -28,7 +28,7 @@ def forward_pass_quantized_linear(
 
             return triton_matmul(input, codes, codebooks, scales, bias)
         case (False, _, 256, 1, _):
-            from .numba import numba_gemm_lut
+            from .numba_kernel import numba_gemm_lut
 
             return numba_gemm_lut(input, codes, codebooks, scales, bias)
         case _:
