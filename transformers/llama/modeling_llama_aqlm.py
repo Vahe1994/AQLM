@@ -1,4 +1,5 @@
 # coding=utf-8
+# This code is a modification of transformers/models/llama/modeling_llama.py , which is has the following copyright:
 # Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
 #
 # This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
