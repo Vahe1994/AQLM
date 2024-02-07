@@ -96,9 +96,6 @@ To use downloaded data from HF, place it in data folder(optional) and set correc
 
 **Warning:** These subsets are already processed with the corresponding model tokenizer. If you want to quantize another model (e.g. mistral/mixtral), please re-tokenize the data with provided script in src/datautils.
 
-__We shall add step-by-step instructions for this before Jan 13 23:59 AOE.__
-
-
 ### WandB logging
 
 One can optionally log the data to `Weights and Biases` service (wandb).
