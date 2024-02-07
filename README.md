@@ -2,9 +2,60 @@
 
 Official PyTorch implementation for [Extreme Compression of Large Language Models via Additive Quantization](https://arxiv.org/pdf/2401.06118.pdf)
 
-## Installation
+## Inference
 
-### Packages
+### Demo
+
+Learn how to run the prequantized models using this Google Colab example:
+
+<a target="_blank" href="https://colab.research.google.com/github/Vahe1994/AQLM/blob/main/notebooks/colab_example.ipynb">
+  <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="AQLM In Colab"/>
+</a>
+
+### Models
+
+This repository is currently designed to work with models of `LLaMA`, `Mistral` and `Mixtral` families.
+
+We provide a number of prequantized models:
+
+| Model      | AQLM scheme | WikiText 2 PPL | Model size, Gb | Hub link                                                                 |
+|------------|-------------|----------------|----------------|--------------------------------------------------------------------------|
+| Llama-2-7b | 1x16        | 6.31           | 2.4            | [Link](https://huggingface.co/BlackSamorez/Llama-2-7b-AQLM-2Bit-1x16-hf) |
+| Llama-2-7b | 2x8         | 7.98           | 2.2            | [Link](https://huggingface.co/BlackSamorez/Llama-2-7b-AQLM-2Bit-2x8-hf)  |
+| Llama-2-7b | 8x8         | 7.83           | 2.2            | [Link](https://huggingface.co/BlackSamorez/Llama-2-7b-AQLM-2Bit-8x8-hf)  |
+| Llama-2-13b| 1x16        | 5.41           | 4.1            | [Link](https://huggingface.co/BlackSamorez/Llama-2-13b-AQLM-2Bit-1x16-hf)|
+| Llama-2-70b| 1x16        | 3.96           | 18.8           | [Link](https://huggingface.co/BlackSamorez/Llama-2-70b-AQLM-2Bit-1x16-hf)|
+| Mixtral-8x7b| 1x15       | 4.61           | 12.6            | [Link](https://huggingface.co/BlackSamorez/Mixtral-8x7b-AQLM-2Bit-1x15-hf)|
+
+
+### Installation
+
+
+
+To run the models, one would have to install an inference library:
+```bash
+pip install aqlm[gpu,cpu]
+```
+, specifying either `gpu`, `cpu` or both based on one's inference setting.
+
+
+Then, one can use the familiar `.from_pretrained` method provided by the [transformers](https://github.com/huggingface/transformers) library:
+```python
+from transformers import AutoModelForCausalLM
+
+quantized_model = AutoModelForCausalLM.from_pretrained(
+    "BlackSamorez/Llama-2-7b-AQLM-2Bit-1x16-hf",
+    trust_remote_code=True, torch_dtype="auto"
+).cuda()
+```
+Notice that `torch_dtype` should be set to either `torch.float16` or `"auto"` on GPU and `torch.float32` on CPU. After that, the model can be used exactly the same as one would use and unquantized model. 
+
+As of now, we provide efficient implementations for matrix-vector multiplications for `1x16` and `2x8` AQLM schemes on GPU, and `Kx8` scheme on CPU.
+
+
+## Quantization
+
+### Dependencies
 
 Install packages from `requirements.txt`:
 ```bash
@@ -16,11 +67,8 @@ pip install -r requirements.txt
 The script will require downloading and caching locally the relevant tokenizer and the datasets. 
 They will be saved in default Huggingface Datasets directory unless alternative location is provided by env variables.
 See [relevant Datasets documentation section](https://huggingface.co/docs/datasets/main/en/cache#cache-directory)
-## Models
 
-This repository is currently designed to work with models of `LLaMA ` family.
-
-## Data
+### Data
 
 When quantizing models with AQLM, we recommend that you use a subset of the original data the model was trained on.
 
@@ -48,7 +96,6 @@ __We shall add step-by-step instructions for this before Jan 13 23:59 AOE.__
 One can optionally log the data to `Weights and Biases` service (wandb).
 Run `pip install wandb` for W&B logging.
 Specify `$WANDB_ENTITY`, `$WANDB_PROJECT`, `$WANDB_NAME` environment variables prior to running experiments. use `--wandb` argument to enable logging
-# Launching
 
 ### GPU and RAM requirements
 This code was developed and tested using a several A100 GPU with 80GB GPU RAM. 
@@ -135,6 +182,15 @@ python lmeval.py \
     --tasks winogrande,piqa,hellaswag,arc_easy,arc_challenge \
     --batch_size 1
 ```
+
+### Preparing models for inference
+
+To convert a model into a _Hugging Face_ compatible format, use `convert_to_hf.py` with corresponding arguments:
+ - `--model` - the original pretrained model (corresponds to `MODEL_PATH` of `main.py`, e.g. `meta-llama/Llama-2-7b-hf`).
+ - `--in_path` - the folder containing an initially quantized model (corresponds to `--save` of `main.py`).
+ - `--out_path` - the folder to save `transformers` model to.
+
+The conversion automatically
 
 ## Contributing
 

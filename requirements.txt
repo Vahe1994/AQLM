@@ -3,5 +3,5 @@ datasets==2.15.0
 sentencepiece==0.1.99
 torch>=2.1.1
 numpy>=1.21.5
-transformers==4.36.2
+transformers==4.37.0
 accelerate==0.24.1
