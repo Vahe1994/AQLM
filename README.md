@@ -6,9 +6,16 @@ Official PyTorch implementation for [Extreme Compression of Large Language Model
 
 ### Demo
 
-Learn how to run the prequantized models using this Google Colab example:
+Learn how to run the prequantized models using this Google Colab examples:
+
+Generating with GPU
 
 <a target="_blank" href="https://colab.research.google.com/github/Vahe1994/AQLM/blob/main/notebooks/colab_example.ipynb">
+  <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="AQLM In Colab"/>
+</a>    
+Streaming with GPU/CPU
+
+<a target="_blank" href="https://colab.research.google.com/github/Vahe1994/AQLM/blob/main/notebooks/streaming_example.ipynb">
   <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="AQLM In Colab"/>
 </a>
 
