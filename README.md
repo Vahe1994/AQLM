@@ -136,6 +136,15 @@ python lmeval.py \
     --batch_size 1
 ```
 
+### Preparing models for inference
+
+To convert a model into a _Hugging Face_ compatible format, use `convert_to_hf.py` with corresponding arguments:
+ - `--model` - the original pretrained model (corresponds to `MODEL_PATH` of `main.py`, e.g. `meta-llama/Llama-2-7b-hf`).
+ - `--in_path` - the folder containing an initially quantized model (corresponds to `--save` of `main.py`).
+ - `--out_path` - the folder to save `transformers` model to.
+
+The conversion automatically
+
 ## Contributing
 
 If you want to contribute something substantial (more than a typo), please open an issue first.

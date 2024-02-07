@@ -144,12 +144,8 @@ __global__ void Code2x8MatVec(
 inline int ceildiv(int a, int b) {
   return (a + b - 1) / b;
 }
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ <= 750
-const int THREAD_M = 16;
-#else
-const int THREAD_M = 32;
-#endif
 
+const int THREAD_M = 16;
 
 void  code1x16_matvec_cuda(
   const void* __restrict__ A,
