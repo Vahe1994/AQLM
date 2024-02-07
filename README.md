@@ -48,9 +48,9 @@ quantized_model = AutoModelForCausalLM.from_pretrained(
     trust_remote_code=True, torch_dtype="auto"
 ).cuda()
 ```
-Notice that `torch_dtype` should be set to either `torch.float16` or `"auto"` on GPU and `torch.float32` on CPU.
+Notice that `torch_dtype` should be set to either `torch.float16` or `"auto"` on GPU and `torch.float32` on CPU. After that, the model can be used exactly the same as one would use and unquantized model. 
 
-After that, the model can be used exactly the same as one would use and unquantized model.
+As of now, we provide efficient implementations for matrix-vector multiplications for `1x16` and `2x8` AQLM schemes on GPU, and `Kx8` scheme on CPU.
 
 
 ## Quantization
