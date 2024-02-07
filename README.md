@@ -28,7 +28,7 @@ We provide a number of prequantized models:
 | Mixtral-8x7b| 1x15       | 4.61           | 12.6            | [Link](https://huggingface.co/BlackSamorez/Mixtral-8x7b-AQLM-2Bit-1x15-hf)|
 
 
-### Dependencies
+### Installation
 
 
 
