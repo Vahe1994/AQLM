@@ -27,7 +27,7 @@ def numba_gemm_lut(
     assert in_features % in_group_size == 0
     assert codebook_size == 2**8
     assert codes.dtype == torch.int8
-    assert input.dtype == torch.float32 and codebooks.dtype == torch.float32
+    assert input.dtype == torch.float32 and codebooks.dtype == torch.float32, f"please load the model with `torch_dtype=torch.float32`, as {input.dtype} is not supported for CPU"
 
     kernel_key = (in_group_size, out_features, in_features, num_codebooks)
     if kernel_key not in COMPILED_KERNELS:

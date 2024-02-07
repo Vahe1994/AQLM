@@ -18,10 +18,16 @@ def forward_pass_quantized_linear(
         case (True, 1, 65536, 1, 8):
             from .cuda_kernel import CUDA_KERNEL
 
+            assert (
+                input.dtype == torch.float16
+            ), f"please load the model with `torch_dtype=torch.float16`, as {input.dtype} is not supported on GPU yet"
             return CUDA_KERNEL.code1x16_matmat(input, codes, codebooks, scales) + (bias if bias is not None else 0)
         case (True, 2, 256, 1, 8):
             from .cuda_kernel import CUDA_KERNEL
 
+            assert (
+                input.dtype == torch.float16
+            ), f"please load the model with `torch_dtype=torch.float16`, as {input.dtype} is not supported on GPU yet"
             return CUDA_KERNEL.code2x8_matmat(input, codes, codebooks, scales) + (bias if bias is not None else 0)
         case (True, _, _, _, _):
             from .triton_kernel import triton_matmul
