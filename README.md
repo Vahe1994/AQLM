@@ -33,7 +33,7 @@ We provide a number of prequantized models:
 | Llama-2-7b | 8x8         | 7.83           | 2.2            | [Link](https://huggingface.co/BlackSamorez/Llama-2-7b-AQLM-2Bit-8x8-hf)  |
 | Llama-2-13b| 1x16        | 5.41           | 4.1            | [Link](https://huggingface.co/BlackSamorez/Llama-2-13b-AQLM-2Bit-1x16-hf)|
 | Llama-2-70b| 1x16        | 3.96           | 18.8           | [Link](https://huggingface.co/BlackSamorez/Llama-2-70b-AQLM-2Bit-1x16-hf)|
-| Mixtral-8x7b| 1x15       | 4.61           | 12.6            | [Link](https://huggingface.co/BlackSamorez/Mixtral-8x7b-AQLM-2Bit-1x15-hf)|
+| Mixtral-8x7b| 1x16       | 4.37           | 12.6            | [Link](https://huggingface.co/BlackSamorez/Mixtral-8x7b-AQLM-2Bit-1x16-hf)|
 
 
 ### Installation
