@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
-
 from tqdm.auto import trange
 
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
@@ -23,6 +22,7 @@ class QuantizedLinear(nn.Module):
 
     def _forward(self, input: torch.Tensor):
         return F.linear(input, self.quantized_weight(), self.bias)
+
     def forward(self, input: torch.Tensor):
         if self.use_checkpoint and torch.is_grad_enabled():
             return checkpoint(
