@@ -5,7 +5,6 @@ import shutil
 
 import torch
 from tqdm.auto import trange
-
 from transformers import AutoConfig, PretrainedConfig
 
 
