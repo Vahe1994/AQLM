@@ -37,11 +37,11 @@ We provide a number of prequantized models:
 | Mixtral-8x7b| 1x16       | 4.37           | 12.6            | [Link](https://huggingface.co/BlackSamorez/Mixtral-8x7b-AQLM-2Bit-1x16-hf)|
 
 
-### AQLM configurations
+### Inference kernels
 
-AQLM quantization setpus vary mainly on the number of codebooks used as well as codebook sizes in bits. The most popular setups, as well as inference kernels they support are:
+AQLM quantization setpus vary mainly on the number of codebooks used as well as the codebook sizes in bits. The most popular setups, as well as inference kernels they support are:
  
-| Kernel | Number of codebooks | Codebook size, bits | Notation | Accuracy | Speedup     | Fast GPU inference | Fast CPU inference |
+| Kernel | Number of codebooks | Codebook size, bits | Scheme Notation | Accuracy | Speedup     | Fast GPU inference | Fast CPU inference |
 |---|---------------------|---------------------|----------|-------------|-------------|--------------------|--------------------|
 | Triton | K                   | N                  | KxN     | -        | Up to ~0.7x | ✅                  | ❌                  |
 | CUDA | 1                   | 16                  | 1x16     | Best        | Up to ~1.3x | ✅                  | ❌                  |
