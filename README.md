@@ -37,6 +37,17 @@ We provide a number of prequantized models:
 | Mixtral-8x7b| 1x16       | 4.37           | 12.6            | [Link](https://huggingface.co/BlackSamorez/Mixtral-8x7b-AQLM-2Bit-1x16-hf)|
 
 
+### AQLM configurations
+
+AQLM quantization setpus vary mainly on the number of codebooks used as well as codebook sizes in bits. The most popular setups, as well as inference kernels they support are:
+ 
+| Kernel | Number of codebooks | Codebook size, bits | Notation | Accuracy | Speedup     | Fast GPU inference | Fast CPU inference |
+|---|---------------------|---------------------|----------|-------------|-------------|--------------------|--------------------|
+| Triton | K                   | N                  | KxN     | -        | Up to ~0.7x | ✅                  | ❌                  |
+| CUDA | 1                   | 16                  | 1x16     | Best        | Up to ~1.3x | ✅                  | ❌                  |
+| CUDA | 2                   | 8                   | 2x8      | OK          | Up to ~3.0x | ✅                  | ❌                  |
+| Numba | K                   | 8                   | Kx8      | Good        | Up to ~4.0x | ❌                  | ✅                  |
+
 ### Installation
 
 
@@ -59,7 +70,6 @@ quantized_model = AutoModelForCausalLM.from_pretrained(
 ```
 Notice that `torch_dtype` should be set to either `torch.float16` or `"auto"` on GPU and `torch.float32` on CPU. After that, the model can be used exactly the same as one would use and unquantized model. 
 
-As of now, we provide efficient implementations for matrix-vector multiplications for `1x16` and `2x8` AQLM schemes on GPU, and `Kx8` scheme on CPU.
 
 
 ## Quantization
