@@ -36,7 +36,6 @@ except ModuleNotFoundError:
 def quantize_model(model, args):
     """main entry point to functions for model quantization"""
     tick = time.time()
-
     print("Loading data ...")
     dataloader = get_loaders(
         args.dataset,
@@ -45,7 +44,16 @@ def quantize_model(model, args):
         model_path=args.model_path,
         seqlen=model.seqlen,
     )
-    results = quantize_aq(model, dataloader, args)
+    if args.val_size > 0:
+        all_ids = torch.randperm(len(dataloader))
+        train_ids, val_ids = all_ids[args.val_size:], all_ids[:args.val_size]
+        train_dataloader = [dataloader[i] for i in train_ids]
+        val_dataloader = [dataloader[i] for i in val_ids]
+    else:
+        train_dataloader = dataloader
+        val_dataloader = None
+
+    results = quantize_aq(model, train_dataloader, args, val_dataloader)
     print(f"quantization time: {time.time() - tick:.1f}")
     return results
 
@@ -145,17 +153,29 @@ def get_inps(
     torch.cuda.empty_cache()
 
     forward_args = {k: cache[k] for k in forward_arg_names}
-    assert cache["i"] == nsamples
     return inps, forward_args
 
 
 @torch.no_grad()
-def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
+def quantize_aq(
+    model: PreTrainedModel, 
+    dataloader: Iterable, 
+    args: Namespace,
+    val_dataloader: Optional[Iterable] = None
+):
     assert not torch.backends.cuda.matmul.allow_tf32
     print("\nStarting AQ quantization ...")
     inps, forward_args = get_inps(model, dataloader, args)
     outs = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
-    num_codebooks = args.num_codebooks
+
+    if val_dataloader:
+        run_validation = True
+        val_inps, _ = get_inps(model, val_dataloader, args)
+        val_outs = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in val_inps]
+    else:
+        run_validation = False
+        val_inps, val_outs = None, None
+
     use_cache = model.config.use_cache
     model.config.use_cache = False
 
@@ -182,6 +202,16 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             sequential = get_sequential_groups(model)
         else:
             sequential = [list(find_sublayers(layer).keys())]
+
+        # prepare validation  outputs
+        if run_validation:
+            if len(args.devices) == 1:
+                assert len(val_inps) == len(val_outs) == 1
+                update_outs(layer, val_inps[0], val_outs[0], compute_mse=not args.skip_out_loss, **forward_args)
+            else:
+                update_outs_parallel(
+                    args.devices, layer, val_inps, val_outs, compute_mse=not args.skip_out_loss, **forward_args
+                )
 
         for names in sequential:
             if len(args.devices) == 1:
@@ -249,7 +279,15 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             print(layer)
             layer = layer.to(dtype=torch.float32)
             with using_tf32(enabled=True):
-                layer = finetune_groupwise(layer=layer, inps=inps, outs=outs, args=args, **forward_args)
+                layer = finetune_groupwise(
+                    layer=layer, 
+                    train_inps=inps, 
+                    train_outs=outs, 
+                    args=args, 
+                    valid_inps=val_inps,
+                    valid_outs=val_outs,
+                    **forward_args
+                )
             layer = layer.to(dtype=layer_dtype_original)
             print("FINISHED FINETUNING")
         if args.save:
@@ -266,25 +304,37 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                 args.devices, layer, inps, outs, compute_mse=not args.skip_out_loss, **forward_args
             )
 
+        if run_validation:
+            if len(args.devices) == 1:
+                assert len(val_inps) == len(val_outs) == 1
+                out_val_losses = update_outs(layer, val_inps[0], val_outs[0], compute_mse=not args.skip_out_loss, **forward_args)
+            else:
+                out_val_losses = update_outs_parallel(
+                    args.devices, layer, val_inps, val_outs, compute_mse=not args.skip_out_loss, **forward_args
+                )
+
         layers[layer_index] = layer.to(layer_device_original)
         del layer
         del aq_handlers
         torch.cuda.empty_cache()
 
         inps, outs = outs, inps
+        if run_validation:
+            val_inps, val_outs = val_outs, val_inps
 
         # Logging
         stats_payload["layer_time"] = time.time() - start_time
         stats_payload["out_loss"] = torch.mean(torch.Tensor(out_losses)).item()
+        if run_validation:
+            stats_payload["out_val_loss"] = torch.mean(torch.Tensor(out_val_losses)).item()
         stats_payload["Step"] = layer_index
         if args.wandb:
-            wandb.log({"out_loss": stats_payload["out_loss"]}, step=layer_index)
-            wandb.log({"layer_time": stats_payload["layer_time"]}, step=layer_index)
+            wandb.log(stats_payload, step=layer_index)
         print(stats_payload)
 
     print("=====================\nFinal stats:")
     if args.save:
-        torch.save(vars(args), args.save + "/args.pt")
+        torch.save(vars(args), os.path.join(args.save, "args.pt"))
         already_saved_weights = set()
         for layer in get_layers(model):
             for param in layer.parameters():
@@ -292,7 +342,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
         not_quantized_weights = {
             name: param for name, param in model.named_parameters() if param not in already_saved_weights
         }
-        torch.save(not_quantized_weights, args.save + "/not_quantized_weights.pt")
+        torch.save(not_quantized_weights, os.path.join(args.save, "not_quantized_weights.pt"))
 
     if args.wandb:
         wandb.log({"max_cuda_mem_quantize": round(torch.cuda.max_memory_allocated() / 1e9, 2)})
@@ -684,20 +734,20 @@ if __name__ == "__main__":
     parser.add_argument(
         "--finetune_max_epochs",
         type=int,
-        default=1000,
+        default=5,
         help="Run this many passes over training data when doing finetuning; No finetuning if set to 0.",
+    )
+    parser.add_argument(
+        "--finetune_early_stop",
+        type=int,
+        default=3,
+        help="Terminate finetuning if loss doesn't improve after this number of epochs.",
     )
     parser.add_argument(
         "--finetune_lr",
         type=float,
         default=1e-5,
         help="Finetuning learning rate",
-    )
-    parser.add_argument(
-        "--finetune_relative_mse_tolerance",
-        type=float,
-        default=None,
-        help="Stop finetuning when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)",
     )
     parser.add_argument(
         "--finetune_batch_size",
@@ -725,6 +775,12 @@ if __name__ == "__main__":
         help="(finetuning only) Per-device and per-forward-pass batch size used to accumulate global --batch_size",
     )
     parser.add_argument(
+        "--val_size",
+        type=int,
+        default=0,
+        help="Num validation sequences",
+    )
+    parser.add_argument(
         "--print_frequency",
         type=int,
         default=10,
@@ -749,6 +805,9 @@ if __name__ == "__main__":
     else:
         args.devices = [torch.device(device_str) for device_str in args.devices]
     assert all(isinstance(device, torch.device) for device in args.devices)
+
+    # validate val size
+    assert args.val_size < args.nsamples
 
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
