@@ -106,6 +106,7 @@ def finetune_groupwise(
 
     if run_validation:
          # evaluate before training
+        layer.eval()
         loss_numerator = loss_denominator = 0
         with torch.no_grad():
             for _ in range(valid_steps_per_epoch):
@@ -131,6 +132,7 @@ def finetune_groupwise(
 
     steps_accumulated = 0
     for epoch in range(args.finetune_max_epochs):
+        layer.train()
         # train epoch
         loss_numerator = loss_denominator = 0
         for _ in range(train_steps_per_epoch):
@@ -161,6 +163,7 @@ def finetune_groupwise(
             loss_denominator += 1
         train_loss_epoch = loss_numerator / loss_denominator
         if run_validation:
+            layer.eval()
             # val epoch
             loss_numerator = loss_denominator = 0
             with torch.no_grad():
