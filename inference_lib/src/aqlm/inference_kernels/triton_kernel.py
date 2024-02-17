@@ -1,3 +1,4 @@
+import math
 from typing import Optional
 
 import torch
@@ -125,7 +126,7 @@ def _aqlm_gemv_simple(
 
 
 def next_power_of_2(x):
-    return 1 if x == 0 else 2 ** (x - 1).bit_length()
+    return 1 if x == 0 else 2 ** math.ceil(math.log2(x))
 
 
 def aqlm_gemm_stupid(
