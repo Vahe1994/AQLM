@@ -1,5 +1,6 @@
 #include <torch/all.h>
 #include <torch/python.h>
+#include <c10/cuda/CUDAGuard.h>
 
 void code1x16_matvec_cuda(
   const void* A,
@@ -25,6 +26,7 @@ void code1x16_matvec(
         torch::Tensor& C,
   const torch::Tensor& codebook
 ) {
+  const at::cuda::OptionalCUDAGuard device_guard(device_of(A));
   int prob_m = C.size(0);
   int prob_k = B.size(0);
   code1x16_matvec_cuda(
@@ -81,6 +83,7 @@ void code2x8_matvec(
         torch::Tensor& C,
   const torch::Tensor& codebook
 ) {
+  const at::cuda::OptionalCUDAGuard device_guard(device_of(A));
   int prob_m = C.size(0);
   int prob_k = B.size(0);
   code2x8_matvec_cuda(
