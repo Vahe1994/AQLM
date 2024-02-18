@@ -3,7 +3,6 @@ from contextlib import contextmanager
 
 import torch
 import torch.nn as nn
-from tqdm import trange
 from transformers import AutoConfig, AutoModelForCausalLM
 
 MODEL_ERROR_MSG = "Unsupported model type {} - only 'llama', 'Yi', 'opt' and 'falcon' are supported"
@@ -213,3 +212,14 @@ def load_quantized_model(model, load_path):
         )
     model.load_state_dict(torch.load(os.path.join(load_path, "not_quantized_weights.pt")), strict=False)
     return model
+
+
+def save_not_quantized_weights(model: nn.Module, save_dir: str):
+    already_saved_weights = set()
+    for layer in get_layers(model):
+        for param in layer.parameters():
+            already_saved_weights.add(param)
+    not_quantized_weights = {
+        name: param for name, param in model.named_parameters() if param not in already_saved_weights
+    }
+    torch.save(not_quantized_weights, os.path.join(save_dir, "not_quantized_weights.pt"))

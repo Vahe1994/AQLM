@@ -1,6 +1,7 @@
+import os
 import argparse
 from copy import deepcopy
-from tqdm import trange
+from tqdm import tqdm, trange
 
 import torch
 import torch.nn.functional as F
@@ -11,7 +12,7 @@ try:
 except ModuleNotFoundError:
     has_wandb = False
 
-from src.modelutils import get_model
+from src.modelutils import get_model, get_layers, save_not_quantized_weights
 from src.datautils import get_loaders
 from src.utils import maybe_get_0th_element, _extract_into_tensor
 
@@ -94,7 +95,7 @@ def finetune(
         # prepare batch indices
         batch_indices_epoch = torch.randperm(num_samples)[:epoch_samples].chunk(microbatches_per_epoch)
 
-        for batch_indices in batch_indices_epoch:
+        for batch_indices in tqdm(batch_indices_epoch, desc=f"Train epoch {epoch}", leave=False):
             # convert tensor to list
             batch_indices = batch_indices.tolist()
             inputs = _extract_into_tensor(train_loader, batch_indices, device=device)
@@ -334,6 +335,14 @@ if __name__ == "__main__":
         val_loader=val_dataloader,
         val_logits=orig_val_logits
     )
+
+    # save model
+    if args.save:
+        os.makedirs(args.save, exist_ok=True)
+        for layer_index, layer in enumerate(get_layers(quant_model)):
+            layer_save_path = os.path.join(args.save, f"{layer_index}.pth")
+            torch.save(layer, layer_save_path)
+        save_not_quantized_weights(quant_model, args.save)
 
     print("\n============ Evaluating perplexity... ============")
     torch.cuda.reset_peak_memory_stats()

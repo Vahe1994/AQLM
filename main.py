@@ -22,6 +22,7 @@ from src.modelutils import (
     get_model,
     get_model_head,
     get_sequential_groups,
+    save_not_quantized_weights
 )
 from src.utils import using_tf32
 
@@ -176,6 +177,7 @@ def quantize_aq(
         run_validation = False
         val_inps, val_outs = None, None
 
+    num_codebooks = args.num_codebooks
     use_cache = model.config.use_cache
     model.config.use_cache = False
 
@@ -335,14 +337,7 @@ def quantize_aq(
     print("=====================\nFinal stats:")
     if args.save:
         torch.save(vars(args), os.path.join(args.save, "args.pt"))
-        already_saved_weights = set()
-        for layer in get_layers(model):
-            for param in layer.parameters():
-                already_saved_weights.add(param)
-        not_quantized_weights = {
-            name: param for name, param in model.named_parameters() if param not in already_saved_weights
-        }
-        torch.save(not_quantized_weights, os.path.join(args.save, "not_quantized_weights.pt"))
+        save_not_quantized_weights(model, args.save)
 
     if args.wandb:
         wandb.log({"max_cuda_mem_quantize": round(torch.cuda.max_memory_allocated() / 1e9, 2)})
