@@ -59,7 +59,9 @@ def get_backward_pass_kernel(
     codebooks: torch.Tensor,
     optimize_for_training: bool,
 ) -> torch.Tensor:
-    forward_pass_kernel = get_forward_pass_kernel(codebooks=codebooks, optimize_for_training=optimize_for_training)
+    forward_pass_kernel = get_forward_pass_kernel(
+        codebooks=codebooks.transpose(2, 3), optimize_for_training=optimize_for_training
+    )
 
     def _backward_pass_kernel(
         grad_output: torch.Tensor,  #  [..., in_features]
