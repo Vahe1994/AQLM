@@ -4,6 +4,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
+import aqlm
 from aqlm.inference_kernels import get_backward_pass_kernel, get_forward_pass_kernel
 from aqlm.utils import get_int_dtype
 
@@ -61,6 +62,7 @@ class QuantizedLinear(nn.Module):
             self.register_parameter("bias", None)
 
         # MATMUL_OP
+        self.optimize_for_training: bool = aqlm.inference_kernels.kernel_selector._OPTIMIZE_FOR_TRAINING
         self.matmul_op = None
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
@@ -77,8 +79,8 @@ class QuantizedLinear(nn.Module):
         ):
             self.codes.data = torch.permute(self.codes.data, (1, 0, 2)).contiguous()  #  TODO: fix this thing
 
-        forward_pass_kernel = get_forward_pass_kernel(self.codebooks)
-        backward_pass_kernel = get_backward_pass_kernel(self.codebooks)
+        forward_pass_kernel = get_forward_pass_kernel(self.codebooks, self.optimize_for_training)
+        backward_pass_kernel = get_backward_pass_kernel(self.codebooks, self.optimize_for_training)
 
         class _QuantizedMatmul(torch.autograd.Function):
             @staticmethod

@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from typing import Callable, Optional
 
 import torch
@@ -6,35 +7,48 @@ import torch.nn.functional as F
 
 from aqlm.utils import _dequantize_weight, unpack_int_data
 
+_OPTIMIZE_FOR_TRAINING = False
+
+
+@contextmanager
+def optimize_for_training():
+    global _OPTIMIZE_FOR_TRAINING
+    _OPTIMIZE_FOR_TRAINING = True
+    try:
+        yield
+    finally:
+        _OPTIMIZE_FOR_TRAINING = False
+
 
 def get_forward_pass_kernel(
     codebooks: torch.Tensor,
+    optimize_for_training: bool,
 ) -> Callable[[torch.Tensor, torch.IntTensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]], torch.Tensor]:
     num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
-    match (codebooks.device.type, num_codebooks, codebook_size, out_group_size, in_group_size):
-        case ("cuda", 1, 65536, 1, 8):
+    match (optimize_for_training, codebooks.device.type, num_codebooks, codebook_size, out_group_size, in_group_size):
+        case (False, "cuda", 1, 65536, 1, 8):
             from .cuda_kernel import CUDA_FOLDER
 
             assert (
                 codebooks.dtype == torch.float16
             ), f"please load the model with `torch_dtype=torch.float16`, as {codebooks.dtype} is not supported on GPU yet"
             return torch.ops.aqlm_cuda_kernel.code1x16_matmat
-        case ("cuda", 2, 256, 1, 8):
+        case (False, "cuda", 2, 256, 1, 8):
             from .cuda_kernel import CUDA_FOLDER
 
             assert (
                 codebooks.dtype == torch.float16
             ), f"please load the model with `torch_dtype=torch.float16`, as {codebooks.dtype} is not supported on GPU yet"
             return torch.ops.aqlm_cuda_kernel.code2x8_matmat
-        case ("cuda", _, _, 1, _):
+        case (False, "cuda", _, _, 1, _):
             from .triton_kernel import triton_matmul
 
             return triton_matmul
-        case ("cpu", _, 256, 1, _):
+        case (False, "cpu", _, 256, 1, _):
             from .numba_kernel import numba_gemm_lut
 
             return numba_gemm_lut
-        case _:
+        case (True, *_):
             from .dequantization import dequantize_gemm
 
             return dequantize_gemm
@@ -42,8 +56,9 @@ def get_forward_pass_kernel(
 
 def get_backward_pass_kernel(
     codebooks: torch.Tensor,
+    optimize_for_training: bool,
 ) -> torch.Tensor:
-    forward_pass_kernel = get_forward_pass_kernel(codebooks=codebooks)
+    forward_pass_kernel = get_forward_pass_kernel(codebooks=codebooks, optimize_for_training=optimize_for_training)
 
     def _backward_pass_kernel(
         grad_output: torch.Tensor,  #  [..., in_features]
