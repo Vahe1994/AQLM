@@ -22,18 +22,14 @@ def forward_pass_quantized_linear(
             assert (
                 input.dtype == torch.float16
             ), f"please load the model with `torch_dtype=torch.float16`, as {input.dtype} is not supported on GPU yet"
-            return torch.ops.aqlm_cuda_kernel.code1x16_matmat(input, codes, codebooks, scales) + (
-                bias if bias is not None else 0
-            )
+            return torch.ops.aqlm_cuda_kernel.code1x16_matmat(input, codes, codebooks, scales, bias)
         case ("cuda", 2, 256, 1, 8):
             from .cuda_kernel import CUDA_FOLDER
 
             assert (
                 input.dtype == torch.float16
             ), f"please load the model with `torch_dtype=torch.float16`, as {input.dtype} is not supported on GPU yet"
-            return torch.ops.aqlm_cuda_kernel.code2x8_matmat(input, codes, codebooks, scales) + (
-                bias if bias is not None else 0
-            )
+            return torch.ops.aqlm_cuda_kernel.code2x8_matmat(input, codes, codebooks, scales, bias)
         case ("cuda", _, _, 1, _):
             from .triton_kernel import triton_matmul
 
