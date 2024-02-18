@@ -49,7 +49,7 @@ def get_forward_pass_kernel(
             from .numba_kernel import numba_gemm_lut
 
             return numba_gemm_lut
-        case (True, *_):
+        case _:
             from .dequantization import dequantize_gemm
 
             return dequantize_gemm
