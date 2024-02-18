@@ -1,8 +1,10 @@
 """ Core mathematics for Additive Quantization (AQ): initialization, reconstruction and beam search"""
+from typing import Optional
+
 import torch
 import torch.nn as nn
 
-from aqlm.inference_kernels import QuantizedMatmul
+from aqlm.inference_kernels import get_backward_pass_kernel, get_forward_pass_kernel
 from aqlm.utils import get_int_dtype
 
 
@@ -58,11 +60,66 @@ class QuantizedLinear(nn.Module):
         else:
             self.register_parameter("bias", None)
 
+        # MATMUL_OP
+        self.matmul_op = None
+
     def forward(self, input: torch.Tensor) -> torch.Tensor:
+        if self.matmul_op is None:
+            self.prepare_matmul_op(input)
+
+        return self.matmul_op.apply(input, self.codes, self.codebooks, self.scales, self.bias)
+
+    def prepare_matmul_op(self, input: torch.Tensor):
         if (
             not input.is_cuda
             and self.codebook_size == 256
             and self.codes.shape[0] == self.out_features // self.out_group_size
         ):
             self.codes.data = torch.permute(self.codes.data, (1, 0, 2)).contiguous()  #  TODO: fix this thing
-        return QuantizedMatmul.apply(input, self.codes, self.codebooks, self.scales, self.bias)
+
+        forward_pass_kernel = get_forward_pass_kernel(self.codebooks)
+        backward_pass_kernel = get_backward_pass_kernel(self.codebooks)
+
+        class _QuantizedMatmul(torch.autograd.Function):
+            @staticmethod
+            def forward(
+                ctx: torch.Any,
+                input: torch.Tensor,
+                codes: torch.IntTensor,
+                codebooks: torch.Tensor,
+                scales: torch.Tensor,
+                bias: Optional[torch.Tensor],
+            ) -> torch.Tensor:
+                ctx.save_for_backward(
+                    input,
+                    codes,
+                    codebooks,
+                    scales,
+                    bias,
+                )
+                return forward_pass_kernel(
+                    input,
+                    codes,
+                    codebooks,
+                    scales,
+                    bias,
+                )
+
+            @staticmethod
+            def backward(ctx, grad_output: torch.Tensor) -> torch.Tensor:
+                input, codes, codebooks, scales, bias = ctx.saved_tensors
+                return (
+                    backward_pass_kernel(
+                        grad_output,
+                        codes,
+                        codebooks,
+                        scales,
+                        bias,
+                    ),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+
+        self.matmul_op = _QuantizedMatmul

@@ -1,1 +1,1 @@
-from .kernel_selector import QuantizedMatmul
+from .kernel_selector import get_backward_pass_kernel, get_forward_pass_kernel
