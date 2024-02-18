@@ -12,6 +12,7 @@ _OPTIMIZE_FOR_TRAINING = False
 
 @contextmanager
 def optimize_for_training():
+    """Use this context manager during model initialization (e.g. `.from_pretrained(...)`) to select inference kernels optimized for larger batch sizes"""
     global _OPTIMIZE_FOR_TRAINING
     _OPTIMIZE_FOR_TRAINING = True
     try:
