@@ -1,5 +1,6 @@
 #include <torch/all.h>
 #include <torch/python.h>
+#include <c10/cuda/CUDAGuard.h>
 
 void code1x16_matvec_cuda(
   const void* A,
@@ -25,6 +26,7 @@ void code1x16_matvec(
         torch::Tensor& C,
   const torch::Tensor& codebook
 ) {
+  const at::cuda::OptionalCUDAGuard device_guard(device_of(A));
   int prob_m = C.size(0);
   int prob_k = B.size(0);
   code1x16_matvec_cuda(
@@ -41,7 +43,8 @@ torch::Tensor code1x16_matmat(
   const torch::Tensor& input,
   const torch::Tensor& codes,
   const torch::Tensor& codebooks,
-  const torch::Tensor& scales
+  const torch::Tensor& scales,
+  const std::optional<torch::Tensor>& bias
 ) {
   auto input_sizes = input.sizes();
   auto out_features = codes.size(0) * codebooks.size(2);
@@ -63,10 +66,14 @@ torch::Tensor code1x16_matmat(
     );
   }
   flat_output *= scales.flatten().unsqueeze(0);
+  if (bias.has_value()) {
+    flat_output += bias->unsqueeze(0);
+  }
+
   auto output_sizes = input_sizes.vec();
   output_sizes.pop_back();
   output_sizes.push_back(-1);
-  auto output = flat_output.view(output_sizes);
+  auto output = flat_output.reshape(output_sizes).clone();
   return output;
 }
 
@@ -76,6 +83,7 @@ void code2x8_matvec(
         torch::Tensor& C,
   const torch::Tensor& codebook
 ) {
+  const at::cuda::OptionalCUDAGuard device_guard(device_of(A));
   int prob_m = C.size(0);
   int prob_k = B.size(0);
   code2x8_matvec_cuda(
@@ -92,7 +100,8 @@ torch::Tensor code2x8_matmat(
   const torch::Tensor& input,
   const torch::Tensor& codes,
   const torch::Tensor& codebooks,
-  const torch::Tensor& scales
+  const torch::Tensor& scales,
+  const std::optional<torch::Tensor>& bias
 ) {
   auto input_sizes = input.sizes();
   auto out_features = codes.size(0) * codebooks.size(2);
@@ -114,16 +123,20 @@ torch::Tensor code2x8_matmat(
     );
   }
   flat_output *= scales.flatten().unsqueeze(0);
+  if (bias.has_value()) {
+    flat_output += bias->unsqueeze(0);
+  }
+
   auto output_sizes = input_sizes.vec();
   output_sizes.pop_back();
   output_sizes.push_back(-1);
-  auto output = flat_output.view(output_sizes);
+  auto output = flat_output.reshape(output_sizes).clone();
   return output;
 }
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("code1x16_matvec", &code1x16_matvec, "1x16 (2bit) codebook matrix-vector product.");
-  m.def("code1x16_matmat", &code1x16_matmat, "1x16 (2bit) codebook matrix-matrix product.");
-  m.def("code2x8_matvec", &code2x8_matvec, "2x8 (2bit) codebook matrix-vector product.");
-  m.def("code2x8_matmat", &code2x8_matmat, "2x8 (2bit) codebook matrix-matrix product.");
+TORCH_LIBRARY(aqlm_cuda_kernel, m) {
+  m.def("code1x16_matvec", code1x16_matvec);
+  m.def("code1x16_matmat", code1x16_matmat);
+  m.def("code2x8_matvec", code2x8_matvec);
+  m.def("code2x8_matmat", code2x8_matmat);
 }
