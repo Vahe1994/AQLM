@@ -155,7 +155,7 @@ def aqlm_gemm_stupid(
         raise NotImplementedError(f"Can't do Triton AQLM matmul with scales of shape {scales.shape}")
 
     if not input.is_contiguous():
-        raise Exception("AAAA")
+        raise ValueError("Input tensor must be contiguous")
 
     output = torch.empty(input.shape[0], out_features, device=device, dtype=dtype)
     for i in range(input.shape[0]):
