@@ -1,10 +1,9 @@
 """ Core mathematics for Additive Quantization (AQ): initialization, reconstruction and beam search"""
 from typing import Optional
 
+import aqlm
 import torch
 import torch.nn as nn
-
-import aqlm
 from aqlm.inference_kernels import get_backward_pass_kernel, get_forward_pass_kernel
 from aqlm.utils import get_int_dtype
 

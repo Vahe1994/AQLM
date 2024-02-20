@@ -2,9 +2,8 @@ from typing import Optional
 
 import torch
 import torch.nn.functional as F
-from torch import nn
-
 from aqlm.utils import _dequantize_weight, unpack_int_data
+from torch import nn
 
 
 def dequantize_gemm(

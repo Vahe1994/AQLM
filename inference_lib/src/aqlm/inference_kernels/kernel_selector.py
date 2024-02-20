@@ -4,7 +4,6 @@ from typing import Callable, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from aqlm.utils import _dequantize_weight, unpack_int_data
 
 _OPTIMIZE_FOR_TRAINING = False
