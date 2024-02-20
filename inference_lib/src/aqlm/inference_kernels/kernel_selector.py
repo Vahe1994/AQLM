@@ -25,33 +25,47 @@ def get_forward_pass_kernel(
     optimize_for_training: bool,
 ) -> Callable[[torch.Tensor, torch.IntTensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]], torch.Tensor]:
     num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
-    match (optimize_for_training, codebooks.device.type, num_codebooks, codebook_size, out_group_size, in_group_size):
-        case (False, "cuda", 1, 65536, 1, 8):
-            from .cuda_kernel import CUDA_FOLDER
 
-            assert (
-                codebooks.dtype == torch.float16
-            ), f"please load the model with `torch_dtype=torch.float16`, as {codebooks.dtype} is not supported on GPU yet"
-            return torch.ops.aqlm_cuda_kernel.code1x16_matmat
-        case (False, "cuda", 2, 256, 1, 8):
-            from .cuda_kernel import CUDA_FOLDER
+    if (optimize_for_training, codebooks.device.type, num_codebooks, codebook_size, out_group_size, in_group_size) == (
+        False,
+        "cuda",
+        1,
+        65536,
+        1,
+        8,
+    ):
+        from .cuda_kernel import CUDA_FOLDER
 
-            assert (
-                codebooks.dtype == torch.float16
-            ), f"please load the model with `torch_dtype=torch.float16`, as {codebooks.dtype} is not supported on GPU yet"
-            return torch.ops.aqlm_cuda_kernel.code2x8_matmat
-        case (False, "cuda", _, _, 1, _):
-            from .triton_kernel import triton_matmul
+        assert (
+            codebooks.dtype == torch.float16
+        ), f"please load the model with `torch_dtype=torch.float16`, as {codebooks.dtype} is not supported on GPU yet"
+        return torch.ops.aqlm_cuda_kernel.code1x16_matmat
+    elif (
+        optimize_for_training,
+        codebooks.device.type,
+        num_codebooks,
+        codebook_size,
+        out_group_size,
+        in_group_size,
+    ) == (False, "cuda", 2, 256, 1, 8):
+        from .cuda_kernel import CUDA_FOLDER
 
-            return triton_matmul
-        case (False, "cpu", _, 256, 1, _):
-            from .numba_kernel import numba_gemm_lut
+        assert (
+            codebooks.dtype == torch.float16
+        ), f"please load the model with `torch_dtype=torch.float16`, as {codebooks.dtype} is not supported on GPU yet"
+        return torch.ops.aqlm_cuda_kernel.code2x8_matmat
+    elif (optimize_for_training, codebooks.device.type, out_group_size) == (False, "cuda", 1):
+        from .triton_kernel import triton_matmul
 
-            return numba_gemm_lut
-        case _:
-            from .dequantization import dequantize_gemm
+        return triton_matmul
+    elif (optimize_for_training, codebooks.device.type, codebook_size, out_group_size) == (False, "cpu", 256, 1):
+        from .numba_kernel import numba_gemm_lut
 
-            return dequantize_gemm
+        return numba_gemm_lut
+    else:
+        from .dequantization import dequantize_gemm
+
+        return dequantize_gemm
 
 
 def get_backward_pass_kernel(
