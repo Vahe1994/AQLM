@@ -1,10 +1,12 @@
 import os
+import shutil
 import argparse
 from copy import deepcopy
 from tqdm import tqdm, trange
 
 import torch
 import torch.nn.functional as F
+from accelerate.hooks import remove_hook_from_submodules
 
 try:
     import wandb
@@ -288,6 +290,13 @@ if __name__ == "__main__":
         choices=["auto", "float16", "float32", "bfloat16"],
         help="dtype to load the model in",
     )
+    parser.add_argument(
+        "--device_map",
+        type=str,
+        default=None,
+        choices=[None, "auto"],
+        help="accelerate device map",
+    )
     args = parser.parse_args()
     args.microbatch_size = args.microbatch_size or args.batch_size
     # get device
@@ -314,7 +323,9 @@ if __name__ == "__main__":
         train_dataloader = dataloader
         val_dataloader = None
     # create original model
-    orig_model = get_model(args.base_model, None, args.dtype, args.model_seqlen).to(device)
+    orig_model = get_model(args.base_model, None, args.device_map, args.dtype, args.model_seqlen)
+    if not args.device_map:
+        orig_model = orig_model.to(device)
     # cache logits
     orig_train_logits = cache_logits(orig_model, train_dataloader, device)
     if val_dataloader:
@@ -323,7 +334,9 @@ if __name__ == "__main__":
         orig_val_logits = None
     del orig_model
     torch.cuda.empty_cache()
-    quant_model = get_model(args.base_model, args.quant_model, args.dtype, args.model_seqlen).to(device)
+    quant_model = get_model(args.base_model, args.quant_model, args.device_map, args.dtype, args.model_seqlen)
+    if not args.device_map:
+        quant_model = quant_model.to(device)
 
     # finetune
     finetune(
@@ -336,6 +349,11 @@ if __name__ == "__main__":
         val_logits=orig_val_logits
     )
 
+    # offload model to cpu
+    quant_model = quant_model.cpu()
+    if args.device_map:
+        remove_hook_from_submodules(quant_model)
+
     # save model
     if args.save:
         os.makedirs(args.save, exist_ok=True)
@@ -343,6 +361,8 @@ if __name__ == "__main__":
             layer_save_path = os.path.join(args.save, f"{layer_index}.pth")
             torch.save(layer, layer_save_path)
         save_not_quantized_weights(quant_model, args.save)
+        # copy args
+        shutil.copy(os.path.join(args.quant_model, "args.pt"), os.path.join(args.save, "args.pt"))
 
     print("\n============ Evaluating perplexity... ============")
     torch.cuda.reset_peak_memory_stats()

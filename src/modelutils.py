@@ -1,8 +1,11 @@
 import os
+import math
 from contextlib import contextmanager
 
 import torch
 import torch.nn as nn
+
+from accelerate import dispatch_model
 from transformers import AutoConfig, AutoModelForCausalLM
 
 MODEL_ERROR_MSG = "Unsupported model type {} - only 'llama', 'Yi', 'opt' and 'falcon' are supported"
@@ -23,7 +26,23 @@ def suspend_nn_inits():
         torch.nn.init.kaiming_uniform_, torch.nn.init.uniform_, torch.nn.init.normal_ = saved_inits  # restoring
 
 
-def get_model(model_path, load_quantized=None, dtype="auto", model_seqlen=2048):
+def dispatch_quantized_model(model):
+    num_devices = torch.cuda.device_count()
+    device_map = {
+        "model.embed_tokens": 0,
+        "model.norm": num_devices - 1,
+        "lm_head": num_devices - 1
+    }
+    num_layers = len(model.model.layers)
+    layers_per_device = math.ceil(num_layers / num_devices)
+    for layer_id in range(num_layers):
+        device_id = layer_id // layers_per_device
+        device_map[f"model.layers.{layer_id}"] = device_id
+    model = dispatch_model(model, device_map)
+    return model
+
+
+def get_model(model_path, load_quantized=None, device_map=None, dtype="auto", model_seqlen=2048):
     if dtype == "auto":
         dtype = (
             AutoConfig.from_pretrained(model_path, trust_remote_code=True).torch_dtype or "auto"
@@ -36,6 +55,8 @@ def get_model(model_path, load_quantized=None, dtype="auto", model_seqlen=2048):
             pretrained_model_name_or_path=model_path,
             trust_remote_code=True,
             torch_dtype=dtype,
+            # do not distribute if loading quantized
+            device_map=None if load_quantized else device_map,
             low_cpu_mem_usage=True,
             local_files_only=True,
         )
@@ -43,11 +64,14 @@ def get_model(model_path, load_quantized=None, dtype="auto", model_seqlen=2048):
             print("Initializing model with random weights...")
             print("Loading quantized model ...")
             model = load_quantized_model(model, load_quantized)
+            # TODO works only for Llama
+            if device_map == "auto":
+                model = dispatch_quantized_model(model)
         else:
             print("Loading pretrained model ...")
 
     model.seqlen = model_seqlen
-    print("Model loaded sucessfully ...")
+    print("Model loaded sucсessfully ...")
 
     return model
 
