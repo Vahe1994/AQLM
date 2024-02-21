@@ -218,7 +218,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                         args.num_codebooks = 2 * num_codebooks
                     else:
                         args.num_codebooks = num_codebooks
-                    print(sublayer_name.lower(), " num codebooks", args.num_codebooks)
+                    print(sublayer_name.lower(), " mixtral num codebooks", args.num_codebooks)
                 quantized_weight = aq_handlers[sublayer_name].quantize(args=args, verbose=True)
 
                 with torch.no_grad():
