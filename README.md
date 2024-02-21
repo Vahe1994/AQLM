@@ -28,8 +28,8 @@ We provide a number of prequantized models:
 
 | Model      | AQLM scheme | WikiText 2 PPL | Model size, Gb | Hub link                                                                 |
 |------------|-------------|----------------|----------------|--------------------------------------------------------------------------|
-| Llama-2-7b | 1x16        | 6.31           | 2.4            | [Link](https://huggingface.co/BlackSamorez/Llama-2-7b-AQLM-2Bit-1x16-hf) |
-| Llama-2-7b | 2x8         | 7.98           | 2.2            | [Link](https://huggingface.co/BlackSamorez/Llama-2-7b-AQLM-2Bit-2x8-hf)  |
+| Llama-2-7b | 1x16        | 5.92           | 2.4            | [Link](https://huggingface.co/BlackSamorez/Llama-2-7b-AQLM-2Bit-1x16-hf) |
+| Llama-2-7b | 2x8         | 6.69           | 2.2            | [Link](https://huggingface.co/BlackSamorez/Llama-2-7b-AQLM-2Bit-2x8-hf)  |
 | Llama-2-7b | 8x8         | 7.83           | 2.2            | [Link](https://huggingface.co/BlackSamorez/Llama-2-7b-AQLM-2Bit-8x8-hf)  |
 | Llama-2-13b| 1x16        | 5.41           | 4.1            | [Link](https://huggingface.co/BlackSamorez/Llama-2-13b-AQLM-2Bit-1x16-hf)|
 | Llama-2-70b| 1x16        | 3.96           | 18.8           | [Link](https://huggingface.co/BlackSamorez/Llama-2-70b-AQLM-2Bit-1x16-hf)|
