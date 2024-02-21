@@ -24,7 +24,7 @@ from main import perplexity_eval
 @torch.inference_mode()
 def cache_logits(model, dataloader, device):
     cached_logits = []
-    for i in trange(len(dataloader),  total=len(dataloader), desc='Caching teacher logits', leave=False):
+    for i in trange(len(dataloader),  total=len(dataloader), desc='Caching logits', leave=False):
         with torch.autocast(device_type='cuda', enabled=args.amp):
             batch = maybe_get_0th_element(dataloader[i]).to(device)
         cached_logits.append(model(batch).logits.cpu())
@@ -76,6 +76,8 @@ def finetune(
     epoch_samples = num_samples - num_samples % args.microbatch_size
     microbatches_per_epoch = epoch_samples // args.microbatch_size
 
+    
+
     if args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
@@ -84,7 +86,7 @@ def finetune(
     if run_validation:
         valid_loss_epoch = evalulate(model, val_loader, val_logits, args.microbatch_size)
         print(f"Evaluation before training.")
-        print(f"valid loss={valid_loss_epoch:.2e}\t")
+        print(f"valid loss={valid_loss_epoch:.3e}\t")
         best_loss = valid_loss_epoch
         best_params = deepcopy(diff_params)
         worse_count = 0
@@ -112,6 +114,8 @@ def finetune(
 
             scaler.scale(loss / num_accumulation_steps).backward()
 
+            steps_accumulated += 1
+
             if steps_accumulated == num_accumulation_steps:
                 scaler.step(opt)
                 scaler.update()
@@ -119,7 +123,6 @@ def finetune(
                 # reset accumulated step and loss
                 steps_accumulated = 0
 
-            steps_accumulated += 1
             loss_numerator += loss.item()
             loss_denominator += 1
         train_loss_epoch = loss_numerator / loss_denominator
@@ -130,9 +133,9 @@ def finetune(
         # log losses in the end of the epoch
         print('-' * 10)
         print(f"epoch={epoch}")
-        print(f"train loss={train_loss_epoch:.2e}\t")
+        print(f"train loss={train_loss_epoch:.3e}\t")
         if run_validation:
-            print(f"valid loss={valid_loss_epoch:.2e}\t")
+            print(f"valid loss={valid_loss_epoch:.3e}\t")
 
         if args.wandb:
             wandb.log({'train_loss': train_loss_epoch}, step=epoch)
@@ -141,7 +144,7 @@ def finetune(
 
         if run_validation:
             if valid_loss_epoch < best_loss:
-                print(f"new best loss {valid_loss_epoch:.2e} on epoch {epoch}")
+                print(f"new best loss {valid_loss_epoch:.3e} on epoch {epoch}")
                 best_loss = valid_loss_epoch
                 best_params = deepcopy(diff_params)
                 worse_count = 0
@@ -323,7 +326,7 @@ if __name__ == "__main__":
         train_dataloader = dataloader
         val_dataloader = None
     # create original model
-    orig_model = get_model(args.base_model, None, args.device_map, args.dtype, args.model_seqlen)
+    orig_model = get_model(args.base_model, None, args.dtype, args.model_seqlen, args.device_map)
     if not args.device_map:
         orig_model = orig_model.to(device)
     # cache logits
@@ -334,7 +337,7 @@ if __name__ == "__main__":
         orig_val_logits = None
     del orig_model
     torch.cuda.empty_cache()
-    quant_model = get_model(args.base_model, args.quant_model, args.device_map, args.dtype, args.model_seqlen)
+    quant_model = get_model(args.base_model, args.quant_model, args.dtype, args.model_seqlen, args.device_map)
     if not args.device_map:
         quant_model = quant_model.to(device)
 

@@ -42,7 +42,13 @@ def dispatch_quantized_model(model):
     return model
 
 
-def get_model(model_path, load_quantized=None, device_map=None, dtype="auto", model_seqlen=2048):
+def get_model(
+    model_path, 
+    load_quantized=None, 
+    dtype="auto", 
+    model_seqlen=2048, 
+    device_map=None
+):
     if dtype == "auto":
         dtype = (
             AutoConfig.from_pretrained(model_path, trust_remote_code=True).torch_dtype or "auto"
@@ -55,7 +61,7 @@ def get_model(model_path, load_quantized=None, device_map=None, dtype="auto", mo
             pretrained_model_name_or_path=model_path,
             trust_remote_code=True,
             torch_dtype=dtype,
-            # do not distribute if loading quantized
+            # defer distribution if loading quantized
             device_map=None if load_quantized else device_map,
             low_cpu_mem_usage=True,
             local_files_only=True,
