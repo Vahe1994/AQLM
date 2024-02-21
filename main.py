@@ -179,6 +179,7 @@ def quantize_aq(
 
     num_codebooks = args.num_codebooks
     use_cache = model.config.use_cache
+    num_codebooks = args.num_codebooks
     model.config.use_cache = False
 
     quantizers = {}
