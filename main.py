@@ -155,7 +155,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
     print("\nStarting AQ quantization ...")
     inps, forward_args = get_inps(model, dataloader, args)
     outs = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
-
+    num_codebooks = args.num_codebooks
     use_cache = model.config.use_cache
     model.config.use_cache = False
 
@@ -163,6 +163,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
     overall_bits = 0
     model_number_of_params = 0
     layers = get_layers(model)
+
     for layer_index in range(len(layers)):
         print(f"\n---------------- Layer {layer_index} of {len(layers)} ----------------")
         stats_payload = {}
@@ -185,12 +186,39 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
         for names in sequential:
             if len(args.devices) == 1:
                 assert len(inps) == len(outs) == 1  # number of per-device inputs/outputs
-                aq_handlers = init_aq_engines(layer, names, inps[0], outs[0], **forward_args)
+                aq_handlers = init_aq_engines(
+                    layer,
+                    [
+                        name
+                        for name in names
+                        if ((".gate" not in name.lower()) or ("mixtral" not in model.config.model_type.lower()))
+                    ],
+                    inps[0],
+                    outs[0],
+                    **forward_args,
+                )
             else:
-                aq_handlers = init_aq_engines_parallel(args.devices, layer, names, inps, outs, **forward_args)
-
+                aq_handlers = init_aq_engines_parallel(
+                    args.devices,
+                    layer,
+                    [
+                        name
+                        for name in names
+                        if ((".gate" not in name.lower()) or ("mixtral" not in model.config.model_type.lower()))
+                    ],
+                    inps,
+                    outs,
+                    **forward_args,
+                )
             for sublayer_name in aq_handlers.keys():
                 print(f"Quantizing module {sublayer_name} of layer {layer_index}")
+                if "mixtral" in model.config.model_type.lower() and args.mix_compression:
+                    assert "mixtral" in model.config.model_type.lower()
+                    if "self_attn" in sublayer_name.lower():
+                        args.num_codebooks = 2 * num_codebooks
+                    else:
+                        args.num_codebooks = num_codebooks
+                    print(sublayer_name.lower(), " mixtral num codebooks", args.num_codebooks)
                 quantized_weight = aq_handlers[sublayer_name].quantize(args=args, verbose=True)
 
                 with torch.no_grad():
@@ -199,6 +227,9 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
                     )  # test that this is not a replica
 
                     new_linear = QuantizedLinear(quantized_weight, aq_handlers[sublayer_name].layer.bias)
+                    if args.use_checkpointing:
+                        new_linear.use_checkpoint = True
+                        print("ENABLED CHECKPOINTING FOR", sublayer_name)
                     found_original = False
                     for submodule in layer.modules():
                         for child_name, child_module in submodule.named_children():
@@ -516,6 +547,16 @@ if __name__ == "__main__":
         default=4096,
         help="Model seqlen and calibration data context length.",
     )
+    parser.add_argument(
+        "--use_checkpointing",
+        action="store_true",
+        help="Whether to use checkpoining in finetuning",
+    )
+    parser.add_argument(
+        "--mix_compression",
+        action="store_true",
+        help="Compress .self_attn in 4 bits, .block_sparse_moe.experts to 2.3 for mixtral.",
+    )
     parser.add_argument("--load", type=str, default=None, help="Path to load quantized statistics.")
     parser.add_argument("--save", type=str, default=None, help="Path to save quantized statistics.")
     parser.add_argument("--devices", metavar="N", type=str, nargs="+", default=None, help="List of devices")
@@ -739,9 +780,9 @@ if __name__ == "__main__":
 
     print("\n============ Evaluating perplexity... ============")
     torch.cuda.reset_peak_memory_stats()
-    datasets = ["wikitext2", "ptb", "c4"]
+    datasets = ["wikitext2", "c4"]
     if args.new_eval:
-        datasets = ["wikitext2", "ptb-new", "c4-new"]
+        datasets = ["wikitext2", "c4-new"]
     for dataset in datasets:
         testloader = get_loaders(
             dataset,
