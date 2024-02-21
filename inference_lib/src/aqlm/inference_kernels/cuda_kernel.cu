@@ -1,6 +1,7 @@
 #include <cuda.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
+#include <c10/cuda/CUDAStream.h>
 
 #include <iostream>
 
@@ -166,7 +167,8 @@ void  code1x16_matvec_cuda(
 
   int blocks = ceildiv(prob_m, thread_m);
   int threads = 32 * thread_m;
-  Code1x16MatVec<<<blocks, threads>>>(
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
+  Code1x16MatVec<<<blocks, threads, 16*32*9, stream>>>(
     (const int4*) A,
     (const int4*) B,
     (int4*) C,
@@ -199,7 +201,8 @@ void  code2x8_matvec_cuda(
   cudaFuncSetAttribute(
     Code2x8MatVec, cudaFuncAttributeMaxDynamicSharedMemorySize, shared
   );
-  Code2x8MatVec<<<blocks, threads, shared>>>(
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
+  Code2x8MatVec<<<blocks, threads, shared, stream>>>(
     (const int4*) A,
     (const int4*) B,
     (int4*) C,
