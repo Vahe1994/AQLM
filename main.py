@@ -52,7 +52,7 @@ def quantize_model(model, args):
 
 @torch.no_grad()
 def get_inps(
-    model: PreTrainedModel, data_iterable: Iterable, args: Namespace, nsamples: Optional[int] = None
+        model: PreTrainedModel, data_iterable: Iterable, args: Namespace, nsamples: Optional[int] = None
 ) -> Sequence[torch.Tensor]:
     """
     mocks model launch to collect inputs to the first model layer
@@ -71,7 +71,7 @@ def get_inps(
 
         def batch_generator(testenc, seqlen, nsamples):
             for i in range(nsamples):
-                batch = testenc[:, (i * seqlen) : ((i + 1) * seqlen)].to(device)
+                batch = testenc[:, (i * seqlen): ((i + 1) * seqlen)].to(device)
                 yield batch
 
         data_iterable = batch_generator(data_iterable, model.seqlen, nsamples)
@@ -155,7 +155,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
     print("\nStarting AQ quantization ...")
     inps, forward_args = get_inps(model, dataloader, args)
     outs = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
-
+    num_codebooks = args.num_codebooks
     use_cache = model.config.use_cache
     model.config.use_cache = False
 
@@ -163,6 +163,7 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
     overall_bits = 0
     model_number_of_params = 0
     layers = get_layers(model)
+
     for layer_index in range(len(layers)):
         print(f"\n---------------- Layer {layer_index} of {len(layers)} ----------------")
         stats_payload = {}
@@ -212,12 +213,11 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             for sublayer_name in aq_handlers.keys():
                 print(f"Quantizing module {sublayer_name} of layer {layer_index}")
                 if "mixtral" in model.config.model_type.lower() and args.mix_compression:
-                    print("mix_compression")
-                    assert args.nbits_per_codebook == 16
+                    assert "mixtral" in model.config.model_type.lower()
                     if "self_attn" in sublayer_name.lower():
-                        args.num_codebooks = 2
+                        args.num_codebooks = 2 * num_codebooks
                     else:
-                        args.num_codebooks = 1
+                        args.num_codebooks = num_codebooks
                     print(sublayer_name.lower(), " num codebooks", args.num_codebooks)
                 quantized_weight = aq_handlers[sublayer_name].quantize(args=args, verbose=True)
 
@@ -340,7 +340,7 @@ def perplexity_eval(model, testenc, args):
         inp = inps[i // nsamples_per_device][i % nsamples_per_device].to(args.devices[0], non_blocking=True)
         lm_logits = get_lm_logits(inp.to(device), model)
         shift_logits = lm_logits[:, :-1, :].contiguous()
-        shift_labels = testenc[:, (i * model.seqlen) : ((i + 1) * model.seqlen)][:, 1:]
+        shift_labels = testenc[:, (i * model.seqlen): ((i + 1) * model.seqlen)][:, 1:]
         loss_fct = nn.CrossEntropyLoss()
         loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
         neg_log_likelihood = loss.float() * model.seqlen
@@ -358,11 +358,11 @@ def perplexity_eval(model, testenc, args):
 
 @torch.no_grad()
 def init_aq_engines(
-    layer: nn.Module,
-    names: Sequence[str],
-    inps_tensor: torch.Tensor,
-    outs_tensor: torch.Tensor,
-    **forward_args: Dict[str, Any],
+        layer: nn.Module,
+        names: Sequence[str],
+        inps_tensor: torch.Tensor,
+        outs_tensor: torch.Tensor,
+        **forward_args: Dict[str, Any],
 ) -> Dict[str, AQEngine]:
     """
     Create a dictionary of AQUtil instances for each quantized layer;
@@ -417,12 +417,12 @@ class _LayerWrapperThatAccumulatesXTX(nn.Module):
 
 @torch.no_grad()
 def init_aq_engines_parallel(
-    devices: Sequence[torch.device],
-    layer: nn.Module,
-    names: Sequence[str],
-    inps: Sequence[torch.Tensor],
-    outs: Sequence[torch.Tensor],
-    **forward_args,
+        devices: Sequence[torch.device],
+        layer: nn.Module,
+        names: Sequence[str],
+        inps: Sequence[torch.Tensor],
+        outs: Sequence[torch.Tensor],
+        **forward_args,
 ):
     """Parallel version of init_aq_engines; works on lists of input/output tensors"""
     layer_replicas = torch.nn.parallel.replicate(layer, devices=devices, detach=True)
@@ -456,7 +456,7 @@ def init_aq_engines_parallel(
 
 @torch.no_grad()
 def update_outs(
-    layer: nn.Module, inps_tensor: torch.Tensor, outs_tensor: torch.Tensor, compute_mse: bool, **forward_args
+        layer: nn.Module, inps_tensor: torch.Tensor, outs_tensor: torch.Tensor, compute_mse: bool, **forward_args
 ) -> Sequence[float]:
     """
     Update outs_tensor with new activations and optionally compute sample-wise mse loss with previous activations
@@ -489,12 +489,12 @@ def update_outs(
 
 @torch.no_grad()
 def update_outs_parallel(
-    devices: Sequence[torch.device],
-    layer: nn.Module,
-    inps: Sequence[torch.Tensor],
-    outs: Sequence[torch.Tensor],
-    compute_mse: bool,
-    **forward_args,
+        devices: Sequence[torch.device],
+        layer: nn.Module,
+        inps: Sequence[torch.Tensor],
+        outs: Sequence[torch.Tensor],
+        compute_mse: bool,
+        **forward_args,
 ) -> Sequence[float]:
     """Parallel version of update_outs_and_compute_losses; works on lists of input/output tensors"""
     layer_replicas = torch.nn.parallel.replicate(layer, devices=devices, detach=True)
@@ -572,7 +572,7 @@ if __name__ == "__main__":
         type=int,
         default=0,
         help="Seed for calibration data and initialization. "
-        "Note that the main training is not strictly deterministic.",
+             "Note that the main training is not strictly deterministic.",
     )
     parser.add_argument(
         "--skip_out_loss",
@@ -618,8 +618,8 @@ if __name__ == "__main__":
         type=int,
         default=0,
         help="Number of bits dedicated to the learnable group-wise scale. 0 means do not use group-wise scales "
-        "(still has row-wise scales), 1-15 means using per-group scales quantized to this many bits, "
-        "16+ means use per-group scales but do not quantize them",
+             "(still has row-wise scales), 1-15 means using per-group scales quantized to this many bits, "
+             "16+ means use per-group scales but do not quantize them",
     )
     parser.add_argument(
         "--codebook_value_nbits",
@@ -753,17 +753,17 @@ if __name__ == "__main__":
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
         args.exp_name = (
-            os.environ.get("WANDB_NAME", "AQ")
-            + f"_num_codebooks_{args.num_codebooks}"
-            + f"_out_group_size_{args.out_group_size}"
-            + f"_in_group_size_{args.in_group_size}"
-            + f"_nbits_per_codebook_{args.nbits_per_codebook}"
-            + f"_codebook_value_nbits_{args.codebook_value_nbits}"
-            + f"_codebook_value_num_groups_{args.codebook_value_num_groups}"
-            + f"_scale_nbits_{args.scale_nbits}"
-            + f"_steps_per_epoch_{args.steps_per_epoch}"
-            + f"_init_max_iter{args.init_max_iter}"
-            + f"_{len(args.devices)}gpus"
+                os.environ.get("WANDB_NAME", "AQ")
+                + f"_num_codebooks_{args.num_codebooks}"
+                + f"_out_group_size_{args.out_group_size}"
+                + f"_in_group_size_{args.in_group_size}"
+                + f"_nbits_per_codebook_{args.nbits_per_codebook}"
+                + f"_codebook_value_nbits_{args.codebook_value_nbits}"
+                + f"_codebook_value_num_groups_{args.codebook_value_num_groups}"
+                + f"_scale_nbits_{args.scale_nbits}"
+                + f"_steps_per_epoch_{args.steps_per_epoch}"
+                + f"_init_max_iter{args.init_max_iter}"
+                + f"_{len(args.devices)}gpus"
         )
         args.group_size = args.in_group_size * args.out_group_size
 
