@@ -12,7 +12,6 @@ import torch
 
 torch.set_num_threads(8)
 from torch import nn
-
 from transformers import AutoConfig, AutoModelForCausalLM
 
 if __name__ == "__main__":
