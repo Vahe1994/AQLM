@@ -4,12 +4,11 @@ from contextlib import contextmanager
 import torch
 import torch.nn as nn
 from tqdm import trange
-
 from transformers import AutoConfig, AutoModelForCausalLM
 
 MODEL_ERROR_MSG = "Unsupported model type {} - only 'llama', 'Yi', 'opt' and 'falcon' are supported"
 FALCON_TYPES = ("falcon", "refinedweb", "refinedwebmodel")
-LLAMA_LIKE = ("llama", "Yi", "mistral")
+LLAMA_LIKE = ("llama", "Yi", "mistral", "mixtral")
 
 
 @contextmanager
@@ -120,6 +119,7 @@ def find_sublayers(module, layers=(nn.Conv2d, nn.Linear)):
 
 def get_sequential_groups(model):
     if model.config.model_type in LLAMA_LIKE:
+        assert "mixtral" not in model.config.model_type.lower()  # check that this is not mixtral
         return [
             ["self_attn.k_proj", "self_attn.v_proj", "self_attn.q_proj"],
             ["self_attn.o_proj"],
@@ -150,13 +150,31 @@ def read_quant_weight_from_file(load_path, block_i, layer_name, device):
     return torch.load(load_path + "/" + str(block_i) + "/" + layer_name, map_location=device)
 
 
-def load_linear_layers(layer, quant_layer):
+def load_linear_layers(layer, quant_layer, model):
+    layer_ident = {}
     for submodule in layer.modules():
         for child_name, child_module in submodule.named_children():
+            print(child_name, "child_name", layer_ident)
             if isinstance(child_module, (nn.Conv2d, nn.Linear)) or "norm" in child_name:
+                if child_name in layer_ident:
+                    layer_ident[child_name] += 1
+                else:
+                    layer_ident[child_name] = 1
+                quant_count = 0
+                print("Finding to dequantize ", child_name)
                 for quant_submodule in quant_layer.modules():
                     for quant_child_name, quant_child_module in quant_submodule.named_children():
                         if quant_child_name == child_name:
+                            quant_count += 1
+                            if quant_count != layer_ident[child_name]:
+                                continue
+                            print(quant_child_name, quant_child_module)
+                            if ("gate" in child_name.lower()) and ("mixtral" in model.config.model_type.lower()):
+                                print("gate", child_name)
+                                child_module.weight.data = quant_child_module.weight.data.to(
+                                    child_module.weight.dtype
+                                ).to(child_module.weight.device)
+                                continue
                             if "norm" in child_name and not isinstance(child_module, (nn.Conv2d, nn.Linear)):
                                 print("norm", child_name)
                                 child_module.weight.data = quant_child_module.weight.data.to(
@@ -180,7 +198,7 @@ def load_dequantized_model(model, load_path):
         print("layer", layer_index)
         layer = layers[layer_index]
         quant_layer = torch.load(os.path.join(load_path, str(layer_index) + ".pth"), map_location="cpu")
-        layers[layer_index] = load_linear_layers(layer, quant_layer)
+        layers[layer_index] = load_linear_layers(layer, quant_layer, model)
     model.load_state_dict(torch.load(os.path.join(load_path, "not_quantized_weights.pt")), strict=False)
     return model
 

@@ -5,7 +5,6 @@ import shutil
 
 import torch
 from tqdm.auto import trange
-
 from transformers import AutoConfig, PretrainedConfig
 
 
@@ -43,8 +42,9 @@ def get_layers_prefix(config) -> str:
             raise NotImplementedError(f"Can't get layers prefix for {unknown_type}")
 
 
-def get_converted_state_dict(config, nbits: int, in_path: os.PathLike) -> dict:
+def get_converted_state_dict(config, nbits: int, in_path: os.PathLike) -> [dict, list[str]]:
     state_dict = {}
+    linear_weights_not_to_quantize = []
 
     num_layers = get_num_layers(config)
     layers_prefix = get_layers_prefix(config)
@@ -56,13 +56,17 @@ def get_converted_state_dict(config, nbits: int, in_path: os.PathLike) -> dict:
                 p.data = p.data.half()
             else:
                 p.data = pack_int_data(p.data, nbits)
-            name = re.sub("quantized_weight.", "", name)
+            if "quantized_weight." not in name:
+                linear_weights_not_to_quantize.append(f"{layers_prefix}.{i}.{name}")
+            else:
+                name = re.sub("quantized_weight.", "", name)
             state_dict[f"{layers_prefix}.{i}.{name}"] = p.data
 
     for key, value in torch.load(os.path.join(in_path, "not_quantized_weights.pt")).items():
         state_dict[key] = value.half()
+        linear_weights_not_to_quantize.append(key)
 
-    return state_dict
+    return state_dict, linear_weights_not_to_quantize
 
 
 def get_metadata(in_path: os.PathLike) -> dict:
@@ -75,44 +79,17 @@ def get_metadata(in_path: os.PathLike) -> dict:
     }
 
 
-def update_config(old_config: PretrainedConfig, aqlm_metadata: dict[str, int]):
-    old_config_type = type(old_config)
-    old_model_type = old_config.model_type
-    new_model_type = f"{old_model_type}_aqlm"
-
-    class AqlmConfig(old_config_type):
-        model_type = new_model_type
-
-        def __init__(
-            self,
-            aqlm: dict[str, int] = {
-                "nbits_per_codebook": 16,
-                "num_codebooks": 1,
-                "out_group_size": 8,
-                "in_group_size": 1,
-            },
-            **kwargs,
-        ):
-            super().__init__(**kwargs)
-            self.aqlm = aqlm
-
-    config_dict = old_config.to_dict()
-    config_dict["auto_map"] = {
-        "AutoConfig": f"configuration_{new_model_type}.{old_config.__class__.__name__}",
-        "AutoModelForCausalLM": f"modeling_{new_model_type}.{config_dict['architectures'][0]}",
+def update_config(config_dict: dict, aqlm_metadata: dict[str, int], linear_weights_not_to_quantize: list[str]):
+    config_dict["quantization_config"] = {
+        "quant_method": "aqlm",
+        "nbits_per_codebook": aqlm_metadata["nbits_per_codebook"],
+        "num_codebooks": aqlm_metadata["num_codebooks"],
+        "out_group_size": aqlm_metadata["out_group_size"],
+        "in_group_size": aqlm_metadata["in_group_size"],
+        "linear_weights_not_to_quantize": linear_weights_not_to_quantize,
     }
-    del config_dict["_name_or_path"]
-
-    new_config = AqlmConfig(
-        {
-            "nbits_per_codebook": aqlm_metadata["nbits_per_codebook"],
-            "num_codebooks": aqlm_metadata["num_codebooks"],
-            "out_group_size": aqlm_metadata["out_group_size"],
-            "in_group_size": aqlm_metadata["in_group_size"],
-        }
-    )
-    new_config.update(config_dict)
-    return new_config
+    config_dict["torch_dtype"] = "float16"
+    return config_dict
 
 
 def add_inference_code(model_type: str, save_path: os.PathLike):
@@ -147,11 +124,11 @@ if __name__ == "__main__":
     old_config = AutoConfig.from_pretrained(args.model)
     metadata = get_metadata(args.in_path)
 
-    add_inference_code(old_config.model_type, args.out_path)
-
-    state_dict = get_converted_state_dict(old_config, metadata["nbits_per_codebook"], args.in_path)
+    state_dict, linear_weights_not_to_quantize = get_converted_state_dict(
+        old_config, metadata["nbits_per_codebook"], args.in_path
+    )
     torch.save(state_dict, os.path.join(args.out_path, "pytorch_model.bin"))
 
-    new_config = update_config(old_config, metadata)
+    new_config_dict = update_config(old_config.to_diff_dict(), metadata, linear_weights_not_to_quantize)
     with open(os.path.join(args.out_path, "config.json"), "w") as config_file:
-        json.dump(new_config.to_dict(), config_file, indent=4)
+        json.dump(new_config_dict, config_file, indent=4)

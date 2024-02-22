@@ -7,7 +7,6 @@ warnings.filterwarnings("ignore")
 import torch
 import torch.nn as nn
 from tqdm import trange
-
 from transformers import AutoConfig, AutoModelForCausalLM
 
 if __name__ == "__main__":
