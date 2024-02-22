@@ -1,7 +1,10 @@
 """ Core mathematics for Additive Quantization (AQ): initialization, reconstruction and beam search"""
+from typing import Optional
+
+import aqlm
 import torch
 import torch.nn as nn
-from aqlm.inference_kernels import forward_pass_quantized_linear
+from aqlm.inference_kernels import get_backward_pass_kernel, get_forward_pass_kernel
 from aqlm.utils import get_int_dtype
 
 
@@ -35,31 +38,89 @@ class QuantizedLinear(nn.Module):
         # CODES & CODEBOOKS
         self.codebooks = nn.Parameter(
             torch.empty((num_codebooks, self.codebook_size, out_group_size, in_group_size), **factory_kwargs),
-            requires_grad=True,
+            requires_grad=False,
         )  # [num_codebooks, codebook_size, out_group_size, in_group_size]
         self.codes = nn.Parameter(
             torch.empty(
-                (num_out_groups, num_in_groups, num_codebooks), device=device, dtype=get_int_dtype(nbits_per_codebook)
+                (num_out_groups, num_in_groups, num_codebooks),
+                device=device,
+                dtype=get_int_dtype(nbits_per_codebook),
             ),
             requires_grad=False,
         )  #  [num_out_groups, num_in_groups, num_codebooks]
 
         # SCALES
         self.scales = nn.Parameter(
-            torch.empty((num_out_groups, 1, 1, 1), **factory_kwargs), requires_grad=True
+            torch.empty((num_out_groups, 1, 1, 1), **factory_kwargs), requires_grad=False
         )  #  [num_out_groups, 1, 1, 1]
 
         # BIAS
         if bias:
-            self.bias = nn.Parameter(torch.empty(out_features, **factory_kwargs))
+            self.bias = nn.Parameter(torch.empty(out_features, **factory_kwargs), requires_grad=False)
         else:
             self.register_parameter("bias", None)
 
+        # MATMUL_OP
+        self.optimize_for_training: bool = aqlm.inference_kernels.kernel_selector._OPTIMIZE_FOR_TRAINING
+        self.matmul_op = None
+
     def forward(self, input: torch.Tensor) -> torch.Tensor:
+        if self.matmul_op is None:
+            self.prepare_matmul_op(input)
+
+        return self.matmul_op.apply(input, self.codes, self.codebooks, self.scales, self.bias)
+
+    def prepare_matmul_op(self, input: torch.Tensor):
         if (
             not input.is_cuda
             and self.codebook_size == 256
             and self.codes.shape[0] == self.out_features // self.out_group_size
         ):
             self.codes.data = torch.permute(self.codes.data, (1, 0, 2)).contiguous()  #  TODO: fix this thing
-        return forward_pass_quantized_linear(input, self.codes, self.codebooks, self.scales, self.bias)
+
+        forward_pass_kernel = get_forward_pass_kernel(self.codebooks, self.optimize_for_training)
+        backward_pass_kernel = get_backward_pass_kernel(self.codebooks, self.optimize_for_training)
+
+        class _QuantizedMatmul(torch.autograd.Function):
+            @staticmethod
+            def forward(
+                ctx: torch.Any,
+                input: torch.Tensor,
+                codes: torch.IntTensor,
+                codebooks: torch.Tensor,
+                scales: torch.Tensor,
+                bias: Optional[torch.Tensor],
+            ) -> torch.Tensor:
+                ctx.save_for_backward(
+                    input,
+                    codes,
+                    codebooks,
+                    scales,
+                    bias,
+                )
+                return forward_pass_kernel(
+                    input,
+                    codes,
+                    codebooks,
+                    scales,
+                    bias,
+                )
+
+            @staticmethod
+            def backward(ctx, grad_output: torch.Tensor) -> torch.Tensor:
+                input, codes, codebooks, scales, bias = ctx.saved_tensors
+                return (
+                    backward_pass_kernel(
+                        grad_output,
+                        codes,
+                        codebooks,
+                        scales,
+                        bias,
+                    ),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+
+        self.matmul_op = _QuantizedMatmul
