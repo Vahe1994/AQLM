@@ -2,10 +2,16 @@ import json
 import os
 import re
 import shutil
+from typing import List, Dict, Tuple, Any
+from tqdm.auto import trange
 
 import torch
-from tqdm.auto import trange
-from transformers import AutoConfig, PretrainedConfig
+from transformers import AutoConfig, AutoModelForCausalLM
+
+try:
+    import safetensors
+except:
+    safetensors = None
 
 
 def get_int_dtype(nbits: int) -> torch.dtype:
@@ -42,7 +48,7 @@ def get_layers_prefix(config) -> str:
             raise NotImplementedError(f"Can't get layers prefix for {unknown_type}")
 
 
-def get_converted_state_dict(config, nbits: int, in_path: os.PathLike) -> [dict, list[str]]:
+def get_converted_state_dict(config, nbits: int, in_path: os.PathLike) -> Tuple[Dict[str, Any], List[str]]:
     state_dict = {}
     linear_weights_not_to_quantize = []
 
@@ -119,6 +125,11 @@ if __name__ == "__main__":
         type=str,
         help="Path to save HF compatible checkpoint to",
     )
+    parser.add_argument(
+        "--save_safetensors",
+        action="store_true",
+        help="Whether to save in safetensors format",
+    )
     args = parser.parse_args()
 
     old_config = AutoConfig.from_pretrained(args.model)
@@ -132,3 +143,14 @@ if __name__ == "__main__":
     new_config_dict = update_config(old_config.to_diff_dict(), metadata, linear_weights_not_to_quantize)
     with open(os.path.join(args.out_path, "config.json"), "w") as config_file:
         json.dump(new_config_dict, config_file, indent=4)
+
+    # convert to safetensors
+    if args.save_safetensors:
+        assert safetensors
+        model = AutoModelForCausalLM.from_pretrained(
+            args.out_path,
+            trust_remote_code=True,
+            torch_dtype=torch.float16
+        )
+        shutil.rmtree(args.out_path)
+        model.save_pretrained(args.out_path)
