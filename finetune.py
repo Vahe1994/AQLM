@@ -362,6 +362,7 @@ if __name__ == "__main__":
     quant_model = quant_model.cpu()
     if args.device_map:
         remove_hook_from_submodules(quant_model)
+    torch.cuda.empty_cache()
 
     # save model
     if args.save:
