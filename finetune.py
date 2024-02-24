@@ -203,9 +203,11 @@ if __name__ == "__main__":
         help="size of validation split",
     )
     parser.add_argument(
-        "--new_eval",
-        action="store_true",
-        help="if this is set, evaluate on new (and slightly more realistic!) val dataset versions",
+        "--eval_datasets",
+        nargs="+",
+        type=str,
+        default=["wikitext2", "c4"],
+        help="Datasets to run evaluation on",
     )
     # Training params
     parser.add_argument(
@@ -378,10 +380,7 @@ if __name__ == "__main__":
     if args.eval_model_seqlen:
         quant_model.seqlen = args.eval_model_seqlen
     torch.cuda.reset_peak_memory_stats()
-    datasets = ["wikitext2", "ptb", "c4"]
-    if args.new_eval:
-        datasets = ["wikitext2", "ptb-new", "c4-new"]
-    for dataset in datasets:
+    for dataset in args.eval_datasets:
         testloader = get_loaders(
             dataset,
             seed=args.seed,
@@ -391,6 +390,8 @@ if __name__ == "__main__":
         )
         args.dataset_name = dataset
         perplexity_eval(quant_model, testloader, args)
+        # make sure that the cache is released
+        torch.cuda.empty_cache()
 
     print(f"eval: {torch.cuda.max_memory_allocated()=:,}")
     if args.wandb:
