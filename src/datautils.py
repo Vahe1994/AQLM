@@ -213,7 +213,7 @@ def get_loaders(name, nsamples=128, seed=0, seqlen=2048, eval_mode=False, model_
         return None
     elif os.path.isfile(name):
         try:
-            data = torch.load(name)[:nsamples]
+            data = [sample[:,:seqlen] for sample in torch.load(name)[:nsamples]]
         except FileNotFoundError:
             raise FileNotFoundError(
                 f"Failed to load custom data from {name}.",

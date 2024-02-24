@@ -191,6 +191,12 @@ if __name__ == "__main__":
         help="Model seqlen and calibration data context length.",
     )
     parser.add_argument(
+        "--eval_model_seqlen",
+        type=int,
+        default=None,
+        help="Model seqlen on validation. By default is equal to model_seqlen.",
+    )
+    parser.add_argument(
         "--val_size",
         type=int,
         default=0,
@@ -368,6 +374,8 @@ if __name__ == "__main__":
         shutil.copy(os.path.join(args.quant_model, "args.pt"), os.path.join(args.save, "args.pt"))
 
     print("\n============ Evaluating perplexity... ============")
+    if args.eval_model_seqlen:
+        quant_model.seqlen = args.eval_model_seqlen
     torch.cuda.reset_peak_memory_stats()
     datasets = ["wikitext2", "ptb", "c4"]
     if args.new_eval:
