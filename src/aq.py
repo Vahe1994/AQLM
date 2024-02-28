@@ -370,7 +370,7 @@ def beam_search_optimal_codes(
                     best_cand_regularizer = code_penalties[codebook_ids, beam_codes[0]].sum() / num_out_groups
                     del codebook_ids
                     best_loss = best_loss - best_cand_regularizer   # report loss without the regularizer part
-                    info += f"| loss {best_loss:.5f} | reg {best_cand_regularizer:.1f}% |"
+                    info += f"| loss {best_loss:.5f} | reg {best_cand_regularizer:.5f} |"
                 del best_loss
                 progressbar.desc = info
     return beam_codes[0]
@@ -537,7 +537,7 @@ def _beam_search_squared_errors(
 
         if code_penalties is not None:
             prev_code_penalties = code_penalties[codebook_index][prev_codes_part[beam_id]]  # [codebook_size]
-            candidate_squared_errors[:, :] -= prev_code_penalties[None, :]  # retract penalty for removed code
+            candidate_squared_errors[:, :] -= prev_code_penalties[None, :]  # refund penalty for the replaced code
             candidate_squared_errors[:, :] += code_penalties[codebook_index, :, None]  # add penalty for new code
 
         best_beam_squared_errors, best_beam_indices = torch.topk(
