@@ -247,7 +247,7 @@ def beam_search_optimal_codes(
     scales: Optional[torch.Tensor],
     beam_size: int,
     dim_rng: Optional[random.Random] = None,
-    sparsity_regularizer: float = 0,
+    code_penalties: Optional[torch.Tensor] = None,
     verbose: bool,
 ):
     """
@@ -262,7 +262,8 @@ def beam_search_optimal_codes(
       random.Random(optional_seed) = shuffle dimensions at random, optionally using the specified seed
 
     :param beam_size: consider up to this many best encoding combinations
-    :param sparsity_regularizer: subtract this value from beam search objective each time you have a zero code somewhere
+    :param code_penalties: a pytorch float tensor of shape [num_codebooks, codebook_size]
+        Penalize the beam search objective by code_penalties[m][i] for every use of ith code from mth codebook
     :param verbose: if True, draw a progressbar and periodically print best loss
     :return: best quantization codes found, same shape as prev_codes
 
@@ -307,8 +308,12 @@ def beam_search_optimal_codes(
         .sum(-1)
     )
     # beam_losses shape: [current beam_size, num_out_groups], initial beam_size = 1
-    if sparsity_regularizer != 0:
-        beam_losses = beam_losses - sparsity_regularizer * (prev_codes == 0).sum(dim=(-1, -2))[None, :]
+    if code_penalties is not None:
+        # Compute counts for each code in each codebook, initialize regularizer
+        codebook_ids = torch.arange(num_codebooks, device=beam_losses.device).view(1, 1, 1, -1)
+        per_channel_regularizers = code_penalties[codebook_ids, beam_codes].sum(dim=(2, 3))  # [beam_size, num_out_groups]
+        del codebook_ids
+        beam_losses += beam_losses + per_channel_regularizers
 
     if verbose:
         progressbar = trange(num_in_groups * num_codebooks)
@@ -334,7 +339,7 @@ def beam_search_optimal_codes(
                 input_group_index=input_group_index,
                 codebook_index=codebook_index,
                 k_best=beam_size,
-                sparsity_regularizer=sparsity_regularizer,
+                code_penalties=code_penalties,
             )  # [current beam_size, codebook_size, num_out_groups]
 
             # part 2: select beam_size new best codes and re-arrange beam to account for the fact that ...
@@ -358,14 +363,15 @@ def beam_search_optimal_codes(
                 best_loss = beam_losses.min(0).values.sum().item() / out_features
                 info = f"in_group {input_group_index} / {num_in_groups} "
                 info += f"| codebook {codebook_index} / {num_codebooks} "
-                if sparsity_regularizer == 0:
+                if code_penalties is None:
                     info += f"| loss {best_loss:.10f}"
                 else:  # un-regularize to restore MSE loss, report sparsity rate
-                    num_zero_codes = (beam_codes[0] == 0).sum().item()
-                    best_loss = best_loss + sparsity_regularizer / out_features * num_zero_codes
-                    sparsity = num_zero_codes / prev_codes.numel()
-                    info += f"| loss {best_loss:.5f} | sparse {sparsity * 100:.1f}% |"
-
+                    codebook_ids = torch.arange(num_codebooks, device=beam_losses.device).view(1, 1, 1, -1)
+                    best_cand_regularizer = code_penalties[codebook_ids, beam_codes[0]].sum() / num_out_groups
+                    del codebook_ids
+                    best_loss = best_loss - best_cand_regularizer   # report loss without the regularizer part
+                    info += f"| loss {best_loss:.5f} | reg {best_cand_regularizer:.1f}% |"
+                del best_loss
                 progressbar.desc = info
     return beam_codes[0]
 
@@ -412,7 +418,7 @@ def _beam_search_squared_errors(
     input_group_index: int,
     codebook_index: int,
     k_best: int,
-    sparsity_regularizer: float,
+    code_penalties: Optional[torch.Tensor] = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Compute MSE or sum-of-squared-error losses for all possible ways to replace quantization codes for one input group
@@ -529,9 +535,10 @@ def _beam_search_squared_errors(
             beam_losses[beam_id, None, :] - 2 * dot_products + XnewBkC_norms_sq - XoldBkC_norms_sq
         )  # shape: [codebook_size, num_out_groups]
 
-        if sparsity_regularizer != 0:
-            candidate_squared_errors += sparsity_regularizer * (prev_codes_part[beam_id] == 0).to(XTX.dtype)[None, :]
-            candidate_squared_errors[0, :] -= sparsity_regularizer
+        if code_penalties is not None:
+            prev_code_penalties = code_penalties[codebook_index][prev_codes_part[beam_id]]  # [codebook_size]
+            candidate_squared_errors[:, :] -= prev_code_penalties[None, :]  # retract penalty for removed code
+            candidate_squared_errors[:, :] += code_penalties[codebook_index, :, None]  # add penalty for new code
 
         best_beam_squared_errors, best_beam_indices = torch.topk(
             candidate_squared_errors, k_best, dim=0, largest=False, sorted=False
