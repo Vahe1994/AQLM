@@ -248,7 +248,8 @@ def quantize_aq(model: PreTrainedModel, dataloader: Iterable, args: Namespace):
             print("PREPARING TO FINETUNE")
             print(layer)
             layer = layer.to(dtype=torch.float32)
-            layer.config._pre_quantization_dtype = torch.float32
+            if model.config.model_type == "mistral":
+                layer.self_attn.config._pre_quantization_dtype = torch.float32
             with using_tf32(enabled=True):
                 layer = finetune_groupwise(layer=layer, inps=inps, outs=outs, args=args, **forward_args)
             layer = layer.to(dtype=layer_dtype_original)
