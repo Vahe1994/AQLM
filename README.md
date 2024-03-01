@@ -37,6 +37,7 @@ We provide a number of prequantized models:
 | Llama-2-70b| 1x16        | 3.96           | 18.8           | [Link](https://huggingface.co/BlackSamorez/Llama-2-70b-AQLM-2Bit-1x16-hf)|
 | Llama-2-70b| 2x8         | 4.83           | 18.2           | [Link](https://huggingface.co/BlackSamorez/Llama-2-70b-AQLM-2Bit-2x8-hf) |
 | Mixtral-8x7b| 1x16       | 4.37           | 12.6            | [Link](https://huggingface.co/BlackSamorez/Mixtral-8x7b-AQLM-2Bit-1x16-hf)|
+| Mixtral-8x7b-Instruct| 1x16       | -           | 12.6            | [Link](https://huggingface.co/BlackSamorez/Mixtral-8x7B-Instruct-v0_1-AQLM-2Bit-1x16-hf)|
 
 
 ### Inference kernels
