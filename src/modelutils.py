@@ -10,7 +10,7 @@ from transformers import AutoConfig, AutoModelForCausalLM
 
 MODEL_ERROR_MSG = "Unsupported model type {} - only 'llama', 'Yi', 'opt' and 'falcon' are supported"
 FALCON_TYPES = ("falcon", "refinedweb", "refinedwebmodel")
-LLAMA_LIKE = ("llama", "Yi", "mistral", "mixtral")
+LLAMA_LIKE = ("llama", "Yi", "mistral", "mixtral", "gemma")
 
 
 @contextmanager
@@ -64,7 +64,7 @@ def get_model(
             # defer distribution if loading quantized
             device_map=None if load_quantized else device_map,
             low_cpu_mem_usage=True,
-            local_files_only=True,
+            # local_files_only=True,
         )
         if load_quantized:
             print("Initializing model with random weights...")
