@@ -788,6 +788,13 @@ if __name__ == "__main__":
         action="store_true",
         help="Skip model quantization and immediately evaluate the loaded model",
     )
+    parser.add_argument(
+        "--attn_implementation",
+        type=str,
+        default=None,
+        choices=[None, "eager", "flash_attention_2", "sdpa"],
+        help="Attention implementation.",
+    )
 
     torch.set_num_threads(min(16, torch.get_num_threads()))
     torch.backends.cudnn.allow_tf32 = False
@@ -827,7 +834,13 @@ if __name__ == "__main__":
         )
 
     print("\n============ Load model... ============")
-    model = get_model(args.model_path, args.load, args.dtype, args.model_seqlen).train(False)
+    model = get_model(
+        args.model_path, 
+        args.load, 
+        args.dtype, 
+        args.model_seqlen, 
+        attn_implementation=args.attn_implementation
+    ).train(False)
 
     if not args.load and not args.no_quant:
         print("\n============ Quantizing model... ============")

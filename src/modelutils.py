@@ -47,7 +47,8 @@ def get_model(
     load_quantized=None, 
     dtype="auto", 
     model_seqlen=2048, 
-    device_map=None
+    device_map=None,
+    attn_implementation=None
 ):
     if dtype == "auto":
         dtype = (
@@ -64,7 +65,8 @@ def get_model(
             # defer distribution if loading quantized
             device_map=None if load_quantized else device_map,
             low_cpu_mem_usage=True,
-            # local_files_only=True,
+            local_files_only=True,
+            attn_implementation=attn_implementation
         )
         if load_quantized:
             print("Initializing model with random weights...")
