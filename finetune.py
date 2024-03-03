@@ -22,34 +22,34 @@ from main import perplexity_eval
 
 
 @torch.inference_mode()
-def cache_logits(model, dataloader, device):
-    cached_logits = []
+def cache_hiddens(model, dataloader, device):
+    cached_hiddens = []
     for i in trange(len(dataloader),  total=len(dataloader), desc='Caching logits', leave=False):
         with torch.autocast(device_type='cuda', enabled=args.amp):
             batch = maybe_get_0th_element(dataloader[i]).to(device)
-        cached_logits.append(model(batch).logits.cpu())
-    return cached_logits
+        cached_hiddens.append(model.model(batch).last_hidden_state.cpu())
+    return cached_hiddens
 
-def kl_div(student_logits, teacher_logits, temp):
-    C = student_logits.shape[-1] # num classes
+def kl_div(student_hiddens, teacher_hiddens, temp):
+    C = student_hiddens.shape[-1] # num classes
     return temp ** 2 * F.kl_div(
-        input=F.log_softmax(student_logits.view(-1, C) / temp, dim=-1),
-        target=F.log_softmax(teacher_logits.view(-1, C) / temp, dim=-1),
+        input=F.log_softmax(student_hiddens.view(-1, C) / temp, dim=-1),
+        target=F.log_softmax(teacher_hiddens.view(-1, C) / temp, dim=-1),
         log_target=True,
         reduction="batchmean",
     )
 
 @torch.no_grad()
-def evalulate(model, loader, logits, batch_size):
+def evalulate(model, lm_head, loader, hiddens, batch_size):
     model.eval()
     loss_numerator, loss_denominator = 0, 0
     # convert tensor to list
     for i in range(0, len(loader), batch_size):
         batch_ids = range(i, i + batch_size)
         inputs = _extract_into_tensor(loader, batch_ids, device=device)
-        targets = _extract_into_tensor(logits, batch_ids, device=device)
+        targets = lm_head(_extract_into_tensor(hiddens, batch_ids, device=device).float())
         outputs = model(inputs).logits
-        loss = kl_div(outputs, targets, args.temperature)
+        loss = kl_div(outputs, targets.to(outputs.device), args.temperature)
         loss_numerator += loss.item()
         loss_denominator += 1
     return loss_numerator / loss_denominator
@@ -58,14 +58,18 @@ def evalulate(model, loader, logits, batch_size):
 def finetune(
     model, 
     train_loader, 
-    train_logits, 
+    train_hiddens, 
     args, 
     device, 
     val_loader=None, 
-    val_logits=None
+    val_hiddens=None
 ):
     # cast model to float
     model.float()
+    lm_head = deepcopy(model.lm_head)
+    for param in lm_head.parameters():
+        param.requires_grad = False
+
     diff_params = {name: param for name, param in model.named_parameters() if param.requires_grad}
     print(f"Fine-tuning {sum(param.numel() for _, param in diff_params.items())} parameters")
     opt = torch.optim.Adam(diff_params.values(), lr=args.lr, betas=(args.adam_beta1, args.adam_beta2))
@@ -76,15 +80,13 @@ def finetune(
     epoch_samples = num_samples - num_samples % args.microbatch_size
     microbatches_per_epoch = epoch_samples // args.microbatch_size
 
-    
-
     if args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
-    run_validation = val_loader is not None and val_logits is not None
+    run_validation = val_loader is not None and val_hiddens is not None
     # validate before training
     if run_validation:
-        valid_loss_epoch = evalulate(model, val_loader, val_logits, args.microbatch_size)
+        valid_loss_epoch = evalulate(model, lm_head, val_loader, val_hiddens, args.microbatch_size)
         print(f"Evaluation before training.")
         print(f"valid loss={valid_loss_epoch:.3e}\t")
         best_loss = valid_loss_epoch
@@ -103,11 +105,12 @@ def finetune(
             # convert tensor to list
             batch_indices = batch_indices.tolist()
             inputs = _extract_into_tensor(train_loader, batch_indices, device=device)
-            targets = _extract_into_tensor(train_logits, batch_indices, device=device)
+            with torch.no_grad():
+                targets = lm_head(_extract_into_tensor(train_hiddens, batch_indices, device=device).float())
 
             with torch.autocast(device_type='cuda', enabled=args.amp):
                 outputs = model(inputs).logits
-                loss = kl_div(outputs, targets, args.temperature)
+                loss = kl_div(outputs, targets.to(outputs.device), args.temperature)
 
             if not torch.isfinite(loss).item():
                 raise ValueError(f"Fine-tuning loss is {loss}")
@@ -128,7 +131,7 @@ def finetune(
         train_loss_epoch = loss_numerator / loss_denominator
 
         if run_validation:
-            valid_loss_epoch = evalulate(model, val_loader, val_logits, args.microbatch_size)
+            valid_loss_epoch = evalulate(model, lm_head, val_loader, val_hiddens, args.microbatch_size)
         
         # log losses in the end of the epoch
         print('-' * 10)
@@ -338,11 +341,11 @@ if __name__ == "__main__":
     if not args.device_map:
         orig_model = orig_model.to(device)
     # cache logits
-    orig_train_logits = cache_logits(orig_model, train_dataloader, device)
+    orig_train_hiddens = cache_hiddens(orig_model, train_dataloader, device)
     if val_dataloader:
-        orig_val_logits = cache_logits(orig_model, val_dataloader, device)
+        orig_val_hiddens = cache_hiddens(orig_model, val_dataloader, device)
     else:
-        orig_val_logits = None
+        orig_val_hiddens = None
     del orig_model
     torch.cuda.empty_cache()
     quant_model = get_model(args.base_model, args.quant_model, args.dtype, args.model_seqlen, args.device_map)
@@ -353,11 +356,11 @@ if __name__ == "__main__":
     finetune(
         quant_model, 
         train_loader=train_dataloader,
-        train_logits=orig_train_logits,
+        train_hiddens=orig_train_hiddens,
         args=args,
         device=device,
         val_loader=val_dataloader,
-        val_logits=orig_val_logits
+        val_hiddens=orig_val_hiddens
     )
 
     # offload model to cpu
