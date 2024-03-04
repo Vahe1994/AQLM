@@ -147,33 +147,43 @@ def find_sublayers(module, layers=(nn.Conv2d, nn.Linear)):
     return res
 
 
-def get_sequential_groups(model):
+def get_sequential_groups(model, mlp_only: bool = False):
     if model.config.model_type in LLAMA_LIKE:
         assert "mixtral" not in model.config.model_type.lower()  # check that this is not mixtral
-        return [
+        attention_groups = [
             ["self_attn.k_proj", "self_attn.v_proj", "self_attn.q_proj"],
             ["self_attn.o_proj"],
+        ]
+        mlp_groups = [
             ["mlp.up_proj", "mlp.gate_proj"],
             ["mlp.down_proj"],
         ]
     elif model.config.model_type.lower() in FALCON_TYPES:
-        return [
+        attention_groups = [
             ["self_attention.query_key_value"],
             ["self_attention.dense"],
+        ]
+        mlp_groups = [
             ["mlp.dense_h_to_4h"],
             ["mlp.dense_4h_to_h"],
         ]
     elif model.config.model_type == "opt":
-        return [
+        attention_groups = [
             ["self_attn.q_proj"],
             ["self_attn.k_proj"],
             ["self_attn.v_proj"],
             ["self_attn.out_proj"],
+        ]
+        mlp_groups = [
             ["fc1"],
             ["fc2"],
         ]
     else:
         raise ValueError(MODEL_ERROR_MSG.format(model.config.model_type))
+    if mlp_only:
+        return mlp_groups
+    else:
+        return attention_groups + mlp_groups
 
 
 def read_quant_weight_from_file(load_path, block_i, layer_name, device):

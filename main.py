@@ -202,7 +202,7 @@ def quantize_aq(
             forward_args[k] = v.to(args.devices[0]) if isinstance(v, torch.Tensor) else v
 
         if args.true_sequential:
-            sequential = get_sequential_groups(model)
+            sequential = get_sequential_groups(model, args.mlp_only)
         else:
             sequential = [list(find_sublayers(layer).keys())]
 
@@ -794,6 +794,11 @@ if __name__ == "__main__":
         default=None,
         choices=[None, "eager", "flash_attention_2", "sdpa"],
         help="Attention implementation.",
+    )
+    parser.add_argument(
+        "--mlp_only",
+        action="store_true",
+        help="Whether to quantize only mlp layers.",
     )
 
     torch.set_num_threads(min(16, torch.get_num_threads()))
