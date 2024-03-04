@@ -64,6 +64,11 @@ def parse_args():
         help="Model seqlen and calibration data context length.",
     )
     parser.add_argument("--load", type=str, default=None, help="Path to load quantized model.")
+    parser.add_argument(
+        "--mad_hack",
+        action="store_true",
+        help="Whether to apply dirty fix for conversion.",
+    )
 
     return parser.parse_args()
 
@@ -112,6 +117,9 @@ def main():
     print("lm.device", lm.device)
     if hasattr(lm.model, "hf_device_map"):
         print("Model device map:\n", lm.model.hf_device_map)
+
+    if args.mad_hack:
+        torch.nn.ModuleList._forward_unimplemented = lambda *args, **kwargs: True
 
     if args.load:
         print("Loading quantized model ...")
