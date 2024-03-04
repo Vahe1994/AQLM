@@ -28,13 +28,13 @@ def get_int_dtype(nbits: int) -> torch.dtype:
 
 @torch.inference_mode()
 def pack_int_data(data: torch.IntTensor, nbits: int) -> torch.IntTensor:
-    data[data >= 2 ** (nbits - 1)] -= 2**nbits
+    data[data >= 2 ** (nbits - 1)] -= 2 ** nbits
     return data.to(get_int_dtype(nbits))
 
 
 def get_num_layers(config) -> int:
     match config.model_type:
-        case "llama" | "mistral" | "mixtral":
+        case "llama" | "mistral" | "mixtral" | "gemma":
             return config.num_hidden_layers
         case unknown_type:
             raise NotImplementedError(f"Can't get number of layers for {unknown_type}")
@@ -42,7 +42,7 @@ def get_num_layers(config) -> int:
 
 def get_layers_prefix(config) -> str:
     match config.model_type:
-        case "llama" | "mistral" | "mixtral":
+        case "llama" | "mistral" | "mixtral" | "gemma":
             return "model.layers"
         case unknown_type:
             raise NotImplementedError(f"Can't get layers prefix for {unknown_type}")
