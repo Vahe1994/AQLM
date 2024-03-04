@@ -130,7 +130,15 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to save in safetensors format",
     )
+    parser.add_argument(
+        "--mad_hack",
+        action="store_true",
+        help="Whether to apply dirty fix for conversion.",
+    )
     args = parser.parse_args()
+
+    if args.mad_hack:
+        torch.nn.ModuleList._forward_unimplemented = lambda *args, **kwargs: True
 
     old_config = AutoConfig.from_pretrained(args.model)
     metadata = get_metadata(args.in_path)
