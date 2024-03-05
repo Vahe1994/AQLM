@@ -55,7 +55,7 @@ def get_forward_pass_kernel(
         from .triton_kernel import triton_matmul
 
         return triton_matmul
-    elif (optimize_for_training, codebooks.device.type, codebook_size, out_group_size) == (False, "cpu", 256, 1):
+    elif (codebooks.device.type, codebook_size, out_group_size) == ("cpu", 256, 1):
         from .numba_kernel import numba_gemm_lut
 
         return numba_gemm_lut
