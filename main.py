@@ -795,6 +795,11 @@ if __name__ == "__main__":
         choices=[None, "eager", "flash_attention_2", "sdpa"],
         help="Attention implementation.",
     )
+    parser.add_argument(
+        "--mad_hack",
+        action="store_true",
+        help="Whether to apply dirty fix for conversion.",
+    )
 
     torch.set_num_threads(min(16, torch.get_num_threads()))
     torch.backends.cudnn.allow_tf32 = False
@@ -832,6 +837,9 @@ if __name__ == "__main__":
         wandb.init(
             config={a: getattr(args, a) for a in dir(args) if not a.startswith("_")},
         )
+
+    if args.mad_hack:
+        torch.nn.ModuleList._forward_unimplemented = lambda *args, **kwargs: True
 
     print("\n============ Load model... ============")
     model = get_model(
