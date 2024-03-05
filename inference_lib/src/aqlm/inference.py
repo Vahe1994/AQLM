@@ -1,7 +1,6 @@
 """ Core mathematics for Additive Quantization (AQ): initialization, reconstruction and beam search"""
 from typing import Optional
 
-import aqlm
 import torch
 import torch.nn as nn
 from aqlm.inference_kernels import get_backward_pass_kernel, get_forward_pass_kernel
@@ -68,7 +67,7 @@ class QuantizedLinear(nn.Module):
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         if self.gemv_op is None:
             self.prepare_matmul_op(input)
-            
+
         if self.use_gemv_rule(input):
             return self.gemv_op.apply(input, self.codes, self.codebooks, self.scales, self.bias)
         else:
@@ -91,8 +90,8 @@ class QuantizedLinear(nn.Module):
             get_forward_pass_kernel(self.codebooks, True),
             get_backward_pass_kernel(self.codebooks, True),
         )
-        
-        self.use_gemv_rule = lambda input: sum(input.shape[:-1]) < 100
+
+        self.use_gemv_rule = lambda input: sum(input.shape[:-1]) <= 32
 
 
 def _get_autograd_matmul_op(forward_pass_kernel, backward_pass_kernel):

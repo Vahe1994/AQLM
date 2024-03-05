@@ -1,23 +1,20 @@
+import logging
 from contextlib import contextmanager
 from typing import Callable, Optional
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from aqlm.utils import _dequantize_weight, unpack_int_data
 
-_OPTIMIZE_FOR_TRAINING = False
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
 def optimize_for_training():
     """Use this context manager during model initialization (e.g. `.from_pretrained(...)`) to select inference kernels optimized for larger batch sizes"""
-    global _OPTIMIZE_FOR_TRAINING
-    _OPTIMIZE_FOR_TRAINING = True
+    logger.warning("`optimize_for_training` is deprecated. The optimization now happens automatically at runtime.")
     try:
         yield
     finally:
-        _OPTIMIZE_FOR_TRAINING = False
+        return
 
 
 def get_forward_pass_kernel(

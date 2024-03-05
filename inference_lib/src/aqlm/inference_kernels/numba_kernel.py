@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 
 import numba
@@ -5,6 +6,9 @@ import numpy as np
 import torch
 
 COMPILED_KERNELS = {}
+
+
+logger = logging.getLogger(__name__)
 
 
 def numba_gemm_lut(
@@ -33,7 +37,7 @@ def numba_gemm_lut(
 
     kernel_key = (in_group_size, out_features, in_features, num_codebooks)
     if kernel_key not in COMPILED_KERNELS:
-        print(f"Compiling AQLM numba kernel with parameters: {kernel_key=}")
+        logger.info(f"Compiling AQLM numba kernel with parameters: {kernel_key=}")
 
         @numba.njit(parallel=True)
         def numba_gemv_lut_(x, codebooks, codes_alt, scales):
