@@ -1,16 +1,17 @@
-import logging
+import warnings
 from contextlib import contextmanager
 from typing import Callable, Optional
 
 import torch
 
-logger = logging.getLogger(__name__)
-
 
 @contextmanager
 def optimize_for_training():
-    """Use this context manager during model initialization (e.g. `.from_pretrained(...)`) to select inference kernels optimized for larger batch sizes"""
-    logger.warning("`optimize_for_training` is deprecated. The optimization now happens automatically at runtime.")
+    """
+    WARNING: `optimize_for_training` is deprecated. The optimization now happens automatically at runtime.
+    OBSOLETE: Use this context manager during model initialization (e.g. `.from_pretrained(...)`) to select inference kernels optimized for larger batch sizes
+    """
+    warnings.warn("`optimize_for_training` is deprecated. The optimization now happens automatically at runtime.")
     try:
         yield
     finally:
