@@ -1,23 +1,21 @@
+import warnings
 from contextlib import contextmanager
 from typing import Callable, Optional
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from aqlm.utils import _dequantize_weight, unpack_int_data
-
-_OPTIMIZE_FOR_TRAINING = False
 
 
 @contextmanager
 def optimize_for_training():
-    """Use this context manager during model initialization (e.g. `.from_pretrained(...)`) to select inference kernels optimized for larger batch sizes"""
-    global _OPTIMIZE_FOR_TRAINING
-    _OPTIMIZE_FOR_TRAINING = True
+    """
+    WARNING: `optimize_for_training` is deprecated. The optimization now happens automatically at runtime.
+    OBSOLETE: Use this context manager during model initialization (e.g. `.from_pretrained(...)`) to select inference kernels optimized for larger batch sizes
+    """
+    warnings.warn("`optimize_for_training` is deprecated. The optimization now happens automatically at runtime.")
     try:
         yield
     finally:
-        _OPTIMIZE_FOR_TRAINING = False
+        return
 
 
 def get_forward_pass_kernel(
@@ -58,7 +56,7 @@ def get_forward_pass_kernel(
         from .triton_kernel import triton_matmul
 
         return triton_matmul
-    elif (optimize_for_training, codebooks.device.type, codebook_size, out_group_size) == (False, "cpu", 256, 1):
+    elif (codebooks.device.type, codebook_size, out_group_size) == ("cpu", 256, 1):
         from .numba_kernel import numba_gemm_lut
 
         return numba_gemm_lut
