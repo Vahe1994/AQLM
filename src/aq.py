@@ -515,27 +515,6 @@ def _beam_search_squared_errors(
 
     # all correct up to this point
 
-    if symmetric:
-        new_code_signs = torch.sign(delta_weight_without_part[:, :, input_group_slice])
-
-    # cand_weights = codebooks[codebook_index]  # [codebook_size, out_group_size, in_group_size], all replacement codes
-    cand_weights = get_all_codebook_values_with_optimal_sign(codebooks[codebook_index], signs=new_code_signs)
-
-    # dWTXTX is equivalent to < X @ (W - \sum BiCi except current codebook), X @ SOMETHING >
-    dWTXTXg = delta_weight_without_part @ XTX[..., input_group_slice]  # [beam_size, out_features, in_group_size]
-    # below: use torch.matmul to compute broadcasted batch matrix multiplication; see matmul docs
-
-    XnewBkC_norms_sq = torch.bmm(
-        (cand_weights.flatten(0, 1) @ XTX[input_group_slice, input_group_slice]).view(
-            codebook_size, 1, out_group_size * in_group_size
-        ),
-        cand_weights.view(codebook_size, out_group_size * in_group_size, 1),
-    ).reshape(
-        codebook_size, 1
-    )  # [codebook_size, num_out_groups]
-    if scales is not None:
-        XnewBkC_norms_sq = XnewBkC_norms_sq.mul(scales_part.square().reshape(1, num_out_groups))
-
     best_losses = torch.empty(
         (beam_size, k_best, num_out_groups), dtype=XTX.dtype, device=XTX.device
     )  # shape: [beam_size, k_best, num_out_groups]
@@ -545,10 +524,35 @@ def _beam_search_squared_errors(
         device=XTX.device,
     )
     for beam_id in range(beam_size):
+        if symmetric:
+            new_code_signs = torch.sign(delta_weight_without_part[beam_id, :, input_group_slice]) # [out_features, in_group_size]
+            new_code_signs = new_code_signs.reshape(num_out_groups, out_group_size, in_group_size)
+
+            cand_weights = (codebooks[codebook_index, :, None, :, :] * new_code_signs[None, :, :,: ]
+                            )  # [codebook_size, num_out_groups, out_group_size, in_group_size]
+
+        else:
+            assert False, "temporarily dropped support for non-symmetric codebooks for simplicity"
+            cand_weights = codebooks[codebook_index][:, None, :, :]  # [codebook_size, out_group_size, in_group_size], all replacement codes
+
+        # dWTXTX is equivalent to < X @ (W - \sum BiCi except current codebook), X @ SOMETHING >
+        dWTXTXg = delta_weight_without_part @ XTX[..., input_group_slice]  # [beam_size, out_features, in_group_size]
+        # below: use torch.matmul to compute broadcasted batch matrix multiplication; see matmul docs
+
+        XnewBkC_norms_sq = torch.bmm(
+            (cand_weights.flatten(0, 2) @ XTX[input_group_slice, input_group_slice]).view(
+                codebook_size * num_out_groups, 1, out_group_size * in_group_size
+            ),
+            cand_weights.view(codebook_size * num_out_groups, out_group_size * in_group_size, 1),
+        ).reshape(codebook_size, num_out_groups)  # [codebook_size, num_out_groups]
+
+        if scales is not None:
+            XnewBkC_norms_sq = XnewBkC_norms_sq.mul(scales_part.square().reshape(1, num_out_groups))
+
         dot_products = (
             torch.einsum(
-                "mg,og->mo",
-                cand_weights.reshape(codebook_size, out_group_size * in_group_size),
+                "mog,og->mo",
+                cand_weights.reshape(codebook_size, num_out_groups, out_group_size * in_group_size),
                 dWTXTXg[beam_id].view(num_out_groups, out_group_size * in_group_size),
             )
             .sub_(
@@ -584,8 +588,8 @@ def _beam_search_squared_errors(
             candidate_squared_errors, k_best, dim=0, largest=False, sorted=False
         )
         best_losses[beam_id] = best_beam_squared_errors
-        best_indices[beam_id] = add_signs_to_code(best_beam_indices, signs=new_code_signs)
-
+        #best_indices[beam_id] = add_signs_to_code(best_beam_indices, signs=new_code_signs)
+        print("TODO add signs to best_indices")
 
     return best_losses, best_indices
 
