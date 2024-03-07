@@ -218,7 +218,7 @@ class QuantizedWeight(nn.Module):
         num_out_groups = self.out_features // self.out_group_size
         num_in_groups = self.in_features // self.in_group_size
 
-        matrix_store = num_parameters // group_size * self.num_codebooks * self.nbits_per_codebook
+        matrix_store = num_parameters // group_size * self.num_codebooks * (self.nbits_per_codebook + self.symmetric * self.out_group_size * self.in_group_size)
 
         codebooks_store = self.num_codebooks * self.codebook_size * group_size * self.codebook_value_nbits
         if self.codebook_value_nbits < 16:
