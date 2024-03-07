@@ -505,9 +505,10 @@ def _beam_search_squared_errors(
     else:
         scales_part = torch.empty(0, device=XTX.device)
 
-    prev_part_dequantized = get_prev_codes_with_correct_signs(prev_codes_part, codebooks[codebook_index].flatten(-2, -1))
-    # F.embedding(prev_codes_part, codebooks[codebook_index].flatten(-2, -1)).view(
-    #         beam_size, out_features, in_group_size)
+    prev_part_dequantized = _dequantize_weight_part(
+        prev_codes_part, codebooks[codebook_index], symmetric=symmetric
+    )  # previous codes de-quantized, [beam_size, out_features, in_group_size]
+    assert prev_part_dequantized.shape == (beam_size, out_features, in_group_size)
     # previous codes de-quantized  #TODO figure out how this works for symmetric
 
     prev_weight_part = prev_part_dequantized
@@ -517,7 +518,6 @@ def _beam_search_squared_errors(
             .mul(scales_part)
             .view(beam_size, out_features, in_group_size)
         )
-
 
     delta_weight_without_part = reference_weight - beam_weights
     delta_weight_without_part[:, :, input_group_slice] += prev_weight_part
@@ -601,6 +601,21 @@ def _beam_search_squared_errors(
         print("TODO add signs to best_indices")
 
     return best_losses, best_indices
+
+
+def _dequantize_weight_part(codes, codebook, symmetric: bool = False):
+    beam_size, num_out_groups = codes.shape
+    codebook_size, out_group_size, in_group_size = codebook.shape
+    if symmetric:
+        codebook_bits = int(math.log2(codebook_size))
+        signs = integer_to_bits(codes // codebook_size, bits=codebook_bits)
+        codes = codes % codebook_size
+
+    dequantized_weight_part = F.embedding(codes, codebook.flatten(-2, -1)).view(beam_size, -1, in_group_size)
+    if symmetric:
+        signs = signs.to(dequantized_weight_part.dtype).mul_(2).sub_(1)
+        dequantized_weight_part.mul_(signs.view_as(dequantized_weight_part))
+    return dequantized_weight_part
 
 
 @maybe_script
