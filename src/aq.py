@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 from tqdm.auto import trange
 
-from src.datautils import integer_to_bits
+from src.datautils import integer_to_bits, bits_to_integer
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
 from src.utils import ellipsis, maybe_script
 
@@ -608,9 +608,13 @@ def _beam_search_squared_errors(
             candidate_squared_errors, k_best, dim=0, largest=False, sorted=False
         )
         best_losses[beam_id] = best_beam_squared_errors
-        #best_indices[beam_id] = add_signs_to_code(best_beam_indices, signs=new_code_signs)
-        print("TODO add signs to best_indices")
 
+        # add signs to best_beam_indices
+        # best_beam_indices: [k_best, num_out_groups]
+        # new_code_signs: [num_out_groups, out_group_size, in_group_size]
+        new_signs_integer = bits_to_integer((new_code_signs > 0).reshape(num_out_groups, out_group_size * in_group_size))  # [num_out_groups]
+        best_beam_indices = best_beam_indices + nbits_per_codebook * new_signs_integer.reshape(1, num_out_groups)
+        best_indices[beam_id] = best_beam_indices
     return best_losses, best_indices
 
 
