@@ -445,6 +445,23 @@ def _dequantize_weight(
 
 
 @maybe_script
+def _dequantize_weight_part(codes, codebook, symmetric: bool, nbits_per_codebook: int):
+    """partial dequantization with a single codebook and without scales"""
+    beam_size, num_out_groups = codes.shape
+    codebook_size, out_group_size, in_group_size = codebook.shape
+    if symmetric:
+        signs = integer_to_bits(codes // codebook_size, bits=nbits_per_codebook)
+        codes = codes % codebook_size
+
+    dequantized_weight_part = F.embedding(codes, codebook.flatten(-2, -1)).view(beam_size, -1, in_group_size)
+    if symmetric:
+        signs = signs.to(dequantized_weight_part.dtype).mul_(2).sub_(1)
+        dequantized_weight_part.mul_(signs.view_as(dequantized_weight_part))
+    return dequantized_weight_part
+
+
+
+@maybe_script
 def _beam_search_squared_errors(
     XTX: torch.Tensor,
     reference_weight: torch.Tensor,
@@ -601,21 +618,6 @@ def _beam_search_squared_errors(
         print("TODO add signs to best_indices")
 
     return best_losses, best_indices
-
-
-@maybe_script
-def _dequantize_weight_part(codes, codebook, symmetric: bool, nbits_per_codebook: int):
-    beam_size, num_out_groups = codes.shape
-    codebook_size, out_group_size, in_group_size = codebook.shape
-    if symmetric:
-        signs = integer_to_bits(codes // codebook_size, bits=nbits_per_codebook)
-        codes = codes % codebook_size
-
-    dequantized_weight_part = F.embedding(codes, codebook.flatten(-2, -1)).view(beam_size, -1, in_group_size)
-    if symmetric:
-        signs = signs.to(dequantized_weight_part.dtype).mul_(2).sub_(1)
-        dequantized_weight_part.mul_(signs.view_as(dequantized_weight_part))
-    return dequantized_weight_part
 
 
 @maybe_script
