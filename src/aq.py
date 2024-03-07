@@ -421,10 +421,11 @@ def _dequantize_weight(
         0, num_codebooks * codebook_size, codebook_size, device=codes.device
     )  # shape: [num_codebooks]
 
-    signs = None
     if symmetric:
         signs = integer_to_bits(codes // codebook_size, bits=nbits_per_codebook)
         codes = codes % codebook_size
+    else:
+        signs = torch.ones_like(codes)
     reconstructed_weight_flat = F.embedding_bag(
         codes.flatten(0, -2) + codebook_offsets, codebooks.flatten(0, 1).flatten(-2, -1), mode="sum"
     )  # [prod(dims) * num_out_groups * num_in_groups, out_group_size * in_group_size]
