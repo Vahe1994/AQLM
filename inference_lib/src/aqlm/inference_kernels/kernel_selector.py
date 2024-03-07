@@ -34,9 +34,6 @@ def get_forward_pass_kernel(
     ):
         from .cuda_kernel import CUDA_FOLDER
 
-        assert (
-            codebooks.dtype == torch.float16
-        ), f"please load the model with `torch_dtype=torch.float16`, as {codebooks.dtype} is not supported on GPU yet"
         return torch.ops.aqlm.code1x16_matmat
     elif (
         optimize_for_training,
@@ -48,9 +45,6 @@ def get_forward_pass_kernel(
     ) == (False, "cuda", 2, 256, 1, 8):
         from .cuda_kernel import CUDA_FOLDER
 
-        assert (
-            codebooks.dtype == torch.float16
-        ), f"please load the model with `torch_dtype=torch.float16`, as {codebooks.dtype} is not supported on GPU yet"
         return torch.ops.aqlm.code2x8_matmat
     elif (optimize_for_training, codebooks.device.type, out_group_size) == (False, "cuda", 1):
         from .triton_kernel import triton_matmul
