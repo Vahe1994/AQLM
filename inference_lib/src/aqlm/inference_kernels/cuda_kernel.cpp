@@ -13,7 +13,11 @@ inline bool check_use_bfloat16(const torch::Tensor& input) {
   } else {
     throw c10::NotImplementedError(
       {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},
-      c10::str("only float16 and bfloat16 are supported. Got ", dtype.name())
+      c10::str(
+        "AQLM CUDA kernels only support float16 and bfloat16. Got ",
+        dtype.name(),
+        ". Please specify the correct `torch_dtype` when loading the model."
+      )
     );
   }
 }
