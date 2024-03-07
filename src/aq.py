@@ -174,7 +174,7 @@ class QuantizedWeight(nn.Module):
             Formally, the indices must be in range [ 0 , self.out_features // self.out_group_size )
 
         """
-        weight = _dequantize_weight(self.codes[selection], self.get_codebooks(), self.get_scales()[selection], symmetric=self.symmetric)
+        weight = _dequantize_weight(self.codes[selection], self.get_codebooks(), self.get_scales()[selection], symmetric=self.symmetric, nbits=self.nbits_per_codebook)
         return weight
 
     @torch.no_grad()
@@ -207,6 +207,7 @@ class QuantizedWeight(nn.Module):
             prev_codes=self.codes[selection],
             scales=self.get_scales()[selection],
             symmetric=self.symmetric,
+            nbits_per_codebook=self.nbits_per_codebook,
             **kwargs,
         )
         return self.codes[selection]
@@ -252,6 +253,7 @@ def beam_search_optimal_codes(
     scales: Optional[torch.Tensor],
     beam_size: int,
     symmetric: bool,
+    nbits_per_codebook: int,
     dim_rng: Optional[random.Random] = None,
     code_penalties: Optional[torch.Tensor] = None,
     verbose: bool,
@@ -301,7 +303,7 @@ def beam_search_optimal_codes(
     in_features = num_in_groups * in_group_size
     out_features = num_out_groups * out_group_size
     assert reference_weight.shape == (out_features, in_features)
-    prev_weight = _dequantize_weight(prev_codes, codebooks, scales, symmetric=symmetric)
+    prev_weight = _dequantize_weight(prev_codes, codebooks, scales, symmetric=symmetric, nbits=nbits_per_codebook)
 
     # initialize all beam codes as previous codes - so they can be updated during beam search
     beam_codes = prev_codes.unsqueeze(0)
@@ -348,6 +350,7 @@ def beam_search_optimal_codes(
                 k_best=beam_size,
                 code_penalties=code_penalties,
                 symmetric=symmetric,
+                nbits_per_codebook=nbits_per_codebook
             )  # [current beam_size, codebook_size, num_out_groups]
 
             # part 2: select beam_size new best codes and re-arrange beam to account for the fact that ...
@@ -363,6 +366,7 @@ def beam_search_optimal_codes(
                 best_indices=best_indices,
                 beam_size=beam_size,
                 symmetric=symmetric,
+                nbits_per_codebook=nbits_per_codebook
             )
 
             if verbose:
@@ -396,13 +400,17 @@ def _dequantize_weight(
     codes: torch.Tensor,
     codebooks: torch.Tensor,
     scales: Optional[torch.Tensor] = None,
-    symmetric: bool = False
+    *,
+    symmetric: bool,
+    nbits_per_codebook: int,
 ) -> torch.Tensor:
     """
     Decode float weights from quantization codes. Differentiable.
     :param codes: tensor of integer quantization codes, shape [*dims, num_out_groups, num_in_groups, num_codebooks]
     :param codebooks: tensor of vectors for each quantization code, [num_codebooks, codebook_size, out_group_size, in_group_size]
     :param scales: weight will be multiplied by this factor, must be broadcastble with [*dims, out_groups, num_in_groups, out_group_size, in_group_size]
+    :param symmetric:
+    :param nbits:
     :return: reconstructed weight tensor of shape [*dims, num_in_groups*group_size]
     """
     num_out_groups, num_in_groups, num_codebooks = codes.shape[-3:]
@@ -415,8 +423,7 @@ def _dequantize_weight(
 
     signs = None
     if symmetric:
-        codebook_bits = int(math.log2(codebook_size))
-        signs = integer_to_bits(codes // codebook_size, bits=codebook_bits)
+        signs = integer_to_bits(codes // codebook_size, bits=nbits_per_codebook)
         codes = codes % codebook_size
     reconstructed_weight_flat = F.embedding_bag(
         codes.flatten(0, -2) + codebook_offsets, codebooks.flatten(0, 1).flatten(-2, -1), mode="sum"
@@ -449,6 +456,7 @@ def _beam_search_squared_errors(
     codebook_index: int,
     k_best: int,
     symmetric: bool,
+    nbits_per_codebook: int,
     code_penalties: Optional[torch.Tensor] = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
@@ -605,7 +613,8 @@ def _beam_search_select_best(
     best_losses: torch.Tensor,
     best_indices: torch.Tensor,
     beam_size: int,
-    symmetric: bool
+    symmetric: bool,
+    nbits_per_codebook: int
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Select top-:beam_size: and reorder beam accordingly, return new beam
@@ -649,7 +658,7 @@ def _beam_search_select_best(
     for beam_index in range(len(best_hypo_codes)):
         new_beam_codes[beam_index, :, ...] = beam_codes[best_hypo_source_ids[beam_index, :], arange_out_groups, ...]
         new_beam_codes[beam_index, :, input_group_index, codebook_index] = best_hypo_codes[beam_index, :]
-        new_beam_weights[beam_index, :, :] = _dequantize_weight(new_beam_codes[beam_index, ...], codebooks, scales, symmetric=symmetric)
+        new_beam_weights[beam_index, :, :] = _dequantize_weight(new_beam_codes[beam_index, ...], codebooks, scales, symmetric=symmetric, nbits=nbits_per_codebook)
 
     # Note: the code above can be further accelerated by 1) vectorzing loop and ...
     # ... 2) updating new_beam_weights only for the chosen input group
