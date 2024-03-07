@@ -452,6 +452,8 @@ def _dequantize_weight_part(codes, codebook, symmetric: bool, nbits_per_codebook
     if symmetric:
         signs = integer_to_bits(codes // codebook_size, bits=nbits_per_codebook)
         codes = codes % codebook_size
+    else:
+        signs = torch.ones_like(codes)
 
     dequantized_weight_part = F.embedding(codes, codebook.flatten(-2, -1)).view(beam_size, -1, in_group_size)
     if symmetric:
