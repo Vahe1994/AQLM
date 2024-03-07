@@ -584,7 +584,8 @@ def _beam_search_squared_errors(
             candidate_squared_errors, k_best, dim=0, largest=False, sorted=False
         )
         best_losses[beam_id] = best_beam_squared_errors
-        best_indices[beam_id] = best_beam_indices
+        best_indices[beam_id] = add_signs_to_code(best_beam_indices, signs=new_code_signs)
+
 
     return best_losses, best_indices
 
