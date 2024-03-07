@@ -174,7 +174,7 @@ class QuantizedWeight(nn.Module):
             Formally, the indices must be in range [ 0 , self.out_features // self.out_group_size )
 
         """
-        weight = _dequantize_weight(self.codes[selection], self.get_codebooks(), self.get_scales()[selection], symmetric=self.symmetric, nbits=self.nbits_per_codebook)
+        weight = _dequantize_weight(self.codes[selection], self.get_codebooks(), self.get_scales()[selection], symmetric=self.symmetric, nbits_per_codebook=self.nbits_per_codebook)
         return weight
 
     @torch.no_grad()
@@ -303,7 +303,7 @@ def beam_search_optimal_codes(
     in_features = num_in_groups * in_group_size
     out_features = num_out_groups * out_group_size
     assert reference_weight.shape == (out_features, in_features)
-    prev_weight = _dequantize_weight(prev_codes, codebooks, scales, symmetric=symmetric, nbits=nbits_per_codebook)
+    prev_weight = _dequantize_weight(prev_codes, codebooks, scales, symmetric=symmetric, nbits_per_codebook=nbits_per_codebook)
 
     # initialize all beam codes as previous codes - so they can be updated during beam search
     beam_codes = prev_codes.unsqueeze(0)
@@ -678,7 +678,7 @@ def _beam_search_select_best(
     for beam_index in range(len(best_hypo_codes)):
         new_beam_codes[beam_index, :, ...] = beam_codes[best_hypo_source_ids[beam_index, :], arange_out_groups, ...]
         new_beam_codes[beam_index, :, input_group_index, codebook_index] = best_hypo_codes[beam_index, :]
-        new_beam_weights[beam_index, :, :] = _dequantize_weight(new_beam_codes[beam_index, ...], codebooks, scales, symmetric=symmetric, nbits=nbits_per_codebook)
+        new_beam_weights[beam_index, :, :] = _dequantize_weight(new_beam_codes[beam_index, ...], codebooks, scales, symmetric=symmetric, nbits_per_codebook=nbits_per_codebook)
 
     # Note: the code above can be further accelerated by 1) vectorzing loop and ...
     # ... 2) updating new_beam_weights only for the chosen input group
