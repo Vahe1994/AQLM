@@ -506,7 +506,7 @@ def _beam_search_squared_errors(
         scales_part = torch.empty(0, device=XTX.device)
 
     prev_part_dequantized = _dequantize_weight_part(
-        prev_codes_part, codebooks[codebook_index], symmetric=symmetric
+        prev_codes_part, codebooks[codebook_index], symmetric=symmetric, nbits_per_codebook=nbits_per_codebook
     )  # previous codes de-quantized, [beam_size, out_features, in_group_size]
     assert prev_part_dequantized.shape == (beam_size, out_features, in_group_size)
     # previous codes de-quantized  #TODO figure out how this works for symmetric
@@ -603,12 +603,12 @@ def _beam_search_squared_errors(
     return best_losses, best_indices
 
 
-def _dequantize_weight_part(codes, codebook, symmetric: bool = False):
+@maybe_script
+def _dequantize_weight_part(codes, codebook, symmetric: bool, nbits_per_codebook: int):
     beam_size, num_out_groups = codes.shape
     codebook_size, out_group_size, in_group_size = codebook.shape
     if symmetric:
-        codebook_bits = int(math.log2(codebook_size))
-        signs = integer_to_bits(codes // codebook_size, bits=codebook_bits)
+        signs = integer_to_bits(codes // codebook_size, bits=nbits_per_codebook)
         codes = codes % codebook_size
 
     dequantized_weight_part = F.embedding(codes, codebook.flatten(-2, -1)).view(beam_size, -1, in_group_size)
