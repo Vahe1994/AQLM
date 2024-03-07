@@ -1,5 +1,4 @@
 """ Core mathematics for Additive Quantization (AQ): initialization, reconstruction and beam search"""
-import math
 import random
 from typing import List, Optional, Tuple, Union
 
@@ -9,6 +8,7 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 from tqdm.auto import trange
 
+from src.datautils import integer_to_bits
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
 from src.utils import ellipsis, maybe_script
 
@@ -94,17 +94,16 @@ class QuantizedWeight(nn.Module):
 
             weight_for_init = (weight_groupwise / scales).swapaxes(1, 2).reshape_as(reference_weight)
             del weight_groupwise
-        if not symmetric:
-            codes, codebooks = init_aq_kmeans(
-                weight_for_init,
-                num_codebooks=num_codebooks,
-                out_group_size=out_group_size,
-                in_group_size=in_group_size,
-                codebook_size=self.codebook_size,
-                **init_kwargs,
-            )
-        else:
-            raise NotImplementedError("TODO initialize codes and codebooks for symmetric aq")
+        codes, codebooks = init_aq_kmeans(
+            weight_for_init,
+            num_codebooks=num_codebooks,
+            out_group_size=out_group_size,
+            in_group_size=in_group_size,
+            codebook_size=self.codebook_size,
+            symmetric=symmetric,
+            **init_kwargs,
+        )
+
         self.codebooks = nn.Parameter(
             codebooks, requires_grad=True
         )  # [num_codebooks, codebook_size, out_group_size, in_group_size]
@@ -387,13 +386,6 @@ def beam_search_optimal_codes(
                 del best_loss
                 progressbar.desc = info
     return beam_codes[0]
-
-
-@maybe_script
-def integer_to_bits(x: torch.Tensor, bits: int) -> torch.Tensor:
-    mask = 2 ** torch.arange(bits, device=x.device, dtype=x.dtype)
-    return x.unsqueeze(-1).bitwise_and(mask).ne(0)
-
 
 @maybe_script
 def _dequantize_weight(
@@ -714,6 +706,7 @@ def init_aq_kmeans(
     max_points_per_centroid: Optional[int] = None,
     max_iter: int = 1000,
     devices: Optional[List[torch.device]] = None,
+    symmetric: bool = False,
     **kwargs,
 ):
     """
@@ -740,6 +733,7 @@ def init_aq_kmeans(
 
     for _ in trange(num_codebooks, desc="initializing with kmeans") if verbose else range(num_codebooks):
         if use_faiss:
+            assert not symmetric, "faiss not supported for symmetric codes"
             codebook_i, codes_i, reconstructed_weight_i = fit_faiss_kmeans(
                 weight_residue,
                 k=codebook_size,
@@ -748,19 +742,20 @@ def init_aq_kmeans(
                 max_points_per_centroid=max_points_per_centroid,
             )
         else:
+            kmeans_data = weight_residue.abs() if symmetric else weight_residue
             chosen_ids = None
             if max_points_per_centroid is not None:
-                chosen_ids = torch.randperm(weight_residue.shape[0], device=weight_residue.device)[
+                chosen_ids = torch.randperm(kmeans_data.shape[0], device=weight_residue.device)[
                     : max_points_per_centroid * codebook_size
                 ]
             codebook_i, _, _ = fit_kmeans(
-                weight_residue if chosen_ids is None else weight_residue[chosen_ids, :],
+                kmeans_data if chosen_ids is None else kmeans_data[chosen_ids, :],
                 k=codebook_size,
                 max_iter=max_iter,
                 devices=devices,
                 **kwargs,
             )
-            codes_i, reconstructed_weight_i = find_nearest_cluster(weight_residue, codebook_i, devices=devices)
+            codes_i, reconstructed_weight_i = find_nearest_cluster(weight_residue, codebook_i, devices=devices, symmetric=symmetric)
 
         codes_i = codes_i.reshape(num_out_groups, num_in_groups, 1)
         codebook_i = codebook_i.reshape(1, codebook_size, out_group_size, in_group_size)

@@ -10,6 +10,8 @@ from packaging import version
 from tqdm import trange
 from transformers import AutoTokenizer, LlamaTokenizer
 
+from src.utils import maybe_script
+
 
 def set_seed(seed: Optional[int]):
     random.seed(seed)
@@ -259,3 +261,15 @@ def get_loaders(name, nsamples=128, seed=0, seqlen=2048, eval_mode=False, model_
 
     print(f"Loaded data from {name}; {len(data)=} sequences")
     return data
+
+
+def bits_to_integer(x: torch.Tensor) -> torch.Tensor:
+    bits = x.shape[-1]
+    mask = 2 ** torch.arange(bits, device=x.device, dtype=torch.int64)
+    return x.mul(mask).sum(dim=-1)
+
+
+@maybe_script
+def integer_to_bits(x: torch.Tensor, bits: int) -> torch.Tensor:
+    mask = 2 ** torch.arange(bits, device=x.device, dtype=x.dtype)
+    return x.unsqueeze(-1).bitwise_and(mask).ne(0)
