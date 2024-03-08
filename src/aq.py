@@ -402,7 +402,7 @@ def _dequantize_weight(
     :param codebooks: tensor of vectors for each quantization code, [num_codebooks, codebook_size, out_group_size, in_group_size]
     :param scales: weight will be multiplied by this factor, must be broadcastble with [*dims, out_groups, num_in_groups, out_group_size, in_group_size]
     :param symmetric:
-    :param nbits:
+    :param nbits_per_codebook:
     :return: reconstructed weight tensor of shape [*dims, num_in_groups*group_size]
     """
     num_out_groups, num_in_groups, num_codebooks = codes.shape[-3:]
@@ -427,8 +427,8 @@ def _dequantize_weight(
     )
 
     if symmetric:
+        assert num_codebooks == 1, "TODO if num_codebooks != 1, we must replace embedding_bag above with something more complex in order to correctly multiply each code by sign. Note that different output dims and different codebooks may have different signs"
         signs = signs.to(reconstructed_weight_groupwise.dtype).mul_(2).sub_(1)
-        print(f"signs max: {signs.max()}, signs.min(): {signs.min()}")
         reconstructed_weight_groupwise.mul_(signs)
 
     if scales is not None:
@@ -519,6 +519,7 @@ def _beam_search_squared_errors(
     prev_part_dequantized = _dequantize_weight_part(
         prev_codes_part, codebooks[codebook_index], symmetric=symmetric, nbits_per_codebook=nbits_per_codebook
     )  # previous codes de-quantized, [beam_size, out_features, in_group_size]
+
     assert prev_part_dequantized.shape == (beam_size, out_features, in_group_size)
     # previous codes de-quantized  #TODO figure out how this works for symmetric
 
@@ -546,6 +547,12 @@ def _beam_search_squared_errors(
     for beam_id in range(beam_size):
         if symmetric:
             new_code_signs = torch.sign(delta_weight_without_part[beam_id, :, input_group_slice]) # [out_features, in_group_size]
+            if scales is not None:
+                new_code_signs = (
+                    new_code_signs.view(num_out_groups, out_group_size, in_group_size)
+                    .mul(torch.sign(scales_part))
+                    .view(out_features, in_group_size)
+                )
             new_code_signs = new_code_signs.reshape(num_out_groups, out_group_size, in_group_size)
 
             cand_weights = (codebooks[codebook_index, :, None, :, :] * new_code_signs[None, :, :,: ]
@@ -556,7 +563,7 @@ def _beam_search_squared_errors(
             cand_weights = codebooks[codebook_index][:, None, :, :]  # [codebook_size, out_group_size, in_group_size], all replacement codes
 
         # dWTXTX is equivalent to < X @ (W - \sum BiCi except current codebook), X @ SOMETHING >
-        dWTXTXg = delta_weight_without_part @ XTX[..., input_group_slice]  # [beam_size, out_features, in_group_size]
+        dWTXTXg = delta_weight_without_part[beam_id] @ XTX[..., input_group_slice]  # [out_features, in_group_size]
         # below: use torch.matmul to compute broadcasted batch matrix multiplication; see matmul docs
 
         XnewBkC_norms_sq = torch.bmm(
@@ -572,14 +579,14 @@ def _beam_search_squared_errors(
         dot_products = (
             torch.einsum(
                 "mog,og->mo",
-                cand_weights.reshape(codebook_size, num_out_groups, out_group_size * in_group_size),
-                dWTXTXg[beam_id].view(num_out_groups, out_group_size * in_group_size),
+                cand_weights.reshape(codebook_size, num_out_groups, out_group_size * in_group_size),  #TODO YOZH REVIEW THIS
+                dWTXTXg.view(num_out_groups, out_group_size * in_group_size),
             )
             .sub_(
                 torch.einsum(
                     "og,og->o",
                     prev_part_dequantized[beam_id].reshape(num_out_groups, out_group_size * in_group_size),
-                    dWTXTXg[beam_id].view(num_out_groups, out_group_size * in_group_size),
+                    dWTXTXg.view(num_out_groups, out_group_size * in_group_size),
                 ).view(1, num_out_groups)
             )
             .view(codebook_size, num_out_groups)
@@ -613,7 +620,7 @@ def _beam_search_squared_errors(
         # best_beam_indices: [k_best, num_out_groups]
         # new_code_signs: [num_out_groups, out_group_size, in_group_size]
         new_signs_integer = bits_to_integer((new_code_signs > 0).reshape(num_out_groups, out_group_size * in_group_size))  # [num_out_groups]
-        best_beam_indices = best_beam_indices + nbits_per_codebook * new_signs_integer.reshape(1, num_out_groups)
+        best_beam_indices = best_beam_indices + codebook_size * new_signs_integer.reshape(1, num_out_groups)
         best_indices[beam_id] = best_beam_indices
     return best_losses, best_indices
 
