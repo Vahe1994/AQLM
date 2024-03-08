@@ -1,5 +1,6 @@
 """ Core mathematics for Additive Quantization (AQ): initialization, reconstruction and beam search"""
 import random
+import math
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -8,9 +9,9 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 from tqdm.auto import trange
 
-from src.datautils import integer_to_bits, bits_to_integer
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
-from src.utils import ellipsis, maybe_script
+from src.utils import ellipsis, maybe_script, bits_to_integer, integer_to_bits, get_num_bits
+
 
 
 class QuantizedLinear(nn.Module):
@@ -151,7 +152,7 @@ class QuantizedWeight(nn.Module):
     def get_scales(self) -> torch.Tensor:
         """Get per-channel or per-group quantization scales or reconstruct those scales based on scales_nbits"""
         if self.scale_nbits == 0 or self.scales_are_lossless:
-            return self.scales  # scales are not quantized or the quantization is lossless
+            return self.scales.abs()  # scales are not quantized or the quantization is lossless
         elif self.straight_through_gradient:
             with torch.no_grad():
                 self.scales_clusters, _, dequantized_scales = fit_kmeans_1d(
@@ -160,9 +161,9 @@ class QuantizedWeight(nn.Module):
                 dequantized_scales = dequantized_scales.reshape_as(self.scales)
             if torch.is_grad_enabled() and self.scales.requires_grad:
                 dequantized_scales = dequantized_scales + (self.scales - self.scales.detach())
-            return dequantized_scales
+            return dequantized_scales.abs()
         else:  # train scale codebook only
-            return self.scales_clusters.gather(1, self.scales_indices)[:, :, None, None]
+            return self.scales_clusters.gather(1, self.scales_indices)[:, :, None, None].abs()
 
     def forward(self, selection: Union[slice, ellipsis, torch.Tensor] = ...):
         """
@@ -173,7 +174,7 @@ class QuantizedWeight(nn.Module):
             Formally, the indices must be in range [ 0 , self.out_features // self.out_group_size )
 
         """
-        weight = _dequantize_weight(self.codes[selection], self.get_codebooks(), self.get_scales()[selection], symmetric=self.symmetric, nbits_per_codebook=self.nbits_per_codebook)
+        weight = _dequantize_weight(self.codes[selection], self.get_codebooks(), self.get_scales()[selection], symmetric=self.symmetric)
         return weight
 
     @torch.no_grad()
@@ -206,7 +207,6 @@ class QuantizedWeight(nn.Module):
             prev_codes=self.codes[selection],
             scales=self.get_scales()[selection],
             symmetric=self.symmetric,
-            nbits_per_codebook=self.nbits_per_codebook,
             **kwargs,
         )
         return self.codes[selection]
@@ -252,7 +252,6 @@ def beam_search_optimal_codes(
     scales: Optional[torch.Tensor],
     beam_size: int,
     symmetric: bool,
-    nbits_per_codebook: int,
     dim_rng: Optional[random.Random] = None,
     code_penalties: Optional[torch.Tensor] = None,
     verbose: bool,
@@ -302,7 +301,7 @@ def beam_search_optimal_codes(
     in_features = num_in_groups * in_group_size
     out_features = num_out_groups * out_group_size
     assert reference_weight.shape == (out_features, in_features)
-    prev_weight = _dequantize_weight(prev_codes, codebooks, scales, symmetric=symmetric, nbits_per_codebook=nbits_per_codebook)
+    prev_weight = _dequantize_weight(prev_codes, codebooks, scales, symmetric=symmetric)
 
     # initialize all beam codes as previous codes - so they can be updated during beam search
     beam_codes = prev_codes.unsqueeze(0)
@@ -348,8 +347,7 @@ def beam_search_optimal_codes(
                 codebook_index=codebook_index,
                 k_best=beam_size,
                 code_penalties=code_penalties,
-                symmetric=symmetric,
-                nbits_per_codebook=nbits_per_codebook
+                symmetric=symmetric
             )  # [current beam_size, codebook_size, num_out_groups]
 
             # part 2: select beam_size new best codes and re-arrange beam to account for the fact that ...
@@ -364,8 +362,7 @@ def beam_search_optimal_codes(
                 best_losses=best_losses,
                 best_indices=best_indices,
                 beam_size=beam_size,
-                symmetric=symmetric,
-                nbits_per_codebook=nbits_per_codebook
+                symmetric=symmetric
             )
 
             if verbose:
@@ -387,28 +384,26 @@ def beam_search_optimal_codes(
                 progressbar.desc = info
     return beam_codes[0]
 
-@maybe_script
 def _dequantize_weight(
     codes: torch.Tensor,
     codebooks: torch.Tensor,
     scales: Optional[torch.Tensor] = None,
     *,
     symmetric: bool,
-    nbits_per_codebook: int,
 ) -> torch.Tensor:
     """
     Decode float weights from quantization codes. Differentiable.
     :param codes: tensor of integer quantization codes, shape [*dims, num_out_groups, num_in_groups, num_codebooks]
     :param codebooks: tensor of vectors for each quantization code, [num_codebooks, codebook_size, out_group_size, in_group_size]
     :param scales: weight will be multiplied by this factor, must be broadcastble with [*dims, out_groups, num_in_groups, out_group_size, in_group_size]
-    :param symmetric:
-    :param nbits_per_codebook:
+    :param symmetric: whether the codebooks is symmetric across axes
     :return: reconstructed weight tensor of shape [*dims, num_in_groups*group_size]
     """
     num_out_groups, num_in_groups, num_codebooks = codes.shape[-3:]
     num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
     out_features = num_out_groups * out_group_size
     in_features = num_in_groups * in_group_size
+    nbits_per_codebook = get_num_bits(codebook_size)
     codebook_offsets = torch.arange(
         0, num_codebooks * codebook_size, codebook_size, device=codes.device
     )  # shape: [num_codebooks]
@@ -418,18 +413,24 @@ def _dequantize_weight(
         codes = codes % codebook_size
     else:
         signs = torch.ones_like(codes)
-    reconstructed_weight_flat = F.embedding_bag(
-        codes.flatten(0, -2) + codebook_offsets, codebooks.flatten(0, 1).flatten(-2, -1), mode="sum"
-    )  # [prod(dims) * num_out_groups * num_in_groups, out_group_size * in_group_size]
-
-    reconstructed_weight_groupwise = reconstructed_weight_flat.view(
-        list(codes.shape[:-3]) + [num_out_groups, num_in_groups, out_group_size, in_group_size]
-    )
 
     if symmetric:
-        assert num_codebooks == 1, "TODO if num_codebooks != 1, we must replace embedding_bag above with something more complex in order to correctly multiply each code by sign. Note that different output dims and different codebooks may have different signs"
-        signs = signs.to(reconstructed_weight_groupwise.dtype).mul_(2).sub_(1)
-        reconstructed_weight_groupwise.mul_(signs)
+        reconstructed_weight_flat = torch.stack(
+            [F.embedding_bag(codes.flatten(0, -2), codebooks[i].flatten(-2, -1), mode="sum") for i in range(num_codebooks)], 
+            dim=-2
+        )  # [prod(dims) * num_out_groups * num_in_groups, num_codebooks, out_group_size * in_group_size]
+        reconstructed_weight_groupwise = reconstructed_weight_flat.view(
+            list(codes.shape[:-3]) + [num_out_groups, num_in_groups, num_codebooks, out_group_size, in_group_size]
+        )
+        signs = signs.to(reconstructed_weight_groupwise.dtype).view_as(reconstructed_weight_groupwise).mul_(2).sub_(1)
+        reconstructed_weight_groupwise = reconstructed_weight_groupwise.mul_(signs).sum(dim=-3)
+    else:
+        reconstructed_weight_flat = F.embedding_bag(
+            codes.flatten(0, -2) + codebook_offsets, codebooks.flatten(0, 1).flatten(-2, -1), mode="sum"
+        )  # [prod(dims) * num_out_groups * num_in_groups, out_group_size * in_group_size]
+        reconstructed_weight_groupwise = reconstructed_weight_flat.view(
+            list(codes.shape[:-3]) + [num_out_groups, num_in_groups, out_group_size, in_group_size]
+        )
 
     if scales is not None:
         reconstructed_weight_groupwise = reconstructed_weight_groupwise.mul(scales)
@@ -437,10 +438,11 @@ def _dequantize_weight(
 
 
 @maybe_script
-def _dequantize_weight_part(codes, codebook, symmetric: bool, nbits_per_codebook: int):
+def _dequantize_weight_part(codes, codebook, symmetric: bool):
     """partial dequantization with a single codebook and without scales"""
     beam_size, num_out_groups = codes.shape
     codebook_size, out_group_size, in_group_size = codebook.shape
+    nbits_per_codebook = get_num_bits(codebook_size)
     if symmetric:
         signs = integer_to_bits(codes // codebook_size, bits=nbits_per_codebook)
         codes = codes % codebook_size
@@ -452,7 +454,6 @@ def _dequantize_weight_part(codes, codebook, symmetric: bool, nbits_per_codebook
         signs = signs.to(dequantized_weight_part.dtype).mul_(2).sub_(1)
         dequantized_weight_part.mul_(signs.view_as(dequantized_weight_part))
     return dequantized_weight_part
-
 
 
 @maybe_script
@@ -468,7 +469,6 @@ def _beam_search_squared_errors(
     codebook_index: int,
     k_best: int,
     symmetric: bool,
-    nbits_per_codebook: int,
     code_penalties: Optional[torch.Tensor] = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
@@ -517,7 +517,7 @@ def _beam_search_squared_errors(
         scales_part = torch.empty(0, device=XTX.device)
 
     prev_part_dequantized = _dequantize_weight_part(
-        prev_codes_part, codebooks[codebook_index], symmetric=symmetric, nbits_per_codebook=nbits_per_codebook
+        prev_codes_part, codebooks[codebook_index], symmetric=symmetric
     )  # previous codes de-quantized, [beam_size, out_features, in_group_size]
 
     assert prev_part_dequantized.shape == (beam_size, out_features, in_group_size)
@@ -547,17 +547,8 @@ def _beam_search_squared_errors(
     for beam_id in range(beam_size):
         if symmetric:
             new_code_signs = torch.sign(delta_weight_without_part[beam_id, :, input_group_slice]) # [out_features, in_group_size]
-            if scales is not None:
-                new_code_signs = (
-                    new_code_signs.view(num_out_groups, out_group_size, in_group_size)
-                    .mul(torch.sign(scales_part))
-                    .view(out_features, in_group_size)
-                )
             new_code_signs = new_code_signs.reshape(num_out_groups, out_group_size, in_group_size)
-
-            cand_weights = (codebooks[codebook_index, :, None, :, :] * new_code_signs[None, :, :,: ]
-                            )  # [codebook_size, num_out_groups, out_group_size, in_group_size]
-
+            cand_weights = codebooks[codebook_index, :, None, :, :] * new_code_signs[None, :, :,: ] # [codebook_size, num_out_groups, out_group_size, in_group_size]
         else:
             assert False, "temporarily dropped support for non-symmetric codebooks for simplicity"
             cand_weights = codebooks[codebook_index][:, None, :, :]  # [codebook_size, out_group_size, in_group_size], all replacement codes
@@ -636,8 +627,7 @@ def _beam_search_select_best(
     best_losses: torch.Tensor,
     best_indices: torch.Tensor,
     beam_size: int,
-    symmetric: bool,
-    nbits_per_codebook: int
+    symmetric: bool
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Select top-:beam_size: and reorder beam accordingly, return new beam
@@ -681,7 +671,7 @@ def _beam_search_select_best(
     for beam_index in range(len(best_hypo_codes)):
         new_beam_codes[beam_index, :, ...] = beam_codes[best_hypo_source_ids[beam_index, :], arange_out_groups, ...]
         new_beam_codes[beam_index, :, input_group_index, codebook_index] = best_hypo_codes[beam_index, :]
-        new_beam_weights[beam_index, :, :] = _dequantize_weight(new_beam_codes[beam_index, ...], codebooks, scales, symmetric=symmetric, nbits_per_codebook=nbits_per_codebook)
+        new_beam_weights[beam_index, :, :] = _dequantize_weight(new_beam_codes[beam_index, ...], codebooks, scales, symmetric=symmetric)
 
     # Note: the code above can be further accelerated by 1) vectorzing loop and ...
     # ... 2) updating new_beam_weights only for the chosen input group

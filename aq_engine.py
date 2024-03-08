@@ -60,6 +60,7 @@ class AQEngine(nn.Module):
             max_points_per_centroid=args.init_max_points_per_centroid,
             devices=args.devices,
             verbose=True,
+            symmetric=args.symmetric,
         )
 
         differentiable_parameters = nn.ParameterDict(

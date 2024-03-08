@@ -103,3 +103,23 @@ def iterate_minibatches(
             prev_batch = batch if isinstance(batch, (list, tuple)) and len(tensors) > 1 else batch[0]
             del batch
         yield prev_batch
+
+
+@maybe_script
+def bits_to_integer(x: torch.Tensor) -> torch.Tensor:
+    bits = x.shape[-1]
+    mask = 2 ** torch.arange(bits, device=x.device, dtype=torch.int64)
+    return x.mul(mask).sum(dim=-1)
+
+
+@maybe_script
+def integer_to_bits(x: torch.Tensor, bits: int) -> torch.Tensor:
+    mask = 2 ** torch.arange(bits, device=x.device, dtype=x.dtype)
+    return x.unsqueeze(-1).bitwise_and(mask).ne(0)
+
+def get_num_bits(x: int):
+    num_bits = -1
+    while x:
+        x = x >> 1
+        num_bits += 1
+    return num_bits

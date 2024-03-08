@@ -596,6 +596,11 @@ if __name__ == "__main__":
         help="#Number of codebooks per layer",
     )
     parser.add_argument(
+        "--symmetric",
+        action="store_true",
+        help="Whether to use symmetric lattice.",
+    )
+    parser.add_argument(
         "--nbits_per_codebook",
         type=int,
         default=16,

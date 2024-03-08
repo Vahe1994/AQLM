@@ -3,8 +3,7 @@ from typing import List, Optional, Tuple
 
 import torch
 
-from src.datautils import bits_to_integer
-from src.utils import maybe_script
+from src.utils import maybe_script, bits_to_integer
 
 
 @maybe_script
