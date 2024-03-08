@@ -9,7 +9,7 @@ Official PyTorch implementation for [Extreme Compression of Large Language Model
 Learn how to run the prequantized models using this Google Colab examples:
 
 | Basic AQLM <br> generation | Streaming with <br> GPU/CPU | Inference with CUDA <br> graphs (3x speedup) | Fine-tuning <br> with PEFT |
-|-----------|-------|---------------|----------|
+|:-----------:|:-------:|:---------------:|:----------:|
 | <a target="_blank" href="https://colab.research.google.com/github/Vahe1994/AQLM/blob/main/notebooks/colab_example.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="AQLM In Colab"/></a>         | <a target="_blank" href="https://colab.research.google.com/github/Vahe1994/AQLM/blob/main/notebooks/streaming_example.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="AQLM In Colab"/></a> | <a target="_blank" href="https://colab.research.google.com/github/Vahe1994/AQLM/blob/main/notebooks/aqlm_cuda_graph.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a> | <a target="_blank" href="https://colab.research.google.com/github/Vahe1994/AQLM/blob/main/notebooks/aqlm_2bit_training.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>  |
 
 
