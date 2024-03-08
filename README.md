@@ -23,14 +23,14 @@ We provide a number of prequantized models:
 
 | Model      | AQLM scheme | WikiText 2 PPL | Model size, Gb | Hub link                                                                 |
 |------------|-------------|----------------|----------------|--------------------------------------------------------------------------|
-| Llama-2-7b† | 1x16        | 5.92          | 2.4            | [Link](https://huggingface.co/BlackSamorez/Llama-2-7b-AQLM-2Bit-1x16-hf) |
-| Llama-2-7b† | 2x8         | 6.69          | 2.2            | [Link](https://huggingface.co/BlackSamorez/Llama-2-7b-AQLM-2Bit-2x8-hf)  |
-| Llama-2-7b† | 8x8         | 6.61          | 2.2            | [Link](https://huggingface.co/BlackSamorez/Llama-2-7b-AQLM-2Bit-8x8-hf)  |
-| Llama-2-13b†| 1x16        | 5.22           | 4.1            | [Link](https://huggingface.co/BlackSamorez/Llama-2-13b-AQLM-2Bit-1x16-hf)|
-| Llama-2-70b†| 1x16        | 3.83           | 18.8           | [Link](https://huggingface.co/BlackSamorez/Llama-2-70b-AQLM-2Bit-1x16-hf)|
-| Llama-2-70b| 2x8         | 4.83           | 18.2           | [Link](https://huggingface.co/BlackSamorez/Llama-2-70b-AQLM-2Bit-2x8-hf) |
-| Mixtral-8x7b†| 1x16       | 3.35           | 12.6            | [Link](https://huggingface.co/BlackSamorez/Mixtral-8x7b-AQLM-2Bit-1x16-hf)|
-| Mixtral-8x7b-Instruct| 1x16       | -           | 12.6            | [Link](https://huggingface.co/BlackSamorez/Mixtral-8x7B-Instruct-v0_1-AQLM-2Bit-1x16-hf)|
+| Llama-2-7b† | 1x16        | 5.92          | 2.4            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-2Bit-1x16-hf) |
+| Llama-2-7b† | 2x8         | 6.69          | 2.2            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-2Bit-2x8-hf)  |
+| Llama-2-7b† | 8x8         | 6.61          | 2.2            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-2Bit-8x8-hf)  |
+| Llama-2-13b†| 1x16        | 5.22           | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-13b-AQLM-2Bit-1x16-hf)|
+| Llama-2-70b†| 1x16        | 3.83           | 18.8           | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-70b-AQLM-2Bit-1x16-hf)|
+| Llama-2-70b| 2x8         | 4.83           | 18.2           | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-70b-AQLM-2Bit-2x8-hf) |
+| Mixtral-8x7b†| 1x16       | 3.35           | 12.6            | [Link](https://huggingface.co/ISTA-DASLab/Mixtral-8x7b-AQLM-2Bit-1x16-hf)|
+| Mixtral-8x7b-Instruct| 1x16       | -           | 12.6            | [Link](https://huggingface.co/ISTA-DASLab/Mixtral-8x7B-Instruct-v0_1-AQLM-2Bit-1x16-hf)|
 
 
 ### Inference kernels
@@ -60,7 +60,7 @@ Then, one can use the familiar `.from_pretrained` method provided by the [transf
 from transformers import AutoModelForCausalLM
 
 quantized_model = AutoModelForCausalLM.from_pretrained(
-    "BlackSamorez/Llama-2-7b-AQLM-2Bit-1x16-hf",
+    "ISTA-DASLab/Llama-2-7b-AQLM-2Bit-1x16-hf",
     trust_remote_code=True, torch_dtype="auto"
 ).cuda()
 ```
