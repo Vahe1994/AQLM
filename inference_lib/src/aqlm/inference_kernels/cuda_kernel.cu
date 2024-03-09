@@ -1,10 +1,12 @@
 #include <cuda.h>
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include <cuda_runtime.h>
 #include <c10/cuda/CUDAStream.h>
 
 #include <iostream>
 
+template<bool use_bfloat16>
 __global__ void Code1x16MatVec(
   const int4* __restrict__ A,
   const int4* __restrict__ B,
@@ -48,13 +50,23 @@ __global__ void Code1x16MatVec(
           : "=r"(dec[0]), "=r"(dec[1]), "=r"(dec[2]), "=r"(dec[3])
           : "l"((void*) &codebook[enc[i]])
         );
-        half2* a = reinterpret_cast<half2*>(&dec);
-        half2* b = reinterpret_cast<half2*>(&sh_b[b_sh_rd]);
-        half2 res2 = {};
-        #pragma unroll
-        for (int j = 0; j < 4; j++)
-          res2 = __hfma2(a[j], b[j], res2);
-        res += __half2float(res2.x) + __half2float(res2.y);
+        if constexpr (use_bfloat16) {
+          nv_bfloat162* a = reinterpret_cast<nv_bfloat162*>(&dec);
+          nv_bfloat162* b = reinterpret_cast<nv_bfloat162*>(&sh_b[b_sh_rd]);
+          nv_bfloat162 res2 = {};
+          #pragma unroll
+          for (int j = 0; j < 4; j++)
+            res2 = __hfma2(a[j], b[j], res2);
+          res += __bfloat162float(res2.x) + __bfloat162float(res2.y);
+        } else {
+          half2* a = reinterpret_cast<half2*>(&dec);
+          half2* b = reinterpret_cast<half2*>(&sh_b[b_sh_rd]);
+          half2 res2 = {};
+          #pragma unroll
+          for (int j = 0; j < 4; j++)
+            res2 = __hfma2(a[j], b[j], res2);
+          res += __half2float(res2.x) + __half2float(res2.y);
+        }
         b_sh_rd++;
       }
       a_gl_rd += 32;
@@ -65,11 +77,17 @@ __global__ void Code1x16MatVec(
     #pragma unroll
     for (int i = 16; i > 0; i /= 2)
       res += __shfl_down_sync(0xffffffff, res, i);
-    if (threadIdx.x % 32 == 0)
-      reinterpret_cast<__half*>(C)[c_gl_wr] = __float2half(res);
+    if (threadIdx.x % 32 == 0) {
+      if constexpr (use_bfloat16) {
+        reinterpret_cast<__nv_bfloat16*>(C)[c_gl_wr] = __float2bfloat16(res);
+      } else {
+        reinterpret_cast<__half*>(C)[c_gl_wr] = __float2half(res);
+      }
+    }
   }
 }
 
+template<bool use_bfloat16>
 __global__ void Code2x8MatVec(
   const int4* __restrict__ A,
   const int4* __restrict__ B,
@@ -119,14 +137,25 @@ __global__ void Code2x8MatVec(
       const uint8_t* enc = reinterpret_cast<const uint8_t*>(&A[a_gl_rd]);
       #pragma unroll
       for (int i = 0; i < 8; i++) {
-        half2* a0 = reinterpret_cast<half2*>(&sh_code0[8 * enc[2 * i + 0] + lane]);
-        half2* a1 = reinterpret_cast<half2*>(&sh_code1[8 * enc[2 * i + 1] + lane]);
-        half2*  b = reinterpret_cast<half2*>(&sh_b[b_sh_rd]);
-        half2 res2 = {};
-        #pragma unroll
-        for (int j = 0; j < 4; j++)
-          res2 = __hfma2(__hadd2(a0[j], a1[j]), b[j], res2);
-        res += __half2float(res2.x) + __half2float(res2.y);
+        if constexpr (use_bfloat16) {
+          nv_bfloat162* a0 = reinterpret_cast<nv_bfloat162*>(&sh_code0[8 * enc[2 * i + 0] + lane]);
+          nv_bfloat162* a1 = reinterpret_cast<nv_bfloat162*>(&sh_code1[8 * enc[2 * i + 1] + lane]);
+          nv_bfloat162*  b = reinterpret_cast<nv_bfloat162*>(&sh_b[b_sh_rd]);
+          nv_bfloat162 res2 = {};
+          #pragma unroll
+          for (int j = 0; j < 4; j++)
+            res2 = __hfma2(__hadd2(a0[j], a1[j]), b[j], res2);
+          res += __bfloat162float(res2.x) + __bfloat162float(res2.y);
+        } else {
+          half2* a0 = reinterpret_cast<half2*>(&sh_code0[8 * enc[2 * i + 0] + lane]);
+          half2* a1 = reinterpret_cast<half2*>(&sh_code1[8 * enc[2 * i + 1] + lane]);
+          half2*  b = reinterpret_cast<half2*>(&sh_b[b_sh_rd]);
+          half2 res2 = {};
+          #pragma unroll
+          for (int j = 0; j < 4; j++)
+            res2 = __hfma2(__hadd2(a0[j], a1[j]), b[j], res2);
+          res += __half2float(res2.x) + __half2float(res2.y);
+        }
         b_sh_rd++;
       }
       a_gl_rd += 32;
@@ -137,8 +166,13 @@ __global__ void Code2x8MatVec(
     #pragma unroll
     for (int i = 16; i > 0; i /= 2)
       res += __shfl_down_sync(0xffffffff, res, i);
-    if (threadIdx.x % 32 == 0)
-      reinterpret_cast<__half*>(C)[c_gl_wr] = __float2half(res);
+    if (threadIdx.x % 32 == 0) {
+      if constexpr (use_bfloat16) {
+        reinterpret_cast<__nv_bfloat16*>(C)[c_gl_wr] = __float2bfloat16(res);
+      } else {
+        reinterpret_cast<__half*>(C)[c_gl_wr] = __float2half(res);
+      }
+    }
   }
 }
 
@@ -154,7 +188,8 @@ void  code1x16_matvec_cuda(
         void* __restrict__ C,
   const void* __restrict__ codebook,
   int prob_m,
-  int prob_k
+  int prob_k,
+  bool use_bfloat16
 ) {
   int sms;
   cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, 0);
@@ -168,14 +203,25 @@ void  code1x16_matvec_cuda(
   int blocks = ceildiv(prob_m, thread_m);
   int threads = 32 * thread_m;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
-  Code1x16MatVec<<<blocks, threads, 16*32*9, stream>>>(
-    (const int4*) A,
-    (const int4*) B,
-    (int4*) C,
-    (const int4*) codebook,
-    prob_m,
-    prob_k
-  );
+  if (use_bfloat16) {
+    Code1x16MatVec<true><<<blocks, threads, 16*32*9, stream>>>(
+      (const int4*) A,
+      (const int4*) B,
+      (int4*) C,
+      (const int4*) codebook,
+      prob_m,
+      prob_k
+    );
+  } else {
+    Code1x16MatVec<false><<<blocks, threads, 16*32*9, stream>>>(
+      (const int4*) A,
+      (const int4*) B,
+      (int4*) C,
+      (const int4*) codebook,
+      prob_m,
+      prob_k
+    );
+  }
 }
 
 void  code2x8_matvec_cuda(
@@ -184,7 +230,8 @@ void  code2x8_matvec_cuda(
         void* __restrict__ C,
   const void* __restrict__ codebook,
   int prob_m,
-  int prob_k
+  int prob_k,
+  bool use_bfloat16
 ) {
   int sms;
   cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, 0);
@@ -198,16 +245,30 @@ void  code2x8_matvec_cuda(
   int blocks = ceildiv(prob_m, thread_m);
   int threads = 32 * thread_m;
   int shared = 16 * (2 * 256 * 8 + 32 * 9);
-  cudaFuncSetAttribute(
-    Code2x8MatVec, cudaFuncAttributeMaxDynamicSharedMemorySize, shared
-  );
   cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
-  Code2x8MatVec<<<blocks, threads, shared, stream>>>(
-    (const int4*) A,
-    (const int4*) B,
-    (int4*) C,
-    (const int4*) codebook,
-    prob_m,
-    prob_k
-  );
+  if (use_bfloat16) {
+    cudaFuncSetAttribute(
+      Code2x8MatVec<true>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared
+    );
+    Code2x8MatVec<true><<<blocks, threads, shared, stream>>>(
+      (const int4*) A,
+      (const int4*) B,
+      (int4*) C,
+      (const int4*) codebook,
+      prob_m,
+      prob_k
+    );
+  } else {
+    cudaFuncSetAttribute(
+      Code2x8MatVec<false>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared
+    );
+    Code2x8MatVec<false><<<blocks, threads, shared, stream>>>(
+      (const int4*) A,
+      (const int4*) B,
+      (int4*) C,
+      (const int4*) codebook,
+      prob_m,
+      prob_k
+    );
+  }
 }
