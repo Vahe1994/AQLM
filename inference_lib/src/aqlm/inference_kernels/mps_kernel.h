@@ -22,7 +22,17 @@ kernel void Code1x16MatVec(
   constant int&       prob_k   [[buffer(5)]],
   uint index [[thread_position_in_grid]]
 ) {
-    return;
+    int num_codes = prob_k / 8;
+    constant short int* codes_row = A + index * num_codes;
+
+    float res = 0;
+    for (int i = 0; i < num_codes; ++i) {
+        constant T* encoded_vector = codebook + codes_row[i] * 8;
+        for (int j = 0; j < 8; ++j) {
+            res += static_cast<float>(encoded_vector[j] * B[i * 8 + j]);
+        }
+    }
+    C[index] = res;
 }
 
 template
