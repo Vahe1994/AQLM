@@ -7,7 +7,7 @@ The code that registers a PyTorch custom operation.
 
 
 #include <torch/extension.h>
-#include "CustomSoftshrink.h"
+#include "mps_kernel.h"
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
@@ -17,7 +17,7 @@ static inline id<MTLBuffer> getMTLBufferStorage(const torch::Tensor& tensor) {
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
 }
 
-torch::Tensor& dispatchCode1x16Matvec(
+void dispatchCode1x16Matvec(
     const torch::Tensor& A,
     const torch::Tensor& B,
           torch::Tensor& C,
@@ -87,8 +87,6 @@ torch::Tensor& dispatchCode1x16Matvec(
             torch::mps::commit();
         });
     }
-
-    return output;
 }
 
 // C++ op dispatching the Metal soft shrink shader.
@@ -122,8 +120,7 @@ torch::Tensor code1x16_matmat(
             codes.squeeze(2),
             input_vec,
             output_vec,
-            codebooks,
-            use_bfloat16
+            codebooks
         );
     }
     flat_output *= scales.flatten().unsqueeze(0);

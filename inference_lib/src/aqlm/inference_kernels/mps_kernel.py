@@ -7,7 +7,8 @@ from torch.utils.cpp_extension import load
 MPS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 MPS_KERNEL = load(
     name="codebook_mps",
-    sources=[os.path.join(MPS_FOLDER, "mps_kernel.h"), os.path.join(MPS_FOLDER, "mps_kernel.mm")],
+    sources=[os.path.join(MPS_FOLDER, "mps_kernel.mm")],
+    extra_cflags=['-std=c++17'],
 )
 
 torch.library.define(

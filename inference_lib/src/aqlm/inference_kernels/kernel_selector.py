@@ -35,6 +35,18 @@ def get_forward_pass_kernel(
         from .cuda_kernel import CUDA_FOLDER
 
         return torch.ops.aqlm.code1x16_matmat
+    elif (optimize_for_training, codebooks.device.type, num_codebooks, codebook_size, out_group_size, in_group_size) == (
+        False,
+        "mps",
+        1,
+        65536,
+        1,
+        8,
+    ):
+        print("MPS kernel")
+        from .mps_kernel import MPS_FOLDER
+        
+        return torch.ops.aqlm.code1x16_matmat_mps
     elif (
         optimize_for_training,
         codebooks.device.type,
