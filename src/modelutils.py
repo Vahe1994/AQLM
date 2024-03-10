@@ -105,6 +105,8 @@ def get_layers(model):
         return model.transformer.h
     elif model.config.model_type == "opt":
         return model.model.decoder.layers
+    elif model.config.model_type == "starcoder2":
+        return model.model.layers
     else:
         raise ValueError(MODEL_ERROR_MSG.format(model.config.model_type))
 
