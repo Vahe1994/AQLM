@@ -39,7 +39,7 @@ void dispatchCode1x16Matvec(
                                                                     error:&error];
         TORCH_CHECK(customKernelLibrary, "Failed to to create custom kernel library, error: ", error.localizedDescription.UTF8String);
 
-        std::string kernel_name = std::string("aqlm_gemv_1x16_kernel_") + "half";
+        std::string kernel_name = std::string("aqlm_gemv_1x16_kernel_") + (B.scalar_type() == torch::kFloat ? "float" : "half");
         id<MTLFunction> customSoftShrinkFunction = [customKernelLibrary newFunctionWithName:[NSString stringWithUTF8String:kernel_name.c_str()]];
         TORCH_CHECK(customSoftShrinkFunction, "Failed to create function state object for ", kernel_name.c_str());
 
@@ -102,7 +102,7 @@ torch::Tensor code1x16_matmat(
     TORCH_CHECK(input.is_contiguous(), "input must be contiguous");
 
     // Check the supported data types for soft shrink.
-    TORCH_CHECK(input.scalar_type() == torch::kHalf, "Unsupported data type: ", input.scalar_type());
+    TORCH_CHECK(input.scalar_type() == torch::kFloat || input.scalar_type() == torch::kHalf, "Unsupported data type: ", input.scalar_type());
 
     auto input_sizes = input.sizes();
     auto out_features = codes.size(0) * codebooks.size(2);

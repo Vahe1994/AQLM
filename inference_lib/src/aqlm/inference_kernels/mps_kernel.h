@@ -46,4 +46,16 @@ kernel void Code1x16MatVec<half>(
   constant int&       prob_k   [[buffer(5)]],
   uint index [[thread_position_in_grid]]
 );
+
+template
+[[host_name("aqlm_gemv_1x16_kernel_float")]]
+kernel void Code1x16MatVec<float>(
+  constant short int* A [[buffer(0)]],
+  constant float*         B [[buffer(1)]],
+  device   float*         C [[buffer(2)]],
+  constant float*         codebook [[buffer(3)]],
+  constant int&       prob_m   [[buffer(4)]],
+  constant int&       prob_k   [[buffer(5)]],
+  uint index [[thread_position_in_grid]]
+);
 )MPS_AQLM";
