@@ -30,6 +30,9 @@ torch::Tensor& dispatchCode1x16Matvec(
         // Set the number of threads equal to the number of rows.
         int numThreads = C.size(-1);
 
+        int prob_m = C.size(0);
+        int prob_k = B.size(0);
+
         // Load the custom soft shrink shader.
         id<MTLLibrary> customKernelLibrary = [device newLibraryWithSource:[NSString stringWithUTF8String:CUSTOM_KERNEL]
                                                                   options:nil
@@ -62,6 +65,8 @@ torch::Tensor& dispatchCode1x16Matvec(
             [computeEncoder setBuffer:getMTLBufferStorage(B) offset:B.storage_offset() * B.element_size() atIndex:1];
             [computeEncoder setBuffer:getMTLBufferStorage(C) offset:C.storage_offset() * C.element_size() atIndex:2];
             [computeEncoder setBuffer:getMTLBufferStorage(codebook) offset:codebook.storage_offset() * codebook.element_size() atIndex:3];
+            [computeEncoder setBytes:&prob_m length:sizeof(int) atIndex:4];
+            [computeEncoder setBytes:&prob_k length:sizeof(int) atIndex:5];
 
             MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
 

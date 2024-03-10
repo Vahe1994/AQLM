@@ -18,8 +18,8 @@ kernel void Code1x16MatVec(
   constant T*         B [[buffer(1)]],
   device   T*         C [[buffer(2)]],
   constant T*         codebook [[buffer(3)]],
-  int prob_m,
-  int prob_k,
+  constant int&       prob_m   [[buffer(4)]],
+  constant int&       prob_k   [[buffer(5)]],
   uint index [[thread_position_in_grid]]
 ) {
     return;
@@ -32,8 +32,8 @@ kernel void Code1x16MatVec(
   constant T*         B [[buffer(1)]],
   device   T*         C [[buffer(2)]],
   constant T*         codebook [[buffer(3)]],
-  int prob_m,
-  int prob_k,
+  constant int&       prob_m   [[buffer(4)]],
+  constant int&       prob_k   [[buffer(5)]],
   uint index [[thread_position_in_grid]]
 );
 )MPS_AQLM";
