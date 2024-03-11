@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple
 
 import torch
 
-from src.utils import maybe_script
+from src.utils import maybe_script, bits_to_integer
 
 
 @maybe_script
@@ -158,17 +158,28 @@ def fit_faiss_kmeans(
 
     return clusters, nearest_indices, reconstructed_data
 
-
-@maybe_script
-def find_nearest_cluster(data, clusters, block_size_vals: int = 2**30, devices: Optional[List[torch.device]] = None):
+def find_nearest_cluster(
+    data,
+    clusters,
+    block_size_vals: int = 2**30,
+    devices: Optional[List[torch.device]] = None,
+    symmetric: bool = False
+):
     """Find nearest clusters for each batch of data and return their indices"""
     if devices is None:
         devices = [data.device]
     block_size = block_size_vals // len(clusters)
+    codebook_size = clusters.shape[0]
     shard_size = (len(data) - 1) // len(devices) + 1
+
+    if symmetric:
+        signs = data > 0
+        data = data.abs()
+
     data = [
         data[gi * shard_size : (gi + 1) * shard_size].to(devices[gi], non_blocking=True) for gi in range(len(devices))
     ]
+
     nearest_indices = [torch.empty(len(data[gi]), dtype=torch.int64, device=devices[gi]) for gi in range(len(devices))]
     clusters = [clusters.to(device, non_blocking=True) for device in devices]
 
@@ -183,6 +194,12 @@ def find_nearest_cluster(data, clusters, block_size_vals: int = 2**30, devices: 
     clusters = clusters[0]
     nearest_indices = torch.cat([nearest_indices[gi].to(devices[0]) for gi in range(len(devices))], dim=0)
     reconstructed_data = clusters[nearest_indices]
+    if symmetric:
+        nearest_indices_offset = codebook_size * bits_to_integer(signs)
+        nearest_indices += nearest_indices_offset.view_as(nearest_indices)
+        signs = signs.to(reconstructed_data.dtype).mul_(2).sub_(1)
+        reconstructed_data.mul_(signs)
+
     return nearest_indices, reconstructed_data
 
 

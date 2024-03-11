@@ -9,7 +9,8 @@ from torch.utils.checkpoint import checkpoint
 from tqdm.auto import trange
 
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
-from src.utils import ellipsis, maybe_script
+from src.utils import ellipsis, maybe_script, bits_to_integer, integer_to_bits, get_num_bits
+
 
 
 class QuantizedLinear(nn.Module):
@@ -46,6 +47,7 @@ class QuantizedWeight(nn.Module):
         codebook_value_nbits: int = 16,
         codebook_value_num_groups: int = 1,
         scale_nbits: int = 0,
+        symmetric: bool = False,
         straight_through_gradient: Optional[bool] = None,
         **init_kwargs,
     ):
@@ -92,13 +94,13 @@ class QuantizedWeight(nn.Module):
 
             weight_for_init = (weight_groupwise / scales).swapaxes(1, 2).reshape_as(reference_weight)
             del weight_groupwise
-
         codes, codebooks = init_aq_kmeans(
             weight_for_init,
             num_codebooks=num_codebooks,
             out_group_size=out_group_size,
             in_group_size=in_group_size,
             codebook_size=self.codebook_size,
+            symmetric=symmetric,
             **init_kwargs,
         )
 
@@ -106,6 +108,7 @@ class QuantizedWeight(nn.Module):
             codebooks, requires_grad=True
         )  # [num_codebooks, codebook_size, out_group_size, in_group_size]
         self.codes = nn.Parameter(codes, requires_grad=False)  #  [num_out_groups, num_in_groups, num_codebooks]
+        self.symmetric = symmetric
 
     def get_codebooks(self) -> torch.Tensor:
         """Get quantization codebooks or reconstruct them from second level quantization (see codebook_values_nbits)"""
@@ -148,7 +151,7 @@ class QuantizedWeight(nn.Module):
     def get_scales(self) -> torch.Tensor:
         """Get per-channel or per-group quantization scales or reconstruct those scales based on scales_nbits"""
         if self.scale_nbits == 0 or self.scales_are_lossless:
-            return self.scales  # scales are not quantized or the quantization is lossless
+            return self.scales.abs()  # scales are not quantized or the quantization is lossless
         elif self.straight_through_gradient:
             with torch.no_grad():
                 self.scales_clusters, _, dequantized_scales = fit_kmeans_1d(
@@ -157,9 +160,9 @@ class QuantizedWeight(nn.Module):
                 dequantized_scales = dequantized_scales.reshape_as(self.scales)
             if torch.is_grad_enabled() and self.scales.requires_grad:
                 dequantized_scales = dequantized_scales + (self.scales - self.scales.detach())
-            return dequantized_scales
+            return dequantized_scales.abs()
         else:  # train scale codebook only
-            return self.scales_clusters.gather(1, self.scales_indices)[:, :, None, None]
+            return self.scales_clusters.gather(1, self.scales_indices)[:, :, None, None].abs()
 
     def forward(self, selection: Union[slice, ellipsis, torch.Tensor] = ...):
         """
@@ -170,7 +173,7 @@ class QuantizedWeight(nn.Module):
             Formally, the indices must be in range [ 0 , self.out_features // self.out_group_size )
 
         """
-        weight = _dequantize_weight(self.codes[selection], self.get_codebooks(), self.get_scales()[selection])
+        weight = _dequantize_weight(self.codes[selection], self.get_codebooks(), self.get_scales()[selection], symmetric=self.symmetric)
         return weight
 
     @torch.no_grad()
@@ -202,6 +205,7 @@ class QuantizedWeight(nn.Module):
             codebooks=self.get_codebooks(),
             prev_codes=self.codes[selection],
             scales=self.get_scales()[selection],
+            symmetric=self.symmetric,
             **kwargs,
         )
         return self.codes[selection]
@@ -213,7 +217,7 @@ class QuantizedWeight(nn.Module):
         num_out_groups = self.out_features // self.out_group_size
         num_in_groups = self.in_features // self.in_group_size
 
-        matrix_store = num_parameters // group_size * self.num_codebooks * self.nbits_per_codebook
+        matrix_store = num_parameters // group_size * self.num_codebooks * (self.nbits_per_codebook + self.symmetric * group_size)
 
         codebooks_store = self.num_codebooks * self.codebook_size * group_size * self.codebook_value_nbits
         if self.codebook_value_nbits < 16:
@@ -246,8 +250,9 @@ def beam_search_optimal_codes(
     prev_codes: torch.IntTensor,
     scales: Optional[torch.Tensor],
     beam_size: int,
+    symmetric: bool,
     dim_rng: Optional[random.Random] = None,
-    sparsity_regularizer: float = 0,
+    code_penalties: Optional[torch.Tensor] = None,
     verbose: bool,
 ):
     """
@@ -262,7 +267,9 @@ def beam_search_optimal_codes(
       random.Random(optional_seed) = shuffle dimensions at random, optionally using the specified seed
 
     :param beam_size: consider up to this many best encoding combinations
-    :param sparsity_regularizer: subtract this value from beam search objective each time you have a zero code somewhere
+    :param symmetric: use signed symmetric codes
+    :param code_penalties: a pytorch float tensor of shape [num_codebooks, codebook_size]
+        Penalize the beam search objective by code_penalties[m][i] for every use of ith code from mth codebook
     :param verbose: if True, draw a progressbar and periodically print best loss
     :return: best quantization codes found, same shape as prev_codes
 
@@ -293,7 +300,7 @@ def beam_search_optimal_codes(
     in_features = num_in_groups * in_group_size
     out_features = num_out_groups * out_group_size
     assert reference_weight.shape == (out_features, in_features)
-    prev_weight = _dequantize_weight(prev_codes, codebooks, scales)
+    prev_weight = _dequantize_weight(prev_codes, codebooks, scales, symmetric=symmetric)
 
     # initialize all beam codes as previous codes - so they can be updated during beam search
     beam_codes = prev_codes.unsqueeze(0)
@@ -307,8 +314,12 @@ def beam_search_optimal_codes(
         .sum(-1)
     )
     # beam_losses shape: [current beam_size, num_out_groups], initial beam_size = 1
-    if sparsity_regularizer != 0:
-        beam_losses = beam_losses - sparsity_regularizer * (prev_codes == 0).sum(dim=(-1, -2))[None, :]
+    if code_penalties is not None:
+        # Compute counts for each code in each codebook, initialize regularizer
+        codebook_ids = torch.arange(num_codebooks, device=beam_losses.device).view(1, 1, 1, -1)
+        per_channel_regularizers = code_penalties[codebook_ids, beam_codes].sum(dim=(2, 3))  # [beam_size, num_out_groups]
+        del codebook_ids
+        beam_losses += beam_losses + per_channel_regularizers
 
     if verbose:
         progressbar = trange(num_in_groups * num_codebooks)
@@ -334,7 +345,8 @@ def beam_search_optimal_codes(
                 input_group_index=input_group_index,
                 codebook_index=codebook_index,
                 k_best=beam_size,
-                sparsity_regularizer=sparsity_regularizer,
+                code_penalties=code_penalties,
+                symmetric=symmetric
             )  # [current beam_size, codebook_size, num_out_groups]
 
             # part 2: select beam_size new best codes and re-arrange beam to account for the fact that ...
@@ -349,6 +361,7 @@ def beam_search_optimal_codes(
                 best_losses=best_losses,
                 best_indices=best_indices,
                 beam_size=beam_size,
+                symmetric=symmetric
             )
 
             if verbose:
@@ -358,46 +371,88 @@ def beam_search_optimal_codes(
                 best_loss = beam_losses.min(0).values.sum().item() / out_features
                 info = f"in_group {input_group_index} / {num_in_groups} "
                 info += f"| codebook {codebook_index} / {num_codebooks} "
-                if sparsity_regularizer == 0:
+                if code_penalties is None:
                     info += f"| loss {best_loss:.10f}"
                 else:  # un-regularize to restore MSE loss, report sparsity rate
-                    num_zero_codes = (beam_codes[0] == 0).sum().item()
-                    best_loss = best_loss + sparsity_regularizer / out_features * num_zero_codes
-                    sparsity = num_zero_codes / prev_codes.numel()
-                    info += f"| loss {best_loss:.5f} | sparse {sparsity * 100:.1f}% |"
-
+                    codebook_ids = torch.arange(num_codebooks, device=beam_losses.device).view(1, 1, 1, -1)
+                    best_cand_regularizer = code_penalties[codebook_ids, beam_codes[0]].sum() / num_out_groups
+                    del codebook_ids
+                    best_loss = best_loss - best_cand_regularizer   # report loss without the regularizer part
+                    info += f"| loss {best_loss:.5f} | reg {best_cand_regularizer:.5f} |"
+                del best_loss
                 progressbar.desc = info
     return beam_codes[0]
 
-
-@maybe_script
 def _dequantize_weight(
-    codes: torch.Tensor, codebooks: torch.Tensor, scales: Optional[torch.Tensor] = None
+    codes: torch.Tensor,
+    codebooks: torch.Tensor,
+    scales: Optional[torch.Tensor] = None,
+    *,
+    symmetric: bool,
 ) -> torch.Tensor:
     """
     Decode float weights from quantization codes. Differentiable.
     :param codes: tensor of integer quantization codes, shape [*dims, num_out_groups, num_in_groups, num_codebooks]
     :param codebooks: tensor of vectors for each quantization code, [num_codebooks, codebook_size, out_group_size, in_group_size]
     :param scales: weight will be multiplied by this factor, must be broadcastble with [*dims, out_groups, num_in_groups, out_group_size, in_group_size]
+    :param symmetric: whether the codebooks is symmetric across axes
     :return: reconstructed weight tensor of shape [*dims, num_in_groups*group_size]
     """
     num_out_groups, num_in_groups, num_codebooks = codes.shape[-3:]
     num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
     out_features = num_out_groups * out_group_size
     in_features = num_in_groups * in_group_size
+    nbits_per_codebook = get_num_bits(codebook_size)
     codebook_offsets = torch.arange(
         0, num_codebooks * codebook_size, codebook_size, device=codes.device
     )  # shape: [num_codebooks]
-    reconstructed_weight_flat = F.embedding_bag(
-        codes.flatten(0, -2) + codebook_offsets, codebooks.flatten(0, 1).flatten(-2, -1), mode="sum"
-    )  # [prod(dims) * num_out_groups * num_in_groups, out_group_size * in_group_size]
 
-    reconstructed_weight_groupwise = reconstructed_weight_flat.view(
-        list(codes.shape[:-3]) + [num_out_groups, num_in_groups, out_group_size, in_group_size]
-    )
+    if symmetric:
+        signs = integer_to_bits(codes // codebook_size, bits=nbits_per_codebook)
+        codes = codes % codebook_size
+    else:
+        signs = torch.ones_like(codes)
+
+    if symmetric:
+        reconstructed_weight_flat = torch.stack(
+            [F.embedding_bag(codes.flatten(0, -2), codebooks[i].flatten(-2, -1), mode="sum") for i in range(num_codebooks)], 
+            dim=-2
+        )  # [prod(dims) * num_out_groups * num_in_groups, num_codebooks, out_group_size * in_group_size]
+        reconstructed_weight_groupwise = reconstructed_weight_flat.view(
+            list(codes.shape[:-3]) + [num_out_groups, num_in_groups, num_codebooks, out_group_size, in_group_size]
+        )
+        signs = signs.to(reconstructed_weight_groupwise.dtype).view_as(reconstructed_weight_groupwise).mul_(2).sub_(1)
+        reconstructed_weight_groupwise = reconstructed_weight_groupwise.mul_(signs).sum(dim=-3)
+    else:
+        reconstructed_weight_flat = F.embedding_bag(
+            codes.flatten(0, -2) + codebook_offsets, codebooks.flatten(0, 1).flatten(-2, -1), mode="sum"
+        )  # [prod(dims) * num_out_groups * num_in_groups, out_group_size * in_group_size]
+        reconstructed_weight_groupwise = reconstructed_weight_flat.view(
+            list(codes.shape[:-3]) + [num_out_groups, num_in_groups, out_group_size, in_group_size]
+        )
+
     if scales is not None:
         reconstructed_weight_groupwise = reconstructed_weight_groupwise.mul(scales)
     return reconstructed_weight_groupwise.swapaxes(-3, -2).reshape(list(codes.shape[:-3]) + [out_features, in_features])
+
+
+@maybe_script
+def _dequantize_weight_part(codes, codebook, symmetric: bool):
+    """partial dequantization with a single codebook and without scales"""
+    beam_size, num_out_groups = codes.shape
+    codebook_size, out_group_size, in_group_size = codebook.shape
+    nbits_per_codebook = get_num_bits(codebook_size)
+    if symmetric:
+        signs = integer_to_bits(codes // codebook_size, bits=nbits_per_codebook)
+        codes = codes % codebook_size
+    else:
+        signs = torch.ones_like(codes)
+
+    dequantized_weight_part = F.embedding(codes, codebook.flatten(-2, -1)).view(beam_size, -1, in_group_size)
+    if symmetric:
+        signs = signs.to(dequantized_weight_part.dtype).mul_(2).sub_(1)
+        dequantized_weight_part.mul_(signs.view_as(dequantized_weight_part))
+    return dequantized_weight_part
 
 
 @maybe_script
@@ -412,7 +467,8 @@ def _beam_search_squared_errors(
     input_group_index: int,
     codebook_index: int,
     k_best: int,
-    sparsity_regularizer: float,
+    symmetric: bool,
+    code_penalties: Optional[torch.Tensor] = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Compute MSE or sum-of-squared-error losses for all possible ways to replace quantization codes for one input group
@@ -458,9 +514,13 @@ def _beam_search_squared_errors(
         scales_part = scales[:, input_group_index % scales.shape[1], :, :]  # [num_out_groups, 1, 1]
     else:
         scales_part = torch.empty(0, device=XTX.device)
-    prev_part_dequantized = F.embedding(prev_codes_part, codebooks[codebook_index].flatten(-2, -1)).view(
-        beam_size, out_features, in_group_size
-    )  # previous codes de-quantized
+
+    prev_part_dequantized = _dequantize_weight_part(
+        prev_codes_part, codebooks[codebook_index], symmetric=symmetric
+    )  # previous codes de-quantized, [beam_size, out_features, in_group_size]
+
+    assert prev_part_dequantized.shape == (beam_size, out_features, in_group_size)
+    # previous codes de-quantized  #TODO figure out how this works for symmetric
 
     prev_weight_part = prev_part_dequantized
     if scales is not None:
@@ -470,25 +530,10 @@ def _beam_search_squared_errors(
             .view(beam_size, out_features, in_group_size)
         )
 
-    cand_weights = codebooks[codebook_index]  # [codebook_size, out_group_size, in_group_size], all replacement codes
-
     delta_weight_without_part = reference_weight - beam_weights
     delta_weight_without_part[:, :, input_group_slice] += prev_weight_part
 
-    # dWTXTX is equivalent to < X @ (W - \sum BiCi except current codebook), X @ SOMETHING >
-    dWTXTXg = delta_weight_without_part @ XTX[..., input_group_slice]  # [beam_size, out_features, in_group_size]
-    # below: use torch.matmul to compute broadcasted batch matrix multiplication; see matmul docs
-
-    XnewBkC_norms_sq = torch.bmm(
-        (cand_weights.flatten(0, 1) @ XTX[input_group_slice, input_group_slice]).view(
-            codebook_size, 1, out_group_size * in_group_size
-        ),
-        cand_weights.view(codebook_size, out_group_size * in_group_size, 1),
-    ).reshape(
-        codebook_size, 1
-    )  # [codebook_size, num_out_groups]
-    if scales is not None:
-        XnewBkC_norms_sq = XnewBkC_norms_sq.mul(scales_part.square().reshape(1, num_out_groups))
+    # all correct up to this point
 
     best_losses = torch.empty(
         (beam_size, k_best, num_out_groups), dtype=XTX.dtype, device=XTX.device
@@ -499,17 +544,38 @@ def _beam_search_squared_errors(
         device=XTX.device,
     )
     for beam_id in range(beam_size):
+        if symmetric:
+            new_code_signs = torch.sign(delta_weight_without_part[beam_id, :, input_group_slice]) # [out_features, in_group_size]
+            new_code_signs = new_code_signs.reshape(num_out_groups, out_group_size, in_group_size)
+            cand_weights = codebooks[codebook_index, :, None, :, :] * new_code_signs[None, :, :,: ] # [codebook_size, num_out_groups, out_group_size, in_group_size]
+        else:
+            assert False, "temporarily dropped support for non-symmetric codebooks for simplicity"
+
+        # dWTXTX is equivalent to < X @ (W - \sum BiCi except current codebook), X @ SOMETHING >
+        dWTXTXg = delta_weight_without_part[beam_id] @ XTX[..., input_group_slice]  # [out_features, in_group_size]
+        # below: use torch.matmul to compute broadcasted batch matrix multiplication; see matmul docs
+
+        XnewBkC_norms_sq = torch.bmm(
+            (cand_weights.flatten(0, 2) @ XTX[input_group_slice, input_group_slice]).view(
+                codebook_size * num_out_groups, 1, out_group_size * in_group_size
+            ),
+            cand_weights.view(codebook_size * num_out_groups, out_group_size * in_group_size, 1),
+        ).reshape(codebook_size, num_out_groups)  # [codebook_size, num_out_groups]
+
+        if scales is not None:
+            XnewBkC_norms_sq = XnewBkC_norms_sq.mul(scales_part.square().reshape(1, num_out_groups))
+
         dot_products = (
             torch.einsum(
-                "mg,og->mo",
-                cand_weights.reshape(codebook_size, out_group_size * in_group_size),
-                dWTXTXg[beam_id].view(num_out_groups, out_group_size * in_group_size),
+                "mog,og->mo",
+                cand_weights.reshape(codebook_size, num_out_groups, out_group_size * in_group_size),  #TODO YOZH REVIEW THIS
+                dWTXTXg.view(num_out_groups, out_group_size * in_group_size),
             )
             .sub_(
                 torch.einsum(
                     "og,og->o",
                     prev_part_dequantized[beam_id].reshape(num_out_groups, out_group_size * in_group_size),
-                    dWTXTXg[beam_id].view(num_out_groups, out_group_size * in_group_size),
+                    dWTXTXg.view(num_out_groups, out_group_size * in_group_size),
                 ).view(1, num_out_groups)
             )
             .view(codebook_size, num_out_groups)
@@ -529,16 +595,22 @@ def _beam_search_squared_errors(
             beam_losses[beam_id, None, :] - 2 * dot_products + XnewBkC_norms_sq - XoldBkC_norms_sq
         )  # shape: [codebook_size, num_out_groups]
 
-        if sparsity_regularizer != 0:
-            candidate_squared_errors += sparsity_regularizer * (prev_codes_part[beam_id] == 0).to(XTX.dtype)[None, :]
-            candidate_squared_errors[0, :] -= sparsity_regularizer
+        if code_penalties is not None:
+            prev_code_penalties = code_penalties[codebook_index][prev_codes_part[beam_id]]  # [codebook_size]
+            candidate_squared_errors[:, :] -= prev_code_penalties[None, :]  # refund penalty for the replaced code
+            candidate_squared_errors[:, :] += code_penalties[codebook_index, :, None]  # add penalty for new code
 
         best_beam_squared_errors, best_beam_indices = torch.topk(
             candidate_squared_errors, k_best, dim=0, largest=False, sorted=False
         )
         best_losses[beam_id] = best_beam_squared_errors
-        best_indices[beam_id] = best_beam_indices
 
+        # add signs to best_beam_indices
+        # best_beam_indices: [k_best, num_out_groups]
+        # new_code_signs: [num_out_groups, out_group_size, in_group_size]
+        new_signs_integer = bits_to_integer((new_code_signs > 0).reshape(num_out_groups, out_group_size * in_group_size))  # [num_out_groups]
+        best_beam_indices = best_beam_indices + codebook_size * new_signs_integer.reshape(1, num_out_groups)
+        best_indices[beam_id] = best_beam_indices
     return best_losses, best_indices
 
 
@@ -553,6 +625,7 @@ def _beam_search_select_best(
     best_losses: torch.Tensor,
     best_indices: torch.Tensor,
     beam_size: int,
+    symmetric: bool
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Select top-:beam_size: and reorder beam accordingly, return new beam
@@ -596,7 +669,7 @@ def _beam_search_select_best(
     for beam_index in range(len(best_hypo_codes)):
         new_beam_codes[beam_index, :, ...] = beam_codes[best_hypo_source_ids[beam_index, :], arange_out_groups, ...]
         new_beam_codes[beam_index, :, input_group_index, codebook_index] = best_hypo_codes[beam_index, :]
-        new_beam_weights[beam_index, :, :] = _dequantize_weight(new_beam_codes[beam_index, ...], codebooks, scales)
+        new_beam_weights[beam_index, :, :] = _dequantize_weight(new_beam_codes[beam_index, ...], codebooks, scales, symmetric=symmetric)
 
     # Note: the code above can be further accelerated by 1) vectorzing loop and ...
     # ... 2) updating new_beam_weights only for the chosen input group
@@ -632,6 +705,7 @@ def init_aq_kmeans(
     max_points_per_centroid: Optional[int] = None,
     max_iter: int = 1000,
     devices: Optional[List[torch.device]] = None,
+    symmetric: bool = False,
     **kwargs,
 ):
     """
@@ -658,6 +732,7 @@ def init_aq_kmeans(
 
     for _ in trange(num_codebooks, desc="initializing with kmeans") if verbose else range(num_codebooks):
         if use_faiss:
+            assert not symmetric, "faiss not supported for symmetric codes"
             codebook_i, codes_i, reconstructed_weight_i = fit_faiss_kmeans(
                 weight_residue,
                 k=codebook_size,
@@ -666,19 +741,20 @@ def init_aq_kmeans(
                 max_points_per_centroid=max_points_per_centroid,
             )
         else:
+            kmeans_data = weight_residue.abs() if symmetric else weight_residue
             chosen_ids = None
             if max_points_per_centroid is not None:
-                chosen_ids = torch.randperm(weight_residue.shape[0], device=weight_residue.device)[
+                chosen_ids = torch.randperm(kmeans_data.shape[0], device=weight_residue.device)[
                     : max_points_per_centroid * codebook_size
                 ]
             codebook_i, _, _ = fit_kmeans(
-                weight_residue if chosen_ids is None else weight_residue[chosen_ids, :],
+                kmeans_data if chosen_ids is None else kmeans_data[chosen_ids, :],
                 k=codebook_size,
                 max_iter=max_iter,
                 devices=devices,
                 **kwargs,
             )
-            codes_i, reconstructed_weight_i = find_nearest_cluster(weight_residue, codebook_i, devices=devices)
+            codes_i, reconstructed_weight_i = find_nearest_cluster(weight_residue, codebook_i, devices=devices, symmetric=symmetric)
 
         codes_i = codes_i.reshape(num_out_groups, num_in_groups, 1)
         codebook_i = codebook_i.reshape(1, codebook_size, out_group_size, in_group_size)

@@ -791,6 +791,12 @@ if __name__ == "__main__":
         choices=[None, "eager", "flash_attention_2", "sdpa"],
         help="Attention implementation.",
     )
+    parser.add_argument(
+        "--symmetric",
+        action="store_true",
+        help="Whether to use symmetric lattice.",
+    )
+
 
     torch.set_num_threads(min(16, torch.get_num_threads()))
     torch.backends.cudnn.allow_tf32 = False
@@ -806,7 +812,7 @@ if __name__ == "__main__":
     assert all(isinstance(device, torch.device) for device in args.devices)
 
     # validate val size
-    assert args.val_size < args.nsamples, "Number of validation set must be smaller than train + val"
+    assert args.val_size < args.nsamples, "Size of validation set must be smaller than train + val"
 
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"

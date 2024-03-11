@@ -117,3 +117,24 @@ def maybe_get_0th_element(x: Union[Any, Sequence[Any]]) -> Any:
 def _extract_into_tensor(tensor_list: List[torch.Tensor], indices: Iterable[int], device=None):
     extracted_items = [maybe_get_0th_element(tensor_list[i]) for i in indices]
     return torch.cat(extracted_items, dim=0).to(device)
+
+
+@maybe_script
+def bits_to_integer(x: torch.Tensor) -> torch.Tensor:
+    bits = x.shape[-1]
+    mask = 2 ** torch.arange(bits, device=x.device, dtype=torch.int64)
+    return x.mul(mask).sum(dim=-1)
+
+
+@maybe_script
+def integer_to_bits(x: torch.Tensor, bits: int) -> torch.Tensor:
+    mask = 2 ** torch.arange(bits, device=x.device, dtype=x.dtype)
+    return x.unsqueeze(-1).bitwise_and(mask).ne(0)
+
+
+def get_num_bits(x: int):
+    num_bits = -1
+    while x:
+        x = x >> 1
+        num_bits += 1
+    return num_bits
