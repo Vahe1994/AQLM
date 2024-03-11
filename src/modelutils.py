@@ -1,14 +1,16 @@
+import math
 import os
 from contextlib import contextmanager
 
 import torch
 import torch.nn as nn
-from tqdm import trange
+import transformers
+from accelerate import dispatch_model
 from transformers import AutoConfig, AutoModelForCausalLM
 
 MODEL_ERROR_MSG = "Unsupported model type {} - only 'llama', 'Yi', 'opt' and 'falcon' are supported"
 FALCON_TYPES = ("falcon", "refinedweb", "refinedwebmodel")
-LLAMA_LIKE = ("llama", "Yi", "mistral", "mixtral")
+LLAMA_LIKE = ("llama", "Yi", "mistral", "mixtral", "gemma")
 
 
 @contextmanager
@@ -24,7 +26,21 @@ def suspend_nn_inits():
         torch.nn.init.kaiming_uniform_, torch.nn.init.uniform_, torch.nn.init.normal_ = saved_inits  # restoring
 
 
-def get_model(model_path, load_quantized=None, dtype="auto", model_seqlen=2048):
+def dispatch_quantized_model(model):
+    num_devices = torch.cuda.device_count()
+    device_map = {"model.embed_tokens": 0, "model.norm": num_devices - 1, "lm_head": num_devices - 1}
+    num_layers = len(get_layers(model))
+    layers_per_device = math.ceil(num_layers / num_devices)
+    for layer_id in range(num_layers):
+        device_id = layer_id // layers_per_device
+        device_map[f"model.layers.{layer_id}"] = device_id
+    model = dispatch_model(model, device_map)
+    return model
+
+
+def get_model(
+    model_path, load_quantized=None, dtype="auto", model_seqlen=2048, device_map=None, attn_implementation=None
+):
     if dtype == "auto":
         dtype = (
             AutoConfig.from_pretrained(model_path, trust_remote_code=True).torch_dtype or "auto"
@@ -32,24 +48,34 @@ def get_model(model_path, load_quantized=None, dtype="auto", model_seqlen=2048):
     else:
         dtype = getattr(torch, dtype)
 
+    model_kwargs = {}
+    # this argument is avaialbe only for transformers >= 4.38.0
+    if transformers.__version__ >= "4.38.0":
+        model_kwargs["attn_implementation"] = attn_implementation
+
     with suspend_nn_inits():
+        model = AutoModelForCausalLM.from_pretrained(
+            pretrained_model_name_or_path=model_path,
+            trust_remote_code=True,
+            torch_dtype=dtype,
+            # defer distribution if loading quantized
+            device_map=None if load_quantized else device_map,
+            low_cpu_mem_usage=True,
+            local_files_only=True,
+            **model_kwargs,
+        )
         if load_quantized:
             print("Initializing model with random weights...")
-            config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)  # consider trust_remote_code=True
-            model = AutoModelForCausalLM.from_config(config, trust_remote_code=True, torch_dtype=dtype).eval()
             print("Loading quantized model ...")
             model = load_quantized_model(model, load_quantized)
+            # TODO works only for Llama
+            if device_map == "auto":
+                model = dispatch_quantized_model(model)
         else:
             print("Loading pretrained model ...")
-            model = AutoModelForCausalLM.from_pretrained(
-                pretrained_model_name_or_path=model_path,
-                trust_remote_code=True,
-                torch_dtype=dtype,
-                low_cpu_mem_usage=True,
-                local_files_only=True,
-            )
+
     model.seqlen = model_seqlen
-    print("Model loaded sucessfully ...")
+    print("Model loaded sucсessfully ...")
 
     return model
 
@@ -214,3 +240,14 @@ def load_quantized_model(model, load_path):
         )
     model.load_state_dict(torch.load(os.path.join(load_path, "not_quantized_weights.pt")), strict=False)
     return model
+
+
+def save_not_quantized_weights(model: nn.Module, save_dir: str):
+    already_saved_weights = set()
+    for layer in get_layers(model):
+        for param in layer.parameters():
+            already_saved_weights.add(param)
+    not_quantized_weights = {
+        name: param for name, param in model.named_parameters() if param not in already_saved_weights
+    }
+    torch.save(not_quantized_weights, os.path.join(save_dir, "not_quantized_weights.pt"))
