@@ -195,16 +195,19 @@ void  code1x16_matvec_cuda(
   int prob_k,
   bool use_bfloat16
 ) {
-  #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800)
-  if (use_bfloat16) {
+  int device;
+  cudaGetDevice(&device);
+
+  struct cudaDeviceProp props;
+  cudaGetDeviceProperties(&props, device);
+  if (props.major < 8 && use_bfloat16) {
     throw c10::TypeError(
       {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},
       c10::str(
         "You're trying to run AQLM with bfloat16 on a GPU with low compute capability. Use torch.float16 instead."
       )
     );
-  } 
-  #endif
+  }
 
   int sms;
   cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, 0);
@@ -248,16 +251,19 @@ void  code2x8_matvec_cuda(
   int prob_k,
   bool use_bfloat16
 ) {
-  #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800)
-  if (use_bfloat16) {
+  int device;
+  cudaGetDevice(&device);
+
+  struct cudaDeviceProp props;
+  cudaGetDeviceProperties(&props, device);
+  if (props.major < 8 && use_bfloat16) {
     throw c10::TypeError(
       {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},
       c10::str(
         "You're trying to run AQLM with bfloat16 on a GPU with low compute capability. Use torch.float16 instead."
       )
     );
-  } 
-  #endif
+  }
 
   int sms;
   cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, 0);
