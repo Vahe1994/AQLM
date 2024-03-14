@@ -195,12 +195,9 @@ void  code1x16_matvec_cuda(
   int prob_k,
   bool use_bfloat16
 ) {
-  int device;
-  cudaGetDevice(&device);
-
-  struct cudaDeviceProp props;
-  cudaGetDeviceProperties(&props, device);
-  if (props.major < 8 && use_bfloat16) {
+  int cc_major;
+  cudaDeviceGetAttribute(&cc_major, cudaDevAttrComputeCapabilityMajor, 0);
+  if (cc_major < 8 && use_bfloat16) {
     throw c10::TypeError(
       {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},
       c10::str(
@@ -251,12 +248,9 @@ void  code2x8_matvec_cuda(
   int prob_k,
   bool use_bfloat16
 ) {
-  int device;
-  cudaGetDevice(&device);
-
-  struct cudaDeviceProp props;
-  cudaGetDeviceProperties(&props, device);
-  if (props.major < 8 && use_bfloat16) {
+  int cc_major;
+  cudaDeviceGetAttribute(&cc_major, cudaDevAttrComputeCapabilityMajor, 0);
+  if (cc_major < 8 && use_bfloat16) {
     throw c10::TypeError(
       {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},
       c10::str(
