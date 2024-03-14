@@ -51,6 +51,7 @@ __global__ void Code1x16MatVec(
           : "l"((void*) &codebook[enc[i]])
         );
         if constexpr (use_bfloat16) {
+        #if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)
           nv_bfloat162* a = reinterpret_cast<nv_bfloat162*>(&dec);
           nv_bfloat162* b = reinterpret_cast<nv_bfloat162*>(&sh_b[b_sh_rd]);
           nv_bfloat162 res2 = {};
@@ -58,6 +59,7 @@ __global__ void Code1x16MatVec(
           for (int j = 0; j < 4; j++)
             res2 = __hfma2(a[j], b[j], res2);
           res += __bfloat162float(res2.x) + __bfloat162float(res2.y);
+        #endif
         } else {
           half2* a = reinterpret_cast<half2*>(&dec);
           half2* b = reinterpret_cast<half2*>(&sh_b[b_sh_rd]);
@@ -138,6 +140,7 @@ __global__ void Code2x8MatVec(
       #pragma unroll
       for (int i = 0; i < 8; i++) {
         if constexpr (use_bfloat16) {
+        #if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)
           nv_bfloat162* a0 = reinterpret_cast<nv_bfloat162*>(&sh_code0[8 * enc[2 * i + 0] + lane]);
           nv_bfloat162* a1 = reinterpret_cast<nv_bfloat162*>(&sh_code1[8 * enc[2 * i + 1] + lane]);
           nv_bfloat162*  b = reinterpret_cast<nv_bfloat162*>(&sh_b[b_sh_rd]);
@@ -146,6 +149,7 @@ __global__ void Code2x8MatVec(
           for (int j = 0; j < 4; j++)
             res2 = __hfma2(__hadd2(a0[j], a1[j]), b[j], res2);
           res += __bfloat162float(res2.x) + __bfloat162float(res2.y);
+        #endif
         } else {
           half2* a0 = reinterpret_cast<half2*>(&sh_code0[8 * enc[2 * i + 0] + lane]);
           half2* a1 = reinterpret_cast<half2*>(&sh_code1[8 * enc[2 * i + 1] + lane]);
@@ -191,6 +195,17 @@ void  code1x16_matvec_cuda(
   int prob_k,
   bool use_bfloat16
 ) {
+  int cc_major;
+  cudaDeviceGetAttribute(&cc_major, cudaDevAttrComputeCapabilityMajor, 0);
+  if (cc_major < 8 && use_bfloat16) {
+    throw c10::TypeError(
+      {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},
+      c10::str(
+        "You're trying to run AQLM with bfloat16 on a GPU with low compute capability. Use torch.float16 instead."
+      )
+    );
+  }
+
   int sms;
   cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, 0);
   int waves = 0;
@@ -233,6 +248,17 @@ void  code2x8_matvec_cuda(
   int prob_k,
   bool use_bfloat16
 ) {
+  int cc_major;
+  cudaDeviceGetAttribute(&cc_major, cudaDevAttrComputeCapabilityMajor, 0);
+  if (cc_major < 8 && use_bfloat16) {
+    throw c10::TypeError(
+      {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},
+      c10::str(
+        "You're trying to run AQLM with bfloat16 on a GPU with low compute capability. Use torch.float16 instead."
+      )
+    );
+  }
+
   int sms;
   cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, 0);
   int waves = 0;
