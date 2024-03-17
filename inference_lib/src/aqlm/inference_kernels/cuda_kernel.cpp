@@ -115,17 +115,15 @@ torch::Tensor code1x16_matmat(
 }
 
 torch::Tensor code1x16_dequant(
-  const torch::Tensor& input,
   const torch::Tensor& codes,
   const torch::Tensor& codebooks,
-  const torch::Tensor& scales,
-  const std::optional<torch::Tensor>& bias
+  const torch::Tensor& scales
 ) {
-  bool use_bfloat16 = check_use_bfloat16(input);
-  auto in_features = input.size(-1);
-  auto out_features = codes.size(0) * codebooks.size(2);
+  bool use_bfloat16 = check_use_bfloat16(codebooks);
+  auto in_features = codes.size(1) * 8;
+  auto out_features = scales.size(0);
 
-  auto weight = torch::empty({out_features, in_features},
+  auto weight = torch::zeros({out_features, in_features},
     torch::TensorOptions()
       .dtype(codebooks.dtype())
       .device(codebooks.device())
@@ -138,8 +136,30 @@ torch::Tensor code1x16_dequant(
     in_features,
     use_bfloat16
   );
+  weight *= scales.index({"...", 0, 0});
 
-  return F::linear(input, weight, bias.value());
+  return weight;
+}
+
+torch::Tensor code1x16_matmat_dequant(
+  const torch::Tensor& input,
+  const torch::Tensor& codes,
+  const torch::Tensor& codebooks,
+  const torch::Tensor& scales,
+  const std::optional<torch::Tensor>& bias
+) {
+  auto weight = code1x16_dequant(
+    codes,
+    codebooks,
+    scales
+  );
+
+  torch::Tensor bias_2{};
+  if (bias.has_value()) {
+    bias_2 = bias.value();
+  }
+
+  return F::linear(input, weight, bias_2);
 }
 
 void code2x8_matvec(
@@ -206,6 +226,7 @@ torch::Tensor code2x8_matmat(
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("code1x16_matmat", &code1x16_matmat, "1x16 (2bit) codebook matrix-matrix product through matvec.");
-  m.def("code1x16_dequant", &code1x16_dequant, "1x16 (2bit) codebook matrix-matrix dequantization product.");
+  m.def("code1x16_dequant", &code1x16_dequant, "1x16 (2bit) codebook dequantization.");
+  m.def("code1x16_matmat_dequant", &code1x16_matmat_dequant, "1x16 (2bit) codebook matrix-matrix dequantization product.");
   m.def("code2x8_matmat", &code2x8_matmat, "2x8 (2bit) codebook matrix-matrix product.");
 }

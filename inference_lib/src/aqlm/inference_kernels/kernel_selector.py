@@ -52,7 +52,7 @@ def get_forward_pass_kernel(
     ):
         from .cuda_kernel import CUDA_FOLDER
 
-        return torch.ops.aqlm.code1x16_dequant
+        return torch.ops.aqlm.code1x16_matmat_dequant
     elif (
         optimize_for_training,
         codebooks.device.type,
