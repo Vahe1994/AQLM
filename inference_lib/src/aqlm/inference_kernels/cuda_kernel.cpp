@@ -3,6 +3,8 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
 
+namespace F = torch::nn::functional;
+
 
 inline bool check_use_bfloat16(const torch::Tensor& input) {
   auto dtype = input.dtype();
@@ -25,6 +27,15 @@ inline bool check_use_bfloat16(const torch::Tensor& input) {
 void code1x16_matvec_cuda(
   const void* A,
   const void* B,
+        void* C,
+  const void* codebook,
+  int prob_m,
+  int prob_k,
+  bool use_bfloat16
+);
+
+void code1x16_dequant_cuda(
+  const void* A,
         void* C,
   const void* codebook,
   int prob_m,
@@ -103,6 +114,34 @@ torch::Tensor code1x16_matmat(
   return output;
 }
 
+torch::Tensor code1x16_dequant(
+  const torch::Tensor& input,
+  const torch::Tensor& codes,
+  const torch::Tensor& codebooks,
+  const torch::Tensor& scales,
+  const std::optional<torch::Tensor>& bias
+) {
+  bool use_bfloat16 = check_use_bfloat16(input);
+  auto in_features = input.size(-1);
+  auto out_features = codes.size(0) * codebooks.size(2);
+
+  auto weight = torch::empty({out_features, in_features},
+    torch::TensorOptions()
+      .dtype(codebooks.dtype())
+      .device(codebooks.device())
+  );
+  code1x16_dequant_cuda(
+    codes.data_ptr(),
+    weight.data_ptr(),
+    codebooks.data_ptr(),
+    out_features,
+    in_features,
+    use_bfloat16
+  );
+
+  return F::linear(input, weight, bias.value());
+}
+
 void code2x8_matvec(
   const torch::Tensor& A,
   const torch::Tensor& B,
@@ -166,6 +205,7 @@ torch::Tensor code2x8_matmat(
 
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("code1x16_matmat", &code1x16_matmat, "1x16 (2bit) codebook matrix-matrix product.");
+  m.def("code1x16_matmat", &code1x16_matmat, "1x16 (2bit) codebook matrix-matrix product through matvec.");
+  m.def("code1x16_dequant", &code1x16_dequant, "1x16 (2bit) codebook matrix-matrix dequantization product.");
   m.def("code2x8_matmat", &code2x8_matmat, "2x8 (2bit) codebook matrix-matrix product.");
 }

@@ -89,6 +89,53 @@ __global__ void Code1x16MatVec(
   }
 }
 
+
+template<bool use_bfloat16>
+__global__ void Code1x16Dequant(
+  const int4* __restrict__ A,
+        int4* __restrict__ C,
+  const int4* __restrict__ codebook,
+  int prob_m,
+  int prob_k
+) {
+  int a_gl_stride = prob_k / 8 / 8;
+  int a_gl_rd = (blockDim.x / 32) * blockIdx.x + (threadIdx.x / 32);
+  bool pred = a_gl_rd < prob_m;
+  a_gl_rd = a_gl_stride * a_gl_rd + threadIdx.x % 32;
+  int a_gl_end = a_gl_rd + a_gl_stride - threadIdx.x % 32;
+
+  int c_gl_stride = prob_k * 4;
+  int c_gl_wr = c_gl_stride * ((blockDim.x / 32) * blockIdx.x + (threadIdx.x / 32));
+
+  int iters = (prob_k / 8 + 8 * 32 - 1) / (8 * 32);
+  while (iters--) {
+    __syncthreads();
+    if (pred && a_gl_rd < a_gl_end) {
+      const uint16_t* enc = reinterpret_cast<const uint16_t*>(&A[a_gl_rd]);
+      #pragma unroll
+      for (int i = 0; i < 8; i++) {
+        uint32_t dec[4];
+        // We bypass the L1 cache to avoid massive amounts of memory streaming that doesn't
+        // actually help us; this brings > 2x speedup.
+        asm volatile (
+          "ld.cg.global.v4.u32 {%0, %1, %2, %3}, [%4];"
+          : "=r"(dec[0]), "=r"(dec[1]), "=r"(dec[2]), "=r"(dec[3])
+          : "l"((void*) &codebook[enc[i]])
+        );
+
+        half2* a = reinterpret_cast<half2*>(&dec);
+        #pragma unroll
+        for (int j = 0; j < 4; ++j) {
+          reinterpret_cast<half2*>(C)[c_gl_wr + 4 * i + j] = a[j];
+        }        
+      }
+      a_gl_rd += 32;
+      c_gl_wr += 64;
+    }
+  }
+}
+
+
 template<bool use_bfloat16>
 __global__ void Code2x8MatVec(
   const int4* __restrict__ A,
@@ -231,6 +278,45 @@ void  code1x16_matvec_cuda(
     Code1x16MatVec<false><<<blocks, threads, 16*32*9, stream>>>(
       (const int4*) A,
       (const int4*) B,
+      (int4*) C,
+      (const int4*) codebook,
+      prob_m,
+      prob_k
+    );
+  }
+}
+
+void  code1x16_dequant_cuda(
+  const void* __restrict__ A,
+        void* __restrict__ C,
+  const void* __restrict__ codebook,
+  int prob_m,
+  int prob_k,
+  bool use_bfloat16
+) {
+  int sms;
+  cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, 0);
+  int waves = 0;
+  int thread_m;
+  do {
+    waves++;
+    thread_m = ceildiv(prob_m, waves * sms);
+  } while (thread_m > THREAD_M);
+
+  int blocks = ceildiv(prob_m, thread_m);
+  int threads = 32 * thread_m;
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
+  if (use_bfloat16) {
+    Code1x16Dequant<true><<<blocks, threads, 0, stream>>>(
+      (const int4*) A,
+      (int4*) C,
+      (const int4*) codebook,
+      prob_m,
+      prob_k
+    );
+  } else {
+    Code1x16Dequant<false><<<blocks, threads, 0, stream>>>(
+      (const int4*) A,
       (int4*) C,
       (const int4*) codebook,
       prob_m,

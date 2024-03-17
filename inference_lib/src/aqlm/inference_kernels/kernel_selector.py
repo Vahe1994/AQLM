@@ -42,6 +42,24 @@ def get_forward_pass_kernel(
         codebook_size,
         out_group_size,
         in_group_size,
+    ) == (
+        True,
+        "cuda",
+        1,
+        65536,
+        1,
+        8,
+    ):
+        from .cuda_kernel import CUDA_FOLDER
+
+        return torch.ops.aqlm.code1x16_dequant
+    elif (
+        optimize_for_training,
+        codebooks.device.type,
+        num_codebooks,
+        codebook_size,
+        out_group_size,
+        in_group_size,
     ) == (False, "cuda", 2, 256, 1, 8):
         from .cuda_kernel import CUDA_FOLDER
 
