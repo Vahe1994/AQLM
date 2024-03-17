@@ -104,17 +104,19 @@ __global__ void Code1x16Dequant(
   a_gl_rd = a_gl_stride * a_gl_rd + threadIdx.x % 32;
   int a_gl_end = a_gl_rd + a_gl_stride - threadIdx.x % 32;
 
-  int c_gl_stride = prob_k / 2;
-  int c_gl_wr = c_gl_stride * ((blockDim.x / 32) * blockIdx.x + (threadIdx.x / 32));
+  int c_gl_stride = prob_k / 8;
+  int c_gl_wr = (blockDim.x / 32) * blockIdx.x + (threadIdx.x / 32);
+  c_gl_wr = c_gl_stride * c_gl_wr + (threadIdx.x % 32) * 8;
 
   int iters = (prob_k / 8 - 1) / (8 * 32) + 1;
   while (iters--) {
-    __syncthreads();
+    int offset = 8 * (threadIdx.x % 32);
     if (pred && a_gl_rd < a_gl_end) {
       const uint16_t* enc = reinterpret_cast<const uint16_t*>(&A[a_gl_rd]);
       #pragma unroll
       for (int i = 0; i < 8; i++) {
-        uint32_t dec[4];
+        int4 chunk;
+        auto dec = reinterpret_cast<uint32_t*>(&chunk);
         // We bypass the L1 cache to avoid massive amounts of memory streaming that doesn't
         // actually help us; this brings > 2x speedup.
         asm volatile (
@@ -123,15 +125,10 @@ __global__ void Code1x16Dequant(
           : "l"((void*) &codebook[enc[i]])
         );
 
-        half2* a = reinterpret_cast<half2*>(&dec);
-        #pragma unroll
-        for (int j = 0; j < 4; ++j) {
-          reinterpret_cast<half2*>(C)[c_gl_wr + 4 * i + j] = a[j];
-        }        
+        C[a_gl_rd * 8 + i] = chunk;
       }
-      a_gl_rd += 32;
-      c_gl_wr += 64;
     }
+    a_gl_rd += 32;
   }
 }
 
