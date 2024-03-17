@@ -104,10 +104,10 @@ __global__ void Code1x16Dequant(
   a_gl_rd = a_gl_stride * a_gl_rd + threadIdx.x % 32;
   int a_gl_end = a_gl_rd + a_gl_stride - threadIdx.x % 32;
 
-  int c_gl_stride = prob_k * 4;
+  int c_gl_stride = prob_k / 2;
   int c_gl_wr = c_gl_stride * ((blockDim.x / 32) * blockIdx.x + (threadIdx.x / 32));
 
-  int iters = (prob_k / 8 + 8 * 32 - 1) / (8 * 32);
+  int iters = (prob_k / 8 - 1) / (8 * 32) + 1;
   while (iters--) {
     __syncthreads();
     if (pred && a_gl_rd < a_gl_end) {
