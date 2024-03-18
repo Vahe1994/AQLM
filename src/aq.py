@@ -46,6 +46,8 @@ class QuantizedWeight(nn.Module):
         codebook_value_nbits: int = 16,
         codebook_value_num_groups: int = 1,
         scale_nbits: int = 0,
+        scale_in_group_size: Optional[int] = None,
+        scale_out_group_size: Optional[int] = None,
         straight_through_gradient: Optional[bool] = None,
         **init_kwargs,
     ):
@@ -62,6 +64,16 @@ class QuantizedWeight(nn.Module):
         self.codebook_value_num_groups = codebook_value_num_groups
         self.codebook_value_clusters = None
 
+        if scale_in_group_size is None:
+            scale_in_group_size = in_group_size
+        if scale_out_group_size is None:
+            scale_out_group_size = out_group_size
+        assert scale_out_group_size % out_group_size == 0
+        assert scale_in_group_size % in_group_size == 0
+        self.scale_in_group_size_factor = scale_in_group_size // in_group_size
+        self.scale_out_group_size_factor = scale_out_group_size // out_group_size
+
+
         self.scales = self.scales_clusters = self.scales_indices = None
         if straight_through_gradient is None and scale_nbits > 0:
             straight_through_gradient = scale_nbits >= 6
@@ -69,17 +81,23 @@ class QuantizedWeight(nn.Module):
         self.scale_nbits = scale_nbits
 
         with torch.no_grad():
-            weight_groupwise = reference_weight.reshape(
-                self.out_features // out_group_size, out_group_size, self.in_features // in_group_size, in_group_size
-            ).swapaxes(
-                1, 2
-            )  # [num_out_groups, num_in_groups, out_group_size, in_group_size]
+            weight_groupwise_for_scales = reference_weight.reshape(
+                self.out_features // scale_out_group_size, scale_out_group_size,
+                self.in_features // scale_in_group_size, scale_in_group_size
+            ).swapaxes(1, 2)  # [num_out_groups, num_in_groups, out_group_size, in_group_size]
 
             if scale_nbits > 0:
-                scales = weight_groupwise.norm(dim=(2, 3), keepdim=True) + self.EPS
+                scales = weight_groupwise_for_scales.norm(dim=(2, 3), keepdim=True) + self.EPS
             else:
-                scales = weight_groupwise.flatten(1, -1).norm(dim=-1).view(-1, 1, 1, 1) + self.EPS
+                scales = weight_groupwise_for_scales.flatten(1, -1).norm(dim=-1).view(-1, 1, 1, 1) + self.EPS
             # shape [num_out_groups, num_in_groups, 1, 1] if scale_nbits > 0 else [num_out_groups, num_in_groups, 1, 1]
+            del weight_groupwise_for_scales
+
+
+            weight_groupwise = reference_weight.reshape(
+                self.out_features // out_group_size, out_group_size, self.in_features // in_group_size, in_group_size
+            ).swapaxes(1, 2)  # [num_out_groups, num_in_groups, out_group_size, in_group_size]
+
 
             self.scales_are_lossless = scale_nbits == 0 or scale_nbits >= 16 or (2**scale_nbits >= scales.shape[1])
             if self.scales_are_lossless or self.straight_through_gradient:
@@ -90,7 +108,7 @@ class QuantizedWeight(nn.Module):
                 self.scales_clusters = nn.Parameter(scales_clusters, requires_grad=True)
                 self.scales_indices = nn.Parameter(scales_indices, requires_grad=False)
 
-            weight_for_init = (weight_groupwise / scales).swapaxes(1, 2).reshape_as(reference_weight)
+            weight_for_init = (weight_groupwise / self.get_scales()).swapaxes(1, 2).reshape_as(reference_weight)
             del weight_groupwise
 
         codes, codebooks = init_aq_kmeans(
@@ -148,7 +166,7 @@ class QuantizedWeight(nn.Module):
     def get_scales(self) -> torch.Tensor:
         """Get per-channel or per-group quantization scales or reconstruct those scales based on scales_nbits"""
         if self.scale_nbits == 0 or self.scales_are_lossless:
-            return self.scales  # scales are not quantized or the quantization is lossless
+            scales = self.scales  # scales are not quantized or the quantization is lossless
         elif self.straight_through_gradient:
             with torch.no_grad():
                 self.scales_clusters, _, dequantized_scales = fit_kmeans_1d(
@@ -157,9 +175,18 @@ class QuantizedWeight(nn.Module):
                 dequantized_scales = dequantized_scales.reshape_as(self.scales)
             if torch.is_grad_enabled() and self.scales.requires_grad:
                 dequantized_scales = dequantized_scales + (self.scales - self.scales.detach())
-            return dequantized_scales
+            scales = dequantized_scales
         else:  # train scale codebook only
-            return self.scales_clusters.gather(1, self.scales_indices)[:, :, None, None]
+            scales = self.scales_clusters.gather(1, self.scales_indices)[:, :, None, None]
+
+        if scales.numel() != scales.shape[0]: # group-wise scales   (i.e. not 1d scales)
+            assert scales.ndim == 4
+            assert scales.shape[2] == scales.shape[3] == 1
+            # if replicate each scale several times
+            scales = scales[:, None, :, None, :, :].tile(
+                1, self.scale_out_group_size_factor, 1, self.scale_in_group_size_factor, 1, 1
+            ).flatten(2, 3).flatten(0, 1)
+        return scales
 
     def forward(self, selection: Union[slice, ellipsis, torch.Tensor] = ...):
         """
@@ -196,6 +223,8 @@ class QuantizedWeight(nn.Module):
         :param kwargs: any additional keyword arguments are forwarded to beam_search_optimal_codes function
         :returns: the updated codes
         """
+        if self.scale_out_group_size_factor != 1:
+            assert selection == ..., "todo implement selection with scale_out_group_size"
         self.codes[selection] = beam_search_optimal_codes(
             XTX=XTX,
             reference_weight=reference_weight,
@@ -222,7 +251,9 @@ class QuantizedWeight(nn.Module):
             )
 
         if self.scale_nbits >= 16 or 2**self.scale_nbits >= num_in_groups:  # group-wise scales in 16 bit
-            scale_store = self.scale_nbits * num_out_groups * num_in_groups
+            scale_num_out_groups = num_out_groups // self.scale_out_group_size_factor
+            scale_num_in_groups = num_in_groups // self.scale_in_group_size_factor
+            scale_store = self.scale_nbits * scale_num_out_groups * scale_num_in_groups
         elif 0 < self.scale_nbits < 16:  # use scale quantization codebooks
             scale_store = self.scale_nbits * num_out_groups * num_in_groups
             scale_store += num_out_groups * 2**self.scale_nbits * 16
