@@ -9,7 +9,7 @@ from transformers import AutoConfig, AutoModelForCausalLM
 
 try:
     import safetensors
-except:
+except ModuleNotFoundError:
     safetensors = None
 
 

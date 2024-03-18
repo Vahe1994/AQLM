@@ -68,8 +68,8 @@ def get_model(
             print("Initializing model with random weights...")
             print("Loading quantized model ...")
             model = load_quantized_model(model, load_quantized)
-            # TODO works only for Llama
             if device_map == "auto":
+                assert model.config.model_type in LLAMA_LIKE, "Dispatching is implemented only for Llama-like models."
                 model = dispatch_quantized_model(model)
         else:
             print("Loading pretrained model ...")
