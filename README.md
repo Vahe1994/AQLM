@@ -160,19 +160,61 @@ Main CLI arguments:
 - `MODEL_PATH` - a path to either hugginface hub (e.g. meta-llama/Llama-2-7b-hf) or a local folder with transformers model and a tokenizer.
 - `DATASET_PATH` - either a path to calibration data (see above) or a standard dataset `[c4, ptb, wikitext2]`
    - for llama-2 models, you can use `DATASET_PATH=./data/red_pajama_n=1024_4096_context_length.pth` for a slice of RedPajama (up to 1024 samples)
-- `--nsamples` - the number of calibration data _sequences_. If this parameter is not set, take all calibration data avaialble.
+- `--nsamples` - the number of calibration data _sequences_ (train + validation). If this parameter is not set, take all calibration data avaialble.
+- `--val_size` - the number of validation sequences for early stopping on block finetuning. By default equal to 0. Must be smaller than `--nsamples`.
 - `--num_codebooks` - number of codebooks per layer
 - `--nbits_per_codebook` - each codebook will contain 2 ** nbits_per_codebook vectors
 - `--in_group_size` - how many weights are quantized together (aka "g" in the arXiv paper)
 - `--finetune_batch_size` - (for fine-tuning only) the total number of sequences used for each optimization step
 - `--local_batch_size` - when accumulating finetune_batch_size, process this many samples per GPU per forward pass (affects GPU RAM usage)
 - `--relative_mse_tolerance`- (for initial calibration) - stop training when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)
-- `--finetune_relative_mse_tolerance`- same, but for fine-tuning
+- `--finetune_max_epochs` - maximal number of passes through calibration data on block tuning.
+- `"--finetune_early_stop` -  maximal number of passes through calibration data without improvement on validation.
 - `--offload_activations` -- during calibration, move activations from GPU memory to RAM. This reduces VRAM usage while slowing calibration by ~10% (depending on your hardware). 
 - `--save` -- path to save/load quantized model. (see also: `--load`)
 - `--wandb` - if this parameter is set, the code will log results to wandb
+- `--attn_implementation` - specify attention (for transformers >= `4.38`). Sdpa attention sometimes causes issues and it is recommended to use `eager` implementation.
 
 There are additional hyperparameters aviailable. Run `python main.py --help` for more details on command line arguments, including compression parameters.
+
+### Finetuning
+
+The accuracy of the quantized model can be further improved via block finetuning. First, the logits 
+of the float16/bfloat16 are cached in RAM. Then the differentiable parameters of the quantized model
+are optimized to minimize KL-divergence with teacher logits. Typically, we use the same calibration data that was used for model quantization.
+
+The command to launch the script should look like this: 
+
+```bash
+python finetune.py \
+  --base_model $MODEL_PATH \
+  --quant_model $INPUT_PATH \
+  --dataset $DATASET_PATH \
+  --nsamples=<TOTAL_SIZE> \
+  --val_size=<VAL_SIZE> \
+  --lr=1e-5 \
+  --adam_beta1=0.90 \
+  --adam_beta2=0.999 \
+  --epochs=5 \
+  --early_stop=3 \
+  --batch_size=8 \
+  --microbatch_size=4 \
+  \
+  --temperature=1.0 \
+  \
+  --save $DATA_PATH \
+  \
+  --gradient_checkpointing
+```
+
+Main CLI arguments:
+- `--base_model` - path or name of the original floating-point model
+- `--quant_model` - path to quantized model weights.
+- `--dataset` - path or name of the calibration dataset
+- `--nsamples` - the number of calibration data _sequences_ (train + validation). If this parameter is not set, take all calibration data avaialble.
+- `--val_size` - the number of validation sequences for early stopping on block finetuning. By default equal to 0. Must be smaller than `--nsamples`.
+
+**Note** for larger models one would need multi-GPU training. At the moment, FSDP training is not implemented and the model is finetuned on a single process with parameters sharded across available devices.
 
 ### Zero-shot benchmarks via LM Evaluation Harness
 
