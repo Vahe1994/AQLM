@@ -24,7 +24,7 @@ class QuantizedLinear(nn.Module):
         return F.linear(input, self.quantized_weight(), self.bias)
 
     def forward(self, input: torch.Tensor):
-        if self.use_checkpoint and torch.is_grad_enabled():
+        if getattr(self, "use_checkpoint", False) and torch.is_grad_enabled():
             return checkpoint(
                 self._forward, input, use_reentrant=False, preserve_rng_state=False, determinism_check="none"
             )

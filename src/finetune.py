@@ -19,9 +19,11 @@ from src.utils import iterate_minibatches
 def finetune_groupwise(
     *,
     layer: nn.Module,
-    inps: Sequence[torch.Tensor],
-    outs: Sequence[torch.Tensor],
+    train_inps: Sequence[torch.Tensor],
+    train_outs: Sequence[torch.Tensor],
     args: Namespace,
+    valid_inps: Sequence[torch.Tensor] = None,
+    valid_outs: Sequence[torch.Tensor] = None,
     verbose: bool = True,
     **kwargs,
 ) -> nn.Module:
@@ -35,15 +37,19 @@ def finetune_groupwise(
     :param kwargs: additional keyword arguments to be passed into layer on each forward
     """
     assert isinstance(args.devices, (list, tuple)) and len(args.devices) >= 1, f"Found devices = {args.devices}"
-    assert isinstance(inps, (list, tuple)) and isinstance(inps, (list, tuple))
-    assert len(inps) == len(outs) == len(args.devices)
+    assert isinstance(train_inps, (list, tuple)) and isinstance(train_inps, (list, tuple))
+    assert len(train_inps) == len(train_outs) == len(args.devices)
     for i in range(len(args.devices)):
-        assert isinstance(inps[i], torch.Tensor) and isinstance(outs[i], torch.Tensor)
+        assert isinstance(train_inps[i], torch.Tensor) and isinstance(train_outs[i], torch.Tensor)
         if not args.offload_activations:
-            assert inps[i].device == outs[i].device == args.devices[i], (inps[i].device, outs[i].device, args.devices)
+            assert train_inps[i].device == train_outs[i].device == args.devices[i], (
+                train_inps[i].device,
+                train_outs[i].device,
+                args.devices,
+            )
         else:
-            assert inps[i].device == outs[i].device == torch.device("cpu")
-            assert inps[i].is_pinned() and outs[i].is_pinned()
+            assert train_inps[i].device == train_outs[i].device == torch.device("cpu")
+            assert train_inps[i].is_pinned() and train_outs[i].is_pinned()
 
     # replicate non-trainable parameters to each GPU
     replicas = kwargs_by_device = None
@@ -70,44 +76,77 @@ def finetune_groupwise(
         differentiable_parameters, lr=args.finetune_lr, betas=(args.finetune_adam_beta1, args.finetune_adam_beta2)
     )
 
-    # backup best parameters
-    if args.finetune_keep_best:
-        best_parameters = deepcopy(differentiable_parameters)
-
     assert args.finetune_batch_size % len(args.devices) == 0, "batch_size must be divisible by the number of GPUs"
 
-    num_samples_per_device = len(inps[0])
+    num_samples_per_device = len(train_inps[0])
     local_batch_size = args.local_batch_size
     if local_batch_size is None:
         local_batch_size = args.finetune_batch_size // len(args.devices)
 
-    assert all(len(inps_tensor) == num_samples_per_device for inps_tensor in inps)
+    assert all(len(inps_tensor) == num_samples_per_device for inps_tensor in train_inps)
     assert args.finetune_batch_size % (local_batch_size * len(args.devices)) == 0, ""
     num_accumulation_steps = args.finetune_batch_size // (local_batch_size * len(args.devices))
     assert num_samples_per_device % local_batch_size * num_accumulation_steps == 0, (
         num_samples_per_device,
         local_batch_size,
     )
-    steps_per_epoch = num_samples_per_device * len(args.devices) // args.finetune_batch_size
-    batch_iterators = [
-        iterate_minibatches(inps[i], outs[i], batch_size=local_batch_size, device=args.devices[i])
+    train_steps_per_epoch = num_samples_per_device * len(args.devices) // args.finetune_batch_size
+    train_batch_iterators = [
+        iterate_minibatches(train_inps[i], train_outs[i], batch_size=local_batch_size, device=args.devices[i])
         for i in range(len(args.devices))
     ]
 
-    previous_best_loss = float("inf")  # for early stopping
+    run_validation = False
+    if valid_inps and valid_outs:
+        run_validation = True
+        num_valid_samples_per_device = len(valid_inps[0])
+        valid_steps_per_epoch = num_valid_samples_per_device * len(args.devices) // args.finetune_batch_size
+        valid_batch_iterators = [
+            iterate_minibatches(valid_inps[i], valid_outs[i], batch_size=local_batch_size, device=args.devices[i])
+            for i in range(len(args.devices))
+        ]
+
+    if run_validation:
+        # evaluate before training
+        layer.eval()
+        loss_numerator = loss_denominator = 0
+        with torch.no_grad():
+            for _ in range(valid_steps_per_epoch):
+                if len(args.devices) == 1:
+                    loss = _compute_mse_on_batch(layer, valid_batch_iterators[0], **kwargs)
+                else:
+                    loss = _compute_mse_parallel(
+                        args.devices,
+                        replicas,
+                        differentiable_parameters,
+                        replacement_tables,
+                        valid_batch_iterators,
+                        kwargs_by_device,
+                    )
+                loss_numerator += loss.item()
+                loss_denominator += 1
+        valid_loss_epoch = loss_numerator / loss_denominator
+        print(f"Evaluation before training.")
+        print(f"valid loss={valid_loss_epoch:.2e}\t")
+        best_loss = valid_loss_epoch
+        best_parameters_by_name = deepcopy(differentiable_parameters_by_name)
+        worse_count = 0
+
     steps_accumulated = 0
     for epoch in range(args.finetune_max_epochs):
+        layer.train()
+        # train epoch
         loss_numerator = loss_denominator = 0
-        for step in range(steps_per_epoch):
+        for _ in range(train_steps_per_epoch):
             if len(args.devices) == 1:
-                loss = _compute_mse_on_batch(layer, batch_iterators[0], **kwargs)
+                loss = _compute_mse_on_batch(layer, train_batch_iterators[0], **kwargs)
             else:
                 loss = _compute_mse_parallel(
                     args.devices,
                     replicas,
                     differentiable_parameters,
                     replacement_tables,
-                    batch_iterators,
+                    train_batch_iterators,
                     kwargs_by_device,
                 )
 
@@ -116,6 +155,7 @@ def finetune_groupwise(
 
             if not torch.isfinite(loss).item():
                 raise ValueError(f"Fine-tuning loss is {loss}")
+
             if steps_accumulated >= num_accumulation_steps:
                 opt.step()
                 opt.zero_grad()
@@ -123,23 +163,49 @@ def finetune_groupwise(
 
             loss_numerator += loss.item()
             loss_denominator += 1
-            if verbose and (epoch * steps_per_epoch + step) % args.print_frequency == 0:
-                print(f"epoch={epoch}\tstep={step}\tloss={loss_numerator / loss_denominator:.10f}\t")
+        train_loss_epoch = loss_numerator / loss_denominator
+        if run_validation:
+            layer.eval()
+            # val epoch
+            loss_numerator = loss_denominator = 0
+            with torch.no_grad():
+                for _ in range(valid_steps_per_epoch):
+                    if len(args.devices) == 1:
+                        loss = _compute_mse_on_batch(layer, valid_batch_iterators[0], **kwargs)
+                    else:
+                        loss = _compute_mse_parallel(
+                            args.devices,
+                            replicas,
+                            differentiable_parameters,
+                            replacement_tables,
+                            valid_batch_iterators,
+                            kwargs_by_device,
+                        )
+                    loss_numerator += loss.item()
+                    loss_denominator += 1
+            valid_loss_epoch = loss_numerator / loss_denominator
+        # log losses in the end of the epoch
+        if verbose:
+            print("-" * 10)
+            print(f"epoch={epoch}")
+            print(f"train loss={train_loss_epoch:.2e}\t")
+            if run_validation:
+                print(f"valid loss={valid_loss_epoch:.2e}\t")
 
-        if verbose and (epoch * steps_per_epoch + step) % args.print_frequency != 0:
-            print(f"epoch={epoch}\tstep={step}\tloss={loss_numerator / loss_denominator:.10f}\t")
+        if run_validation:
+            if valid_loss_epoch < best_loss:
+                print(f"new best loss {valid_loss_epoch:.2e} on epoch {epoch}")
+                best_loss = valid_loss_epoch
+                best_parameters_by_name = deepcopy(differentiable_parameters_by_name)
+                worse_count = 0
+            else:
+                worse_count += 1
+                if worse_count >= args.finetune_early_stop:
+                    break
 
-        if args.finetune_relative_mse_tolerance is not None:
-            epoch_loss = loss_numerator / loss_denominator
-            if args.finetune_keep_best:
-                if epoch_loss / previous_best_loss < 1.0:
-                    best_parameters = deepcopy(differentiable_parameters)
-                else:
-                    differentiable_parameters = best_parameters
-            if epoch_loss / previous_best_loss > (1.0 - args.finetune_relative_mse_tolerance):
-                return layer  # early stopping; no updates after last epoch's beam search
-            previous_best_loss = min(epoch_loss, previous_best_loss)
-    opt.zero_grad(set_to_none=True)
+    if run_validation:
+        layer.load_state_dict(best_parameters_by_name, strict=False)
+
     return layer
 
 

@@ -5,7 +5,12 @@ import shutil
 
 import torch
 from tqdm.auto import trange
-from transformers import AutoConfig, PretrainedConfig
+from transformers import AutoConfig, AutoModelForCausalLM
+
+try:
+    import safetensors
+except ModuleNotFoundError:
+    safetensors = None
 
 
 def get_int_dtype(nbits: int) -> torch.dtype:
@@ -28,7 +33,7 @@ def pack_int_data(data: torch.IntTensor, nbits: int) -> torch.IntTensor:
 
 def get_num_layers(config) -> int:
     match config.model_type:
-        case "llama" | "mistral" | "mixtral":
+        case "llama" | "mistral" | "mixtral" | "gemma":
             return config.num_hidden_layers
         case unknown_type:
             raise NotImplementedError(f"Can't get number of layers for {unknown_type}")
@@ -36,7 +41,7 @@ def get_num_layers(config) -> int:
 
 def get_layers_prefix(config) -> str:
     match config.model_type:
-        case "llama" | "mistral" | "mixtral":
+        case "llama" | "mistral" | "mixtral" | "gemma":
             return "model.layers"
         case unknown_type:
             raise NotImplementedError(f"Can't get layers prefix for {unknown_type}")
@@ -65,6 +70,9 @@ def get_converted_state_dict(config, nbits: int, in_path: os.PathLike) -> [dict,
     for key, value in torch.load(os.path.join(in_path, "not_quantized_weights.pt")).items():
         state_dict[key] = value.half()
         linear_weights_not_to_quantize.append(key)
+
+    if "lm_head.weight" not in linear_weights_not_to_quantize:
+        linear_weights_not_to_quantize.append("lm_head.weight")
 
     return state_dict, linear_weights_not_to_quantize
 
@@ -119,6 +127,11 @@ if __name__ == "__main__":
         type=str,
         help="Path to save HF compatible checkpoint to",
     )
+    parser.add_argument(
+        "--save_safetensors",
+        action="store_true",
+        help="Whether to save in safetensors format",
+    )
     args = parser.parse_args()
 
     old_config = AutoConfig.from_pretrained(args.model)
@@ -132,3 +145,10 @@ if __name__ == "__main__":
     new_config_dict = update_config(old_config.to_diff_dict(), metadata, linear_weights_not_to_quantize)
     with open(os.path.join(args.out_path, "config.json"), "w") as config_file:
         json.dump(new_config_dict, config_file, indent=4)
+
+    # convert to safetensors
+    if args.save_safetensors:
+        assert safetensors
+        model = AutoModelForCausalLM.from_pretrained(args.out_path, trust_remote_code=True, torch_dtype=torch.float16)
+        shutil.rmtree(args.out_path)
+        model.save_pretrained(args.out_path)
