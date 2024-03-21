@@ -90,7 +90,6 @@ __global__ void Code1x16MatVec(
 }
 
 
-template<bool use_bfloat16>
 __global__ void Code1x16Dequant(
   const int4* __restrict__ A,
         int4* __restrict__ C,
@@ -326,8 +325,7 @@ void  code1x16_dequant_cuda(
         void* __restrict__ C,
   const void* __restrict__ codebook,
   int prob_m,
-  int prob_k,
-  bool use_bfloat16
+  int prob_k
 ) {
   int sms;
   cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, 0);
@@ -341,23 +339,13 @@ void  code1x16_dequant_cuda(
   int blocks = ceildiv(prob_m, thread_m);
   int threads = 32 * thread_m;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
-  if (use_bfloat16) {
-    Code1x16Dequant<true><<<blocks, threads, 0, stream>>>(
-      (const int4*) A,
-      (int4*) C,
-      (const int4*) codebook,
-      prob_m,
-      prob_k
-    );
-  } else {
-    Code1x16Dequant<false><<<blocks, threads, 0, stream>>>(
-      (const int4*) A,
-      (int4*) C,
-      (const int4*) codebook,
-      prob_m,
-      prob_k
-    );
-  }
+  Code1x16Dequant<<<blocks, threads, 0, stream>>>(
+    (const int4*) A,
+    (int4*) C,
+    (const int4*) codebook,
+    prob_m,
+    prob_k
+  );
 }
 
 // Dequantizes the code and codebook into weights.

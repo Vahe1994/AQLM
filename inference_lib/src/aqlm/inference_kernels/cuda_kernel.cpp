@@ -39,8 +39,7 @@ void code1x16_dequant_cuda(
         void* C,
   const void* codebook,
   int prob_m,
-  int prob_k,
-  bool use_bfloat16
+  int prob_k
 );
 
 void code1x16_dequant_vllm(
@@ -129,7 +128,7 @@ torch::Tensor code1x16_dequant(
   const torch::Tensor& codebooks,
   const torch::Tensor& scales
 ) {
-  bool use_bfloat16 = check_use_bfloat16(codebooks);
+  check_use_bfloat16(codebooks);
   auto in_features = codes.size(1) * 8;
   auto out_features = scales.size(0);
 
@@ -143,8 +142,7 @@ torch::Tensor code1x16_dequant(
     weight.data_ptr(),
     codebooks.data_ptr(),
     out_features,
-    in_features,
-    use_bfloat16
+    in_features
   );
   weight *= scales.index({"...", 0, 0});
 
@@ -176,10 +174,7 @@ torch::Tensor vllm_dequant(
   const torch::Tensor& codebooks,
   const torch::Tensor& scales
 ) {
-  
-
-
-  bool use_bfloat16 = check_use_bfloat16(codebooks);
+  check_use_bfloat16(codebooks);
   auto in_features = codes.size(1) * 8;
   auto out_features = scales.size(0);
 
