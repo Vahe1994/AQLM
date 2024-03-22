@@ -141,7 +141,7 @@ torch::Tensor code1x16_dequant(
   auto in_features = codes.size(1) * 8;
   auto out_features = scales.size(0);
 
-  auto weight = torch::zeros({out_features, in_features},
+  auto weight = torch::empty({out_features, in_features},
     torch::TensorOptions()
       .dtype(codebooks.dtype())
       .device(codebooks.device())
@@ -189,7 +189,7 @@ torch::Tensor vllm_dequant(
 
   int4 cumulative_sizes = {out_features, 10 * out_features, 10 * out_features, 10 * out_features};
 
-  auto weight = torch::zeros({out_features, in_features},
+  auto weight = torch::empty({out_features, in_features},
     torch::TensorOptions()
       .dtype(codebooks.dtype())
       .device(codebooks.device())
@@ -320,7 +320,7 @@ torch::Tensor code2x8_dequant(
   auto in_features = codes.size(1) * 8;
   auto out_features = scales.size(0);
 
-  auto weight = torch::zeros({out_features, in_features},
+  auto weight = torch::empty({out_features, in_features},
     torch::TensorOptions()
       .dtype(codebooks.dtype())
       .device(codebooks.device())
