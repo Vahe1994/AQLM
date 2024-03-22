@@ -71,6 +71,24 @@ void code2x8_dequant_cuda(
   bool use_bfloat16
 );
 
+inline torch::Tensor scale_bias_unflatten_output(
+        torch::Tensor& flat_output,
+  const torch::Tensor& scales,
+  const std::optional<torch::Tensor>& bias,
+  const c10::IntArrayRef& input_sizes
+) {
+  flat_output *= scales.flatten().unsqueeze(0);
+  if (bias.has_value()) {
+    flat_output += bias->unsqueeze(0);
+  }
+
+  auto output_sizes = input_sizes.vec();
+  output_sizes.pop_back();
+  output_sizes.push_back(-1);
+  auto output = flat_output.reshape(output_sizes).clone();
+  return output;
+}
+
 void code1x16_matvec(
   const torch::Tensor& A,
   const torch::Tensor& B,
@@ -120,16 +138,12 @@ torch::Tensor code1x16_matmat(
       use_bfloat16
     );
   }
-  flat_output *= scales.flatten().unsqueeze(0);
-  if (bias.has_value()) {
-    flat_output += bias->unsqueeze(0);
-  }
-
-  auto output_sizes = input_sizes.vec();
-  output_sizes.pop_back();
-  output_sizes.push_back(-1);
-  auto output = flat_output.reshape(output_sizes).clone();
-  return output;
+  return scale_bias_unflatten_output(
+    flat_output,
+    scales,
+    bias,
+    input_sizes
+  );
 }
 
 torch::Tensor code1x16_dequant(
@@ -215,18 +229,32 @@ torch::Tensor code1x16_matmat_dequant(
   const torch::Tensor& scales,
   const std::optional<torch::Tensor>& bias
 ) {
-  auto weight = code1x16_dequant(
-    codes,
-    codebooks,
-    scales
+  bool use_bfloat16 = check_use_bfloat16(input);
+  auto input_sizes = input.sizes();
+  auto in_features = codes.size(1) * 8;
+  auto out_features = codes.size(0) * codebooks.size(2);
+  auto flat_input = input.reshape({-1, input.size(-1)});
+
+  auto weight = torch::empty({out_features, in_features},
+    torch::TensorOptions()
+      .dtype(codebooks.dtype())
+      .device(codebooks.device())
+  );
+  code1x16_dequant_cuda(
+    codes.data_ptr(),
+    weight.data_ptr(),
+    codebooks.data_ptr(),
+    out_features,
+    in_features
   );
 
-  torch::Tensor bias_2{};
-  if (bias.has_value()) {
-    bias_2 = bias.value();
-  }
-
-  return F::linear(input, weight, bias_2);
+  auto flat_output = F::linear(flat_input, weight);
+  return scale_bias_unflatten_output(
+    flat_output,
+    scales,
+    bias,
+    input_sizes
+  );
 }
 
 torch::Tensor code1x16_matmat_dequant_transposed(
@@ -236,18 +264,32 @@ torch::Tensor code1x16_matmat_dequant_transposed(
   const torch::Tensor& scales,
   const std::optional<torch::Tensor>& bias
 ) {
-  auto weight = code1x16_dequant(
-    codes,
-    codebooks,
-    scales
-  ).transpose(0, 1);
+  auto use_bfloat16 = check_use_bfloat16(codebooks);
+  auto input_sizes = input.sizes();
+  auto in_features = codes.size(1) * 8;
+  auto out_features = scales.size(0);
+  auto scaled_input = (input.reshape({-1, input.size(-1)}) * scales.flatten().unsqueeze(0)).reshape(input_sizes);
+
+  auto weight = torch::empty({out_features, in_features},
+    torch::TensorOptions()
+      .dtype(codebooks.dtype())
+      .device(codebooks.device())
+  );
+  code2x8_dequant_cuda(
+    codes.data_ptr(),
+    weight.data_ptr(),
+    codebooks.data_ptr(),
+    out_features,
+    in_features,
+    use_bfloat16
+  );
 
   torch::Tensor bias_2{};
   if (bias.has_value()) {
     bias_2 = bias.value();
   }
 
-  return F::linear(input, weight, bias_2);
+  return F::linear(scaled_input, weight, bias_2);
 }
 
 void code2x8_matvec(
@@ -299,16 +341,12 @@ torch::Tensor code2x8_matmat(
       use_bfloat16
     );
   }
-  flat_output *= scales.flatten().unsqueeze(0);
-  if (bias.has_value()) {
-    flat_output += bias->unsqueeze(0);
-  }
-
-  auto output_sizes = input_sizes.vec();
-  output_sizes.pop_back();
-  output_sizes.push_back(-1);
-  auto output = flat_output.reshape(output_sizes).clone();
-  return output;
+  return scale_bias_unflatten_output(
+    flat_output,
+    scales,
+    bias,
+    input_sizes
+  );
 }
 
 torch::Tensor code2x8_dequant(
@@ -345,18 +383,33 @@ torch::Tensor code2x8_matmat_dequant(
   const torch::Tensor& scales,
   const std::optional<torch::Tensor>& bias
 ) {
-  auto weight = code2x8_dequant(
-    codes,
-    codebooks,
-    scales
+  bool use_bfloat16 = check_use_bfloat16(input);
+  auto input_sizes = input.sizes();
+  auto in_features = codes.size(1) * 8;
+  auto out_features = codes.size(0) * codebooks.size(2);
+  auto flat_input = input.reshape({-1, input.size(-1)});
+
+  auto weight = torch::empty({out_features, in_features},
+    torch::TensorOptions()
+      .dtype(codebooks.dtype())
+      .device(codebooks.device())
+  );
+  code2x8_dequant_cuda(
+    codes.data_ptr(),
+    weight.data_ptr(),
+    codebooks.data_ptr(),
+    out_features,
+    in_features,
+    use_bfloat16
   );
 
-  torch::Tensor bias_2{};
-  if (bias.has_value()) {
-    bias_2 = bias.value();
-  }
-
-  return F::linear(input, weight, bias_2);
+  auto flat_output = F::linear(flat_input, weight);
+  return scale_bias_unflatten_output(
+    flat_output,
+    scales,
+    bias,
+    input_sizes
+  );
 }
 
 torch::Tensor code2x8_matmat_dequant_transposed(
@@ -366,11 +419,24 @@ torch::Tensor code2x8_matmat_dequant_transposed(
   const torch::Tensor& scales,
   const std::optional<torch::Tensor>& bias
 ) {
-  auto weight = code2x8_dequant(
-    codes,
-    codebooks,
-    scales
-  ).transpose(0, 1);
+  auto use_bfloat16 = check_use_bfloat16(codebooks);
+  auto input_sizes = input.sizes();
+  auto in_features = codes.size(1) * 8;
+  auto out_features = scales.size(0);
+  auto scaled_input = (input.reshape({-1, input.size(-1)}) * scales.flatten().unsqueeze(0)).reshape(input_sizes);
+
+  auto weight = torch::empty({out_features, in_features},
+    torch::TensorOptions()
+      .dtype(codebooks.dtype())
+      .device(codebooks.device())
+  );
+  code1x16_dequant_cuda(
+    codes.data_ptr(),
+    weight.data_ptr(),
+    codebooks.data_ptr(),
+    out_features,
+    in_features
+  );
 
   torch::Tensor bias_2{};
   if (bias.has_value()) {
