@@ -261,6 +261,68 @@ __global__ void Code2x8MatVec(
   }
 }
 
+template<bool use_bfloat16>
+__global__ void Code2x8Dequant(
+  const int4* __restrict__ A,
+        int4* __restrict__ C,
+  const int4* __restrict__ codebook,
+  int prob_m,
+  int prob_k
+) {
+  int a_gl_stride = prob_k / 8 / 8;
+  int a_gl_rd = (blockDim.x / 32) * blockIdx.x + (threadIdx.x / 32);
+  bool pred = a_gl_rd < prob_m;
+  a_gl_rd = a_gl_stride * a_gl_rd + threadIdx.x % 32;
+  int a_gl_end = a_gl_rd + a_gl_stride - threadIdx.x % 32;
+  int lane = threadIdx.x % 8;
+
+  int c_gl_stride = prob_k / 8;
+  int c_gl_wr = (blockDim.x / 32) * blockIdx.x + (threadIdx.x / 32);
+  c_gl_wr = c_gl_stride * c_gl_wr + (threadIdx.x % 32) * 8;
+
+  extern __shared__ int4 sh[];
+  int4* sh_code = sh;
+  int4* sh_code0 = sh_code;
+  int4* sh_code1 = sh_code + 256 * 8;
+
+  for (int i = threadIdx.x; i < 2 * 256; i += blockDim.x) {
+    int4 dec = codebook[i];
+    #pragma unroll
+    for (int j = 0; j < 8; j++)
+      sh_code[8 * i + (j + lane) % 8] = dec;
+  }
+  __syncthreads();
+
+  float res = 0;
+
+  int iters = (prob_k / 8 - 1) / (8 * 32) + 1;
+  while (iters--) {
+    int offset = 8 * (threadIdx.x % 32);
+    if (pred && a_gl_rd < a_gl_end) {
+      const uint8_t* enc = reinterpret_cast<const uint8_t*>(&A[a_gl_rd]);
+      #pragma unroll
+      for (int i = 0; i < 8; i++) {
+        int4 chunk;
+        if constexpr (use_bfloat16) {
+          nv_bfloat162* a0 = reinterpret_cast<nv_bfloat162*>(&sh_code0[8 * enc[2 * i + 0] + lane]);
+          nv_bfloat162* a1 = reinterpret_cast<nv_bfloat162*>(&sh_code1[8 * enc[2 * i + 1] + lane]);
+          #pragma unroll
+          for (int j = 0; j < 4; j++)
+            reinterpret_cast<nv_bfloat162*>(&chunk)[j] = __hadd2(a0[j], a1[j]);
+        } else {
+          half2* a0 = reinterpret_cast<half2*>(&sh_code0[8 * enc[2 * i + 0] + lane]);
+          half2* a1 = reinterpret_cast<half2*>(&sh_code1[8 * enc[2 * i + 1] + lane]);
+          #pragma unroll
+          for (int j = 0; j < 4; j++)
+            reinterpret_cast<half2*>(&chunk)[j] = __hadd2(a0[j], a1[j]);
+        }
+        C[a_gl_rd * 8 + i] = chunk;
+      }
+    }
+    a_gl_rd += 32;
+  }
+}
+
 inline int ceildiv(int a, int b) {
   return (a + b - 1) / b;
 }
@@ -432,6 +494,63 @@ void  code2x8_matvec_cuda(
     Code2x8MatVec<false><<<blocks, threads, shared, stream>>>(
       (const int4*) A,
       (const int4*) B,
+      (int4*) C,
+      (const int4*) codebook,
+      prob_m,
+      prob_k
+    );
+  }
+}
+
+void  code2x8_dequant_cuda(
+  const void* __restrict__ A,
+        void* __restrict__ C,
+  const void* __restrict__ codebook,
+  int prob_m,
+  int prob_k,
+  bool use_bfloat16
+) {
+  int cc_major;
+  cudaDeviceGetAttribute(&cc_major, cudaDevAttrComputeCapabilityMajor, 0);
+  if (cc_major < 8 && use_bfloat16) {
+    throw c10::TypeError(
+      {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},
+      c10::str(
+        "You're trying to run AQLM with bfloat16 on a GPU with low compute capability. Use torch.float16 instead."
+      )
+    );
+  }
+
+  int sms;
+  cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, 0);
+  int waves = 0;
+  int thread_m;
+  do {
+    waves++;
+    thread_m = ceildiv(prob_m, waves * sms);
+  } while (thread_m > THREAD_M);
+
+  int blocks = ceildiv(prob_m, thread_m);
+  int threads = 32 * thread_m;
+  int shared = 16 * (2 * 256 * 8 + 32 * 9);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
+  if (use_bfloat16) {
+    cudaFuncSetAttribute(
+      Code2x8Dequant<true>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared
+    );
+    Code2x8Dequant<true><<<blocks, threads, shared, stream>>>(
+      (const int4*) A,
+      (int4*) C,
+      (const int4*) codebook,
+      prob_m,
+      prob_k
+    );
+  } else {
+    cudaFuncSetAttribute(
+      Code2x8Dequant<false>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared
+    );
+    Code2x8Dequant<false><<<blocks, threads, shared, stream>>>(
+      (const int4*) A,
       (int4*) C,
       (const int4*) codebook,
       prob_m,
