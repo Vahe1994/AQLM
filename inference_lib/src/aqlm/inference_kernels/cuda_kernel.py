@@ -74,9 +74,7 @@ torch.library.impl("aqlm::code2x8_matmat_dequant", "default", CUDA_KERNEL.code2x
 
 @torch.library.impl_abstract("aqlm::code2x8_matmat_dequant")
 def code2x8_matmat_dequant_meta(input, codes, codebooks, scales, bias):
-    return torch.empty(
-        input.shape[:-1] + (codes.shape[0],), device=input.device, dtype=input.dtype
-    )
+    return torch.empty(input.shape[:-1] + (codes.shape[0],), device=input.device, dtype=input.dtype)
 
 
 torch.library.define(
