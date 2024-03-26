@@ -42,16 +42,6 @@ void code1x16_dequant_cuda(
   int prob_k
 );
 
-void code1x16_dequant_vllm(
-        void* weights,
-  const void* a,
-  const void* codebook,
-  const int a_rows, // code rows in element space, so k
-  const int a_cols, // code columns in element space, so n
-  const int4 codebook_a_sizes,  // cumulative sizes of A spanning each codebook, at most 3 long, sums to m.
-  const int codebook_stride // as int4
-);
-
 void code2x8_matvec_cuda(
   const void* A,
   const void* B,
@@ -190,36 +180,6 @@ int4 accumulate_sizes(const torch::Tensor& codebook_partition_sizes)
     *cumulative_size = last*10;
   }
   return cumulative_sizes;
-}
-
-torch::Tensor vllm_dequant(
-  const torch::Tensor& codes,
-  const torch::Tensor& codebooks,
-  const torch::Tensor& scales
-) {
-  check_use_bfloat16(codebooks);
-  auto in_features = codes.size(1) * 8;
-  auto out_features = scales.size(0);
-
-  int4 cumulative_sizes = {out_features, 10 * out_features, 10 * out_features, 10 * out_features};
-
-  auto weight = torch::empty({out_features, in_features},
-    torch::TensorOptions()
-      .dtype(codebooks.dtype())
-      .device(codebooks.device())
-  );
-  code1x16_dequant_vllm(
-    weight.data_ptr(),
-    codes.data_ptr(),
-    codebooks.data_ptr(),
-    codes.size(0), // code rows in element space, so k
-    codes.size(1), // code columns in element space, so n
-    cumulative_sizes,  // cumulative sizes of A spanning each codebook, at most 3 long, sums to m.
-    codebooks.stride(0) * codebooks.element_size() / sizeof(int4) // as int4
-  );
-  weight *= scales.index({"...", 0, 0});
-
-  return weight;
 }
 
 torch::Tensor code1x16_matmat_dequant(
@@ -449,7 +409,6 @@ torch::Tensor code2x8_matmat_dequant_transposed(
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("code1x16_matmat", &code1x16_matmat, "1x16 (2bit) codebook matrix-matrix product through matvec.");
   m.def("code1x16_dequant", &code1x16_dequant, "1x16 (2bit) codebook dequantization.");
-  m.def("vllm_dequant", &vllm_dequant, "vllm dequantization.");
   m.def("code1x16_matmat_dequant", &code1x16_matmat_dequant, "1x16 (2bit) codebook matrix-matrix dequantization product.");
   m.def("code1x16_matmat_dequant_transposed", &code1x16_matmat_dequant_transposed, "1x16 (2bit) codebook matrix-matrix dequantization product for backward pass.");
   m.def("code2x8_matmat", &code2x8_matmat, "2x8 (2bit) codebook matrix-matrix product.");

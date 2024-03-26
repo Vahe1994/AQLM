@@ -131,45 +131,6 @@ __global__ void Code1x16Dequant(
   }
 }
 
-// Dequantizes the code and codebook into weights.
-// We span horizontally and do an int4 at a time in an attempt to maximize throughput.
-__global__ void Code1x16Dequant(
-        int4* __restrict__ weights,
-  const int4* __restrict__ a,
-  const int4* __restrict__ codebook,
-  const int a_rows, // code rows in int4 space, so same as stride.
-  const int a_cols, // code columns (matter?)
-  const int4 codebook_a_sizes,  // cumulative sizes of A spanning each codebook, at most 3 long, sums to m.
-  const int codebook_stride // as int4
-) {
-  // Each thread decodes one int4 worth of codebook.
-  int a_col = blockIdx.x * 32 + threadIdx.x;
-  int a_row = blockIdx.y * 32 + threadIdx.y;
-
-  // out of range
-  if (a_row >= a_rows)
-    return;
-
-  const int weight_stride = a_rows * 8; // as int4
-  weights += a_col * weight_stride + a_row * 8;
-
-  // advance to the correct codebook, this easy because we only multiply one column of the codebook.
-  auto codebook_size = &codebook_a_sizes.x;
-  while (a_col >= *codebook_size)
-  {
-      codebook += codebook_stride;
-      ++codebook_size;
-  }
-
-  // do one int4 read and write, hopefully maxing out bandwidth.
-  int4 code_block = a[a_row + a_col * a_rows];
-  const uint16_t* enc = reinterpret_cast<const uint16_t*>(&code_block);
-  #pragma unroll
-  for (int i = 0; i < 8; i++) {
-    weights[i] = codebook[enc[i]];
-  }
-}
-
 template<bool use_bfloat16>
 __global__ void Code2x8MatVec(
   const int4* __restrict__ A,
@@ -407,38 +368,6 @@ void  code1x16_dequant_cuda(
     (const int4*) codebook,
     prob_m,
     prob_k
-  );
-}
-
-// Dequantizes the code and codebook into weights.
-void code1x16_dequant_vllm(
-        void* __restrict__ weights,
-  const void* __restrict__ a,
-  const void* __restrict__ codebook,
-  const int a_rows, // code rows in element space, so k
-  const int a_cols, // code columns in element space, so n
-  const int4 codebook_a_sizes,  // cumulative sizes of A spanning each codebook, at most 3 long, sums to m.
-  const int codebook_stride // as int4
-) {
-  dim3 threads(32, 32, 1);
-
-  assert(a_cols % 32 == 0);
-  // each thread does one int4 worth.
-  assert(a_rows % 8 == 0);
-
-  const int rows = a_rows/8;
-
-  dim3 blocks(ceildiv(a_cols, 32), ceildiv(rows, 32), 1);
-
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
-  Code1x16Dequant<<<blocks, threads, 0, stream>>>(
-    (int4*) weights,
-    (const int4*) a,
-    (const int4*) codebook,
-    rows, // in int4 space.
-    a_cols,
-    codebook_a_sizes,
-    codebook_stride
   );
 }
 
