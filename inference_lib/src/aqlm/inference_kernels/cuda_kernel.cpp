@@ -249,7 +249,7 @@ torch::Tensor code1x16_matmat_dequant_transposed(
     bias_2 = bias.value();
   }
 
-  return F::linear(scaled_input, weight, bias_2);
+  return F::linear(scaled_input, weight.transpose(0, 1), bias_2);
 }
 
 void code2x8_matvec(
@@ -403,7 +403,7 @@ torch::Tensor code2x8_matmat_dequant_transposed(
     bias_2 = bias.value();
   }
 
-  return F::linear(input, weight, bias_2);
+  return F::linear(input, weight.transpose(0, 1), bias_2);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
