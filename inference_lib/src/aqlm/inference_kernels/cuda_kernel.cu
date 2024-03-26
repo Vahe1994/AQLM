@@ -109,7 +109,6 @@ __global__ void Code1x16Dequant(
 
   int iters = (prob_k / 8 - 1) / (8 * 32) + 1;
   while (iters--) {
-    int offset = 8 * (threadIdx.x % 32);
     if (pred && a_gl_rd < a_gl_end) {
       const uint16_t* enc = reinterpret_cast<const uint16_t*>(&A[a_gl_rd]);
       #pragma unroll
@@ -258,7 +257,6 @@ __global__ void Code2x8Dequant(
 
   int iters = (prob_k / 8 - 1) / (8 * 32) + 1;
   while (iters--) {
-    int offset = 8 * (threadIdx.x % 32);
     if (pred && a_gl_rd < a_gl_end) {
       const uint8_t* enc = reinterpret_cast<const uint8_t*>(&A[a_gl_rd]);
       #pragma unroll
