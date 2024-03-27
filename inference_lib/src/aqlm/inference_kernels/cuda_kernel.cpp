@@ -390,12 +390,13 @@ torch::Tensor code2x8_matmat_dequant_transposed(
       .dtype(codebooks.dtype())
       .device(codebooks.device())
   );
-  code1x16_dequant_cuda(
+  code2x8_dequant_cuda(
     codes.data_ptr(),
     weight.data_ptr(),
     codebooks.data_ptr(),
     out_features,
-    in_features
+    in_features,
+    use_bfloat16
   );
 
   torch::Tensor bias_2{};
