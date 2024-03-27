@@ -224,7 +224,7 @@ torch::Tensor code1x16_matmat_dequant_transposed(
   const torch::Tensor& scales,
   const std::optional<torch::Tensor>& bias
 ) {
-  auto use_bfloat16 = check_use_bfloat16(codebooks);
+  check_use_bfloat16(codebooks);
   auto input_sizes = input.sizes();
   auto in_features = codes.size(1) * 8;
   auto out_features = scales.size(0);
@@ -235,13 +235,12 @@ torch::Tensor code1x16_matmat_dequant_transposed(
       .dtype(codebooks.dtype())
       .device(codebooks.device())
   );
-  code2x8_dequant_cuda(
+  code1x16_dequant_cuda(
     codes.data_ptr(),
     weight.data_ptr(),
     codebooks.data_ptr(),
     out_features,
-    in_features,
-    use_bfloat16
+    in_features
   );
 
   torch::Tensor bias_2{};
