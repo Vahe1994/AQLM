@@ -1,5 +1,6 @@
 import math
 import os
+import re
 from contextlib import contextmanager
 
 import torch
@@ -8,10 +9,16 @@ import transformers
 from accelerate import dispatch_model
 from transformers import AutoConfig, AutoModelForCausalLM
 
-MODEL_ERROR_MSG = "Unsupported model type {} - only 'llama', 'Yi', 'opt' and 'falcon' are supported"
+MODEL_ERROR_MSG = "Unsupported model type {}"
 FALCON_TYPES = ("falcon", "refinedweb", "refinedwebmodel")
 LLAMA_LIKE = ("llama", "Yi", "mistral", "mixtral", "gemma")
+JAMBA_LIKE = ("jamba",)
 
+
+LAYERS_TO_SKIP = {
+    "mixtral": "*.gate",
+    "jamba": ".*(x|dt)_proj|.router|.conv1d"
+}
 
 @contextmanager
 def suspend_nn_inits():
@@ -96,6 +103,10 @@ def get_model_head(model):
         if model.model.decoder.project_out is not None:
             head.append(model.model.decoder.project_out)
         head.append(model.lm_head)
+    elif model.config.model_type == "jamba":
+        if model.model.final_layernorm is not None:
+            head.append(model.model.final_layernorm)
+        head.append(model.lm_head)
     else:
         raise ValueError(MODEL_ERROR_MSG.format(model.config.model_type))
     return head
@@ -119,13 +130,18 @@ def get_lm_logits(inps_, model):
         if model.model.decoder.project_out is not None:
             hidden_states = model.model.decoder.project_out(hidden_states)
         lm_logits = model.lm_head(hidden_states)
+    elif model.config.model_type == "jamba":
+        hidden_states = inps_.unsqueeze(0)
+        if model.model.final_layernorm is not None:
+            hidden_states = model.model.final_layernorm(hidden_states)
+        lm_logits = model.lm_head(hidden_states)
     else:
         raise ValueError(MODEL_ERROR_MSG.format(model.config.model_type))
     return lm_logits
 
 
 def get_layers(model):
-    if model.config.model_type in LLAMA_LIKE:
+    if model.config.model_type in (*LLAMA_LIKE, *JAMBA_LIKE):
         return model.model.layers
     elif model.config.model_type.lower() in FALCON_TYPES:
         return model.transformer.h
@@ -135,10 +151,10 @@ def get_layers(model):
         raise ValueError(MODEL_ERROR_MSG.format(model.config.model_type))
 
 
-def find_sublayers(module, layers=(nn.Conv2d, nn.Linear)):
+def find_sublayers(module, layers=(nn.Conv2d, nn.Linear), layers_to_skip="^$"):
     res = {}
     for name, layer in module.named_modules():
-        if isinstance(layer, layers):
+        if isinstance(layer, layers) and not re.search(layers_to_skip, name):
             res[name] = layer
     return res
 

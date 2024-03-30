@@ -16,6 +16,7 @@ from src.datautils import get_loaders
 from src.finetune import finetune_groupwise
 from src.modelutils import (
     FALCON_TYPES,
+    LAYERS_TO_SKIP,
     find_sublayers,
     get_layers,
     get_lm_logits,
@@ -54,9 +55,8 @@ def quantize_model(model, args):
         train_dataloader = dataloader
         val_dataloader = None
 
-    results = quantize_aq(model, train_dataloader, args, val_dataloader)
+    quantize_aq(model, train_dataloader, args, val_dataloader)
     print(f"quantization time: {time.time() - tick:.1f}")
-    return results
 
 
 @torch.no_grad()
@@ -179,7 +179,6 @@ def quantize_aq(
     num_codebooks = args.num_codebooks
     model.config.use_cache = False
 
-    quantizers = {}
     overall_bits = 0
     model_number_of_params = 0
     layers = get_layers(model)
@@ -201,7 +200,8 @@ def quantize_aq(
         if args.true_sequential:
             sequential = get_sequential_groups(model, args.mlp_only)
         else:
-            sequential = [list(find_sublayers(layer).keys())]
+            layers_to_skip = LAYERS_TO_SKIP.get(model.config.model_type, "^$")
+            sequential = [list(find_sublayers(layer, layers_to_skip=layers_to_skip).keys())]
 
         # prepare validation  outputs
         if run_validation:
@@ -218,11 +218,7 @@ def quantize_aq(
                 assert len(inps) == len(outs) == 1  # number of per-device inputs/outputs
                 aq_handlers = init_aq_engines(
                     layer,
-                    [
-                        name
-                        for name in names
-                        if ((".gate" not in name.lower()) or ("mixtral" not in model.config.model_type.lower()))
-                    ],
+                    names,
                     inps[0],
                     outs[0],
                     **forward_args,
@@ -231,11 +227,7 @@ def quantize_aq(
                 aq_handlers = init_aq_engines_parallel(
                     args.devices,
                     layer,
-                    [
-                        name
-                        for name in names
-                        if ((".gate" not in name.lower()) or ("mixtral" not in model.config.model_type.lower()))
-                    ],
+                    names,
                     inps,
                     outs,
                     **forward_args,
@@ -243,7 +235,6 @@ def quantize_aq(
             for sublayer_name in aq_handlers.keys():
                 print(f"Quantizing module {sublayer_name} of layer {layer_index}")
                 if "mixtral" in model.config.model_type.lower() and args.mix_compression:
-                    assert "mixtral" in model.config.model_type.lower()
                     if "self_attn" in sublayer_name.lower():
                         args.num_codebooks = 2 * num_codebooks
                     else:
@@ -272,8 +263,7 @@ def quantize_aq(
                 weight_avg_bits = quantized_weight.estimate_nbits_per_parameter()
                 overall_bits += int(weight_avg_bits * torch.numel(aq_handlers[sublayer_name].layer.weight.data))
                 model_number_of_params += torch.numel(aq_handlers[sublayer_name].layer.weight.data)
-                print("curent_avg_bits", overall_bits / model_number_of_params)
-                quantizers["model.layers.%d.%s" % (layer_index, sublayer_name)] = ()  # to be updated
+                print("current_avg_bits", overall_bits / model_number_of_params)
 
             print("PREPARING TO FINETUNE")
             print(layer)
@@ -344,7 +334,6 @@ def quantize_aq(
         wandb.log({"Avg_bits": overall_bits / model_number_of_params})
     model.config.use_cache = use_cache
     print(f"quantize: {torch.cuda.max_memory_allocated()=:,}")
-    return quantizers
 
 
 @torch.no_grad()
