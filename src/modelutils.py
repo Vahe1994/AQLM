@@ -8,9 +8,9 @@ import transformers
 from accelerate import dispatch_model
 from transformers import AutoConfig, AutoModelForCausalLM
 
-MODEL_ERROR_MSG = "Unsupported model type {} - only 'llama', 'Yi', 'opt' and 'falcon' are supported"
+MODEL_ERROR_MSG = "Unsupported model type {}"
 FALCON_TYPES = ("falcon", "refinedweb", "refinedwebmodel")
-LLAMA_LIKE = ("llama", "Yi", "mistral", "mixtral", "gemma")
+LLAMA_LIKE = ("llama", "Yi", "mistral", "mixtral", "gemma", "cohere")
 
 
 @contextmanager
@@ -49,7 +49,7 @@ def get_model(
         dtype = getattr(torch, dtype)
 
     model_kwargs = {}
-    # this argument is avaialbe only for transformers >= 4.38.0
+    # this argument is available only for transformers >= 4.38.0
     if transformers.__version__ >= "4.38.0":
         model_kwargs["attn_implementation"] = attn_implementation
 
