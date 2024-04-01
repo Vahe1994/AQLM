@@ -44,6 +44,7 @@ def quantize_model(model, args):
         seed=args.seed,
         model_path=args.model_path,
         seqlen=model.seqlen,
+        use_fast_tokenizer=args.use_fast_tokenizer
     )
     if args.val_size > 0:
         all_ids = torch.randperm(len(dataloader))
@@ -791,6 +792,16 @@ if __name__ == "__main__":
         choices=[None, "eager", "flash_attention_2", "sdpa"],
         help="Attention implementation.",
     )
+    parser.add_argument(
+        "--use_fast_tokenizer",
+        action="store_true",
+        help="Whether to use fast tokenizer.",
+    )
+    parser.add_argument(
+        "--trust_remote_code",
+        action="store_true",
+        help="Whether to trust remote code.",
+    )
 
     torch.set_num_threads(min(16, torch.get_num_threads()))
     torch.backends.cudnn.allow_tf32 = False
@@ -831,7 +842,9 @@ if __name__ == "__main__":
 
     print("\n============ Load model... ============")
     model = get_model(
-        args.model_path, args.load, args.dtype, args.model_seqlen, attn_implementation=args.attn_implementation
+        args.model_path, args.load, args.dtype, args.model_seqlen, 
+        attn_implementation=args.attn_implementation, 
+        trust_remote_code=args.trust_remote_code
     ).train(False)
 
     if not args.load and not args.no_quant:
@@ -850,6 +863,8 @@ if __name__ == "__main__":
             model_path=args.model_path,
             seqlen=model.seqlen,
             eval_mode=True,
+            use_fast_tokenizer=args.use_fast_tokenizer,
+            trust_remote_code=args.trust_remote_code
         )
         args.dataset_name = dataset
         perplexity_eval(model, testloader, args)

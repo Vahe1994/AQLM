@@ -39,7 +39,13 @@ def dispatch_quantized_model(model):
 
 
 def get_model(
-    model_path, load_quantized=None, dtype="auto", model_seqlen=2048, device_map=None, attn_implementation=None
+    model_path, 
+    load_quantized=None, 
+    dtype="auto",
+    model_seqlen=2048, 
+    device_map=None, 
+    attn_implementation=None,
+    trust_remote_code=None,
 ):
     if dtype == "auto":
         dtype = (
@@ -56,11 +62,10 @@ def get_model(
     with suspend_nn_inits():
         model = AutoModelForCausalLM.from_pretrained(
             pretrained_model_name_or_path=model_path,
-            trust_remote_code=True,
+            trust_remote_code=trust_remote_code,
             torch_dtype=dtype,
             # defer distribution if loading quantized
             device_map=None if load_quantized else device_map,
-            low_cpu_mem_usage=True,
             local_files_only=True,
             **model_kwargs,
         )
