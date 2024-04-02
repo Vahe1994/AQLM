@@ -95,9 +95,9 @@ class AQEngine(nn.Module):
                 if not torch.isfinite(loss).item():
                     raise ValueError(f"Quantization loss is {loss}")
 
-                full_loss = loss.item() + self._compute_regularizer_penalty(dynamic_regularizer_coefficient, args)
-                print(f"Full loss: {full_loss:.5f} = {loss.item():.5f} (mse) + {full_loss - loss.item():.5f} (reg)")
                 if step == 0 and args.relative_mse_tolerance is not None:
+                    full_loss = loss.item() + self._compute_regularizer_penalty(dynamic_regularizer_coefficient, args)
+                    print(f"Full loss: {full_loss:.5f} = {loss.item():.5f} (mse) + {full_loss - loss.item():.5f} (reg)")
                     if full_loss / previous_best_loss > (1.0 - args.relative_mse_tolerance):
                         return self.quantized_weight  # early stopping; no updates after last epoch's beam search
                     previous_best_loss = min(previous_best_loss, full_loss)
@@ -121,7 +121,7 @@ class AQEngine(nn.Module):
                 differentiable_parameters,
                 seed=seed,
                 beam_size=args.beam_size,
-                code_penaties=code_penalties,
+                code_penalties=code_penalties,
                 verbose=True,
             )
             print("Entropy before beam search:", _calculate_code_entropy(
