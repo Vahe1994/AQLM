@@ -10,6 +10,7 @@ import torch.nn as nn
 from torch.nn.parallel.scatter_gather import Gather
 
 from src.aq import QuantizedWeight
+from src.info import _calculate_code_entropy, _get_entropy_penalties_upper_bound
 from src.utils import ellipsis
 
 
@@ -72,6 +73,16 @@ class AQEngine(nn.Module):
             replicas = torch.nn.parallel.replicate(self, args.devices)
             replicas[0] = self
 
+        reference_weight = self.layer.weight.detach().double()
+        target_norm_squared = (
+                (reference_weight @ self.XTX.double()).flatten() @ reference_weight.flatten()
+                / len(reference_weight)
+        ).item()  # if does not work: consider using loss after 1st epoch instead of this
+        del reference_weight
+        print(f"Prediction norm squared: {target_norm_squared}")
+
+        dynamic_regularizer_coefficient = args.info_regularizer * target_norm_squared
+
         previous_best_loss = float("inf")  # for early stopping
         for epoch in range(args.max_epochs):
             # train codebooks and scales
@@ -83,10 +94,13 @@ class AQEngine(nn.Module):
 
                 if not torch.isfinite(loss).item():
                     raise ValueError(f"Quantization loss is {loss}")
+
+                full_loss = loss.item() + self._compute_regularizer_penalty(dynamic_regularizer_coefficient, args)
+                print(f"Full loss: {full_loss:.5f} = {loss.item():.5f} (mse) + {full_loss - loss.item():.5f} (reg)")
                 if step == 0 and args.relative_mse_tolerance is not None:
-                    if loss.item() / previous_best_loss > (1.0 - args.relative_mse_tolerance):
+                    if full_loss / previous_best_loss > (1.0 - args.relative_mse_tolerance):
                         return self.quantized_weight  # early stopping; no updates after last epoch's beam search
-                    previous_best_loss = min(previous_best_loss, loss.item())
+                    previous_best_loss = min(previous_best_loss, full_loss)
 
                 opt.zero_grad()
                 loss.backward()
@@ -96,14 +110,23 @@ class AQEngine(nn.Module):
 
             # search for better codes (cluster indices)
             seed = random.getrandbits(256)
+            print("Entropy before beam search:", _calculate_code_entropy(
+                self.quantized_weight.codes, codebook_size=2 ** args.nbits_per_codebook).mean().item())
+            code_penalties = _get_entropy_penalties_upper_bound(
+                self.quantized_weight.codes, codebook_size=2 ** args.nbits_per_codebook,
+                regularizer=dynamic_regularizer_coefficient)
             self.beam_search_update_codes_(
                 args.devices,
                 replicas,
                 differentiable_parameters,
                 seed=seed,
                 beam_size=args.beam_size,
+                code_penaties=code_penalties,
                 verbose=True,
             )
+            print("Entropy before beam search:", _calculate_code_entropy(
+                self.quantized_weight.codes, codebook_size=2 ** args.nbits_per_codebook).mean().item())
+
         return self.quantized_weight
 
     def _compute_mse(self, selection: Union[slice, ellipsis] = ...) -> torch.Tensor:
@@ -204,6 +227,20 @@ class AQEngine(nn.Module):
             # gather all code parts and assign them to each replica
             for device, replica in zip(devices, replicas):
                 replica.quantized_weight.codes[...] = Gather.apply(device, 0, *new_code_parts_by_replica)
+
+    @torch.no_grad()
+    def _compute_regularizer_penalty(self, regularizer_coefficient: float, args: Namespace) -> float:
+        if regularizer_coefficient == 0:
+            return 0.
+        # Compute counts for each code in each codebook, initialize regularizer
+        codebook_ids = torch.arange(args.num_codebooks, device=args.devices[0]).view(1, 1, 1, -1)
+        code_penalties = _get_entropy_penalties_upper_bound(
+            self.quantized_weight.codes, codebook_size=2 ** args.nbits_per_codebook,
+            regularizer=regularizer_coefficient)
+        per_channel_regularizers = code_penalties[codebook_ids, self.quantized_weight.codes].sum(
+            dim=(-2, -1))  # [beam_size, num_out_groups]
+        del codebook_ids
+        return regularizer_coefficient * per_channel_regularizers.mean().item()
 
 
 def replace_parameter_(module: nn.Module, name: str, new_value: torch.Tensor):
