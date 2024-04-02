@@ -278,8 +278,8 @@ def quantize_aq(
 
             print("PREPARING TO FINETUNE")
             print(layer)
-            layer = layer.to(dtype=torch.float32)
-            with using_tf32(enabled=True):
+            layer = layer.to(dtype=args.finetune_dtype)
+            with using_tf32(enabled=(args.finetune_dtype == torch.float32)):
                 layer = finetune_groupwise(
                     layer=layer,
                     train_inps=inps,
@@ -611,6 +611,13 @@ if __name__ == "__main__":
         help="dtype to load the model in",
     )
     parser.add_argument(
+        "--finetune_dtype",
+        type=str,
+        default="float32",
+        choices=["float16", "float32", "bfloat16"],
+        help="dtype to run block finetuning",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=0,
@@ -815,9 +822,10 @@ if __name__ == "__main__":
     else:
         args.devices = [torch.device(device_str) for device_str in args.devices]
     assert all(isinstance(device, torch.device) for device in args.devices)
-
     # validate val size
     assert args.val_size < args.nsamples, "Number of validation set must be smaller than train + val"
+    # transform type to torch dtype
+    args.finetune_dtype = getattr(torch, args.finetune_dtype)
 
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"

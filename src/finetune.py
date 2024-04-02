@@ -246,15 +246,25 @@ def _make_parameter_replacement_tables(
 
 
 def _compute_mse_on_batch(
-    layer: nn.Module, batch_iter: Iterator[Tuple[torch.Tensor, torch.Tensor]], **kwargs
+    layer: nn.Module, 
+    batch_iter: Iterator[Tuple[torch.Tensor, torch.Tensor]],
+    **kwargs
 ) -> torch.Tensor:
     """
     Compute the activation MSE error between transformer layers
     :param
     """
+    dtype = next(layer.parameters()).dtype
     inps_batch, outs_batch = next(batch_iter)
-    inps_batch = inps_batch.to(dtype=torch.float32)
-    outs_batch = outs_batch.to(dtype=torch.float32)
+    inps_batch = inps_batch.to(dtype=dtype)
+    outs_batch = outs_batch.to(dtype=dtype)
+
+    for name, value in kwargs.items():
+        if isinstance(value, torch.Tensor) and torch.is_floating_point(value):
+            kwargs[name] = value.to(dtype)
+
+    # for name, value in kwargs.items():
+    #     print(f"{name}: {value.dtype}")
 
     if inps_batch.shape[0] != 1:  # replicate kwargs to match the batch size
         for name, value in list(kwargs.items()):
