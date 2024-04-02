@@ -806,7 +806,8 @@ if __name__ == "__main__":
     assert all(isinstance(device, torch.device) for device in args.devices)
 
     # validate val size
-    assert args.val_size < args.nsamples, "Number of validation set must be smaller than train + val"
+    if args.nsamples is not None:
+        assert args.val_size < args.nsamples, "Number of validation set must be smaller than train + val"
 
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
