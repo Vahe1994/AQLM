@@ -3,6 +3,7 @@ from __future__ import annotations
 import warnings
 from argparse import Namespace
 from collections import defaultdict
+from functools import partial
 from copy import deepcopy
 from typing import Any, Dict, Iterator, List, Sequence, Tuple
 
@@ -113,7 +114,12 @@ def finetune_groupwise(
         with torch.no_grad():
             for _ in range(valid_steps_per_epoch):
                 if len(args.devices) == 1:
-                    loss = _compute_mse_on_batch(layer, valid_batch_iterators[0], **kwargs)
+                    loss = _compute_mse_on_batch(
+                        layer, 
+                        valid_batch_iterators[0], 
+                        dtype=args.finetune_dtype, 
+                        **kwargs
+                    )
                 else:
                     loss = _compute_mse_parallel(
                         args.devices,
@@ -122,6 +128,7 @@ def finetune_groupwise(
                         replacement_tables,
                         valid_batch_iterators,
                         kwargs_by_device,
+                        dtype=args.finetune_dtype
                     )
                 loss_numerator += loss.item()
                 loss_denominator += 1
@@ -139,7 +146,12 @@ def finetune_groupwise(
         loss_numerator = loss_denominator = 0
         for _ in range(train_steps_per_epoch):
             if len(args.devices) == 1:
-                loss = _compute_mse_on_batch(layer, train_batch_iterators[0], **kwargs)
+                loss = _compute_mse_on_batch(
+                    layer, 
+                    train_batch_iterators[0], 
+                    dtype=args.finetune_dtype,
+                    **kwargs
+                )
             else:
                 loss = _compute_mse_parallel(
                     args.devices,
@@ -148,6 +160,7 @@ def finetune_groupwise(
                     replacement_tables,
                     train_batch_iterators,
                     kwargs_by_device,
+                    dtype=args.finetune_dtype
                 )
 
             (loss / num_accumulation_steps).backward()
@@ -171,7 +184,12 @@ def finetune_groupwise(
             with torch.no_grad():
                 for _ in range(valid_steps_per_epoch):
                     if len(args.devices) == 1:
-                        loss = _compute_mse_on_batch(layer, valid_batch_iterators[0], **kwargs)
+                        loss = _compute_mse_on_batch(
+                            layer, 
+                            valid_batch_iterators[0], 
+                            dtype=args.finetune_dtype,
+                            **kwargs
+                        )
                     else:
                         loss = _compute_mse_parallel(
                             args.devices,
@@ -180,6 +198,7 @@ def finetune_groupwise(
                             replacement_tables,
                             valid_batch_iterators,
                             kwargs_by_device,
+                            dtype=args.finetune_dtype
                         )
                     loss_numerator += loss.item()
                     loss_denominator += 1
@@ -248,13 +267,13 @@ def _make_parameter_replacement_tables(
 def _compute_mse_on_batch(
     layer: nn.Module, 
     batch_iter: Iterator[Tuple[torch.Tensor, torch.Tensor]],
+    dtype: torch.dtype = torch.float32,
     **kwargs
 ) -> torch.Tensor:
     """
     Compute the activation MSE error between transformer layers
     :param
     """
-    dtype = next(layer.parameters()).dtype
     inps_batch, outs_batch = next(batch_iter)
     inps_batch = inps_batch.to(dtype=dtype)
     outs_batch = outs_batch.to(dtype=dtype)
@@ -262,9 +281,6 @@ def _compute_mse_on_batch(
     for name, value in kwargs.items():
         if isinstance(value, torch.Tensor) and torch.is_floating_point(value):
             kwargs[name] = value.to(dtype)
-
-    # for name, value in kwargs.items():
-    #     print(f"{name}: {value.dtype}")
 
     if inps_batch.shape[0] != 1:  # replicate kwargs to match the batch size
         for name, value in list(kwargs.items()):
@@ -286,10 +302,11 @@ def _compute_mse_parallel(
     replacement_tables: Sequence[List[Sequence[Tuple[nn.Module, str]]]],
     batch_iterators: Sequence[Iterator[Tuple[torch.Tensor, torch.Tensor]]],
     kwargs_by_device: Sequence[Dict[str, Any]],
+    dtype: torch.dtype = torch.float32
 ) -> torch.Tensor:
     """Compute MSE in parallel over multiple GPUs, each GPU processes a portion of samples"""
     replicated_parameters = torch.nn.parallel.replicate(parameters_to_replicate, devices, detach=False)
-    funcs_by_replica = [_compute_mse_on_batch for _ in replicas]
+    funcs_by_replica = [partial(_compute_mse_on_batch, dtype=dtype) for _ in replicas]
     inputs_by_replica = []
     for i in range(len(devices)):
         if i != 0:  # no overrides needed for master module
