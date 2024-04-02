@@ -634,7 +634,7 @@ if __name__ == "__main__":
         help="Split codebook vectors into this many groups for quantizations. Only used when quantized codebooks.",
     )
     parser.add_argument(
-        "--information_regularizer",
+        "--info_regularizer",
         type=float,
         default=1e-5,
         help="Penalry for total information in layer codes, applied only in beam search",
