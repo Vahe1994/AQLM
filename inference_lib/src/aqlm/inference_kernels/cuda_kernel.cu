@@ -263,11 +263,13 @@ __global__ void Code2x8Dequant(
       for (int i = 0; i < 8; i++) {
         int4 chunk;
         if constexpr (use_bfloat16) {
+          #if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)
           nv_bfloat162* a0 = reinterpret_cast<nv_bfloat162*>(&sh_code0[8 * enc[2 * i + 0] + lane]);
           nv_bfloat162* a1 = reinterpret_cast<nv_bfloat162*>(&sh_code1[8 * enc[2 * i + 1] + lane]);
           #pragma unroll
           for (int j = 0; j < 4; j++)
             reinterpret_cast<nv_bfloat162*>(&chunk)[j] = __hadd2(a0[j], a1[j]);
+          #endif
         } else {
           half2* a0 = reinterpret_cast<half2*>(&sh_code0[8 * enc[2 * i + 0] + lane]);
           half2* a1 = reinterpret_cast<half2*>(&sh_code1[8 * enc[2 * i + 1] + lane]);
