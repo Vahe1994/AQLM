@@ -151,12 +151,20 @@ export SAVE_PATH=/path/to/save/quantized/model/
 export WANDB_PROJECT=MY_AQ_EXPS
 export WANDB_NAME=COOL_EXP_NAME
 
-python main.py $MODEL_PATH $DATASET_PATH --nsamples=1024 \
- --num_codebooks=1 --nbits_per_codebook=16 --in_group_size=8 \
- --relative_mse_tolerance=0.01 --finetune_relative_mse_tolerance=0.001 \
- --finetune_batch_size=32 --local_batch_size=1 --offload_activations \
- --wandb --save $SAVE_PATH
-
+python main.py $MODEL_PATH $DATASET_PATH \
+ --nsamples=1024 \
+ --val_size=128 \
+ --num_codebooks=1 \
+ --nbits_per_codebook=16 \
+ --in_group_size=8 \
+ --relative_mse_tolerance=0.01 \
+ --finetune_batch_size=32 \
+ --finetune_max_epochs=10 \
+ --finetune_early_stop=3 \
+ --local_batch_size=1 \
+ --offload_activations \
+ --wandb \
+ --save $SAVE_PATH
 ```
 
 Main CLI arguments:
@@ -173,7 +181,7 @@ Main CLI arguments:
 - `--local_batch_size` - when accumulating finetune_batch_size, process this many samples per GPU per forward pass (affects GPU RAM usage)
 - `--relative_mse_tolerance`- (for initial calibration) - stop training when (current_epoch_mse / previous_epoch_mse) > (1 - relative_mse_tolerance)
 - `--finetune_max_epochs` - maximal number of passes through calibration data on block tuning.
-- `"--finetune_early_stop` -  maximal number of passes through calibration data without improvement on validation.
+- `--finetune_early_stop` -  maximal number of passes through calibration data without improvement on validation.
 - `--offload_activations` -- during calibration, move activations from GPU memory to RAM. This reduces VRAM usage while slowing calibration by ~10% (depending on your hardware). 
 - `--save` -- path to save/load quantized model. (see also: `--load`)
 - `--wandb` - if this parameter is set, the code will log results to wandb
@@ -203,11 +211,8 @@ python finetune.py \
   --early_stop=3 \
   --batch_size=8 \
   --microbatch_size=4 \
-  \
   --temperature=1.0 \
-  \
   --save $DATA_PATH \
-  \
   --gradient_checkpointing
 ```
 
@@ -216,7 +221,8 @@ Main CLI arguments:
 - `--quant_model` - path to quantized model weights.
 - `--dataset` - path or name of the calibration dataset
 - `--nsamples` - the number of calibration data _sequences_ (train + validation). If this parameter is not set, take all calibration data avaialble.
-- `--val_size` - the number of validation sequences for early stopping on block finetuning. By default equal to 0. Must be smaller than `--nsamples`.
+- `--val_size` - the number of validation sequences for early stopping on end-to-end finetuning. By default equal to 0. Must be smaller than `--nsamples`.
+- `--gradient_checkpointing` - whether to use gradient checkpointing. Reduces peak memory usage at the cost of longer runtime.
 
 **Note** for larger models one would need multi-GPU training. At the moment, FSDP training is not implemented and the model is finetuned on a single process with parameters sharded across available devices.
 
