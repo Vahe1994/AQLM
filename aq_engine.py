@@ -73,16 +73,7 @@ class AQEngine(nn.Module):
             replicas = torch.nn.parallel.replicate(self, args.devices)
             replicas[0] = self
 
-        reference_weight = self.layer.weight.detach().double()
-        target_norm_squared = (
-                (reference_weight @ self.XTX.double()).flatten() @ reference_weight.flatten()
-                / len(reference_weight)
-        ).item()  # if does not work: consider using loss after 1st epoch instead of this
-        del reference_weight
-        print(f"Prediction norm squared: {target_norm_squared}")
-
-        dynamic_regularizer_coefficient = args.info_regularizer * target_norm_squared
-
+        dynamic_regularizer_coefficient = 0.0
         previous_best_loss = float("inf")  # for early stopping
         for epoch in range(args.max_epochs):
             # train codebooks and scales
@@ -95,6 +86,7 @@ class AQEngine(nn.Module):
                 if not torch.isfinite(loss).item():
                     raise ValueError(f"Quantization loss is {loss}")
 
+                dynamic_regularizer_coefficient = args.info_regularizer * loss.item()
                 if step == 0 and args.relative_mse_tolerance is not None:
                     full_loss = loss.item() + self._compute_regularizer_penalty(dynamic_regularizer_coefficient, args)
                     print(f"Full loss: {full_loss:.5f} = {loss.item():.9f} (mse) + {full_loss - loss.item():.9f} (reg)")
