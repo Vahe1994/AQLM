@@ -124,7 +124,8 @@ AQLM quantization takes considerably longer to calibrate than simpler quantizati
 
 For instance, quantizing a 7B model with default configuration takes about 1 day on a single A100 gpu. Similarly, quantizing a 70B model on a single GPU would take 10-14 days. If you have multiple GPUs with fast interconnect, you can run AQLM multi-gpu to speed up comparison - simply set CUDA_VISIBLE_DEVICES for multiple GPUs. Quantizing 7B model on two gpus reduces quantization time to ~14.5 hours. Similarly, quantizing a 70B model on 8 x A100 GPUs takes 3 days 18 hours.
 
-If you need to speed up quantization without adding more GPUs, you may also increase --relative_mse_tolerance , --finetune_relative_mse_tolerance or set --init_max_points_per_centroid . However, that usually comes at a cost of reduced model accuracy.
+If you need to speed up quantization without adding more GPUs, you may also increase `--relative_mse_tolerance` or set `--init_max_points_per_centroid` or limit `--finetune_max_epochs`. 
+However, that usually comes at a cost of reduced model accuracy.
 
 ### Model downloading
 The code requires the LLaMA model to be downloaded in Huggingface format and saved locally. The scripts below assume that `$TRANSFORMERS_CACHE` variable points to the Huggingface Transformers cache folder.
