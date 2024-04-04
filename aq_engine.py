@@ -73,7 +73,7 @@ class AQEngine(nn.Module):
             replicas = torch.nn.parallel.replicate(self, args.devices)
             replicas[0] = self
 
-        dynamic_regularizer_coefficient = 0.0
+        dynamic_regularizer_coefficient = None
         previous_best_loss = float("inf")  # for early stopping
         for epoch in range(args.max_epochs):
             # train codebooks and scales
@@ -85,8 +85,9 @@ class AQEngine(nn.Module):
 
                 if not torch.isfinite(loss).item():
                     raise ValueError(f"Quantization loss is {loss}")
+                if dynamic_regularizer_coefficient is None:
+                    dynamic_regularizer_coefficient = args.info_regularizer * loss.item()  # scale with initial mse
 
-                dynamic_regularizer_coefficient = args.info_regularizer * loss.item()
                 if step == 0 and args.relative_mse_tolerance is not None:
                     full_loss = loss.item() + self._compute_regularizer_penalty(dynamic_regularizer_coefficient, args)
                     print(f"Full loss: {full_loss:.5f} = {loss.item():.9f} (mse) + {full_loss - loss.item():.9f} (reg)")
@@ -116,7 +117,7 @@ class AQEngine(nn.Module):
                 code_penalties=code_penalties,
                 verbose=True,
             )
-            print("Entropy before beam search:", _calculate_code_entropy(
+            print("Entropy after beam search:", _calculate_code_entropy(
                 self.quantized_weight.codes, codebook_size=2 ** args.nbits_per_codebook).mean().item())
 
         return self.quantized_weight
