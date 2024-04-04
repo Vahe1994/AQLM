@@ -89,8 +89,9 @@ class AQEngine(nn.Module):
                     dynamic_regularizer_coefficient = args.info_regularizer * loss.item()  # scale with initial mse
 
                 if step == 0 and args.relative_mse_tolerance is not None:
-                    full_loss = loss.item() + self._compute_regularizer_penalty(dynamic_regularizer_coefficient, args)
-                    print(f"Full loss: {full_loss:.5f} = {loss.item():.9f} (mse) + {full_loss - loss.item():.9f} (reg)")
+                    penalty = self._compute_regularizer_penalty(dynamic_regularizer_coefficient, args)
+                    full_loss = loss.item() + penalty
+                    print(f"Full loss: {full_loss:.5f} = {loss.item():.9f} (mse) + {penalty:.9f} (reg)")
                     if full_loss / previous_best_loss > (1.0 - args.relative_mse_tolerance):
                         return self.quantized_weight  # early stopping; no updates after last epoch's beam search
                     previous_best_loss = min(previous_best_loss, full_loss)
@@ -231,9 +232,8 @@ class AQEngine(nn.Module):
             self.quantized_weight.codes, codebook_size=2 ** args.nbits_per_codebook,
             regularizer=regularizer_coefficient)
         per_channel_regularizers = code_penalties[codebook_ids, self.quantized_weight.codes].sum(
-            dim=(-2, -1))  # [beam_size, num_out_groups]
-        del codebook_ids
-        return regularizer_coefficient * per_channel_regularizers.mean().item()
+            dim=(-2, -1))  # [num_out_groups]
+        return per_channel_regularizers.mean().item()
 
 
 def replace_parameter_(module: nn.Module, name: str, new_value: torch.Tensor):
