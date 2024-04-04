@@ -793,6 +793,11 @@ if __name__ == "__main__":
         help="Skip model quantization and immediately evaluate the loaded model",
     )
     parser.add_argument(
+        "--skip_evaluation",
+        action="store_true",
+        help="Skip model evaluation",
+    )
+    parser.add_argument(
         "--attn_implementation",
         type=str,
         default=None,
@@ -859,24 +864,25 @@ if __name__ == "__main__":
         print("\n============ Quantizing model... ============")
         quantize_model(model, args)
 
-    print("\n============ Evaluating perplexity... ============")
-    torch.cuda.reset_peak_memory_stats()
-    datasets = ["wikitext2", "c4"]
-    if args.new_eval:
-        datasets = ["wikitext2", "c4-new"]
-    for dataset in datasets:
-        testloader = get_loaders(
-            dataset,
-            seed=args.seed,
-            model_path=args.model_path,
-            seqlen=model.seqlen,
-            eval_mode=True,
-            use_fast_tokenizer=args.use_fast_tokenizer,
-            trust_remote_code=args.trust_remote_code
-        )
-        args.dataset_name = dataset
-        perplexity_eval(model, testloader, args)
+    if not args.skip_evaluation:
+        print("\n============ Evaluating perplexity... ============")
+        torch.cuda.reset_peak_memory_stats()
+        datasets = ["wikitext2", "c4"]
+        if args.new_eval:
+            datasets = ["wikitext2", "c4-new"]
+        for dataset in datasets:
+            testloader = get_loaders(
+                dataset,
+                seed=args.seed,
+                model_path=args.model_path,
+                seqlen=model.seqlen,
+                eval_mode=True,
+                use_fast_tokenizer=args.use_fast_tokenizer,
+                trust_remote_code=args.trust_remote_code
+            )
+            args.dataset_name = dataset
+            perplexity_eval(model, testloader, args)
 
-    print(f"eval: {torch.cuda.max_memory_allocated()=:,}")
-    if args.wandb:
-        wandb.log({"max_cuda_mem_eval": round(torch.cuda.max_memory_allocated() / 1e9, 2)})
+        print(f"eval: {torch.cuda.max_memory_allocated()=:,}")
+        if args.wandb:
+            wandb.log({"max_cuda_mem_eval": round(torch.cuda.max_memory_allocated() / 1e9, 2)})
