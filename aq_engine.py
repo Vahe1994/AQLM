@@ -22,7 +22,7 @@ class AQEngine(nn.Module):
         self.device = layer.weight.device
         self.columns = self.layer.weight.data.shape[1]
         self.register_buffer(
-            "XTX", torch.zeros((self.columns, self.columns), dtype=accumultor_dtype, device=self.device)
+            "XTX", torch.zeros((self.columns, self.columns), dtype=accumulator_dtype, device=self.device)
         )
         self.quantized_weight: Optional[QuantizedWeight] = None
         self.nsamples = 0
