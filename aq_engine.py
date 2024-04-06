@@ -16,7 +16,7 @@ from src.utils import ellipsis
 class AQEngine(nn.Module):
     """A wrapper class that runs AQ training for a single linear layer. All the important math is in aq.py"""
 
-    def __init__(self, layer: nn.Linear, accumultor_dtype: torch.dtype = torch.float64):
+    def __init__(self, layer: nn.Linear, accumulator_dtype: torch.dtype = torch.float64):
         super().__init__()
         self.layer = layer
         self.device = layer.weight.device
