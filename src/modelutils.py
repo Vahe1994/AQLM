@@ -245,7 +245,16 @@ def load_quantized_model(model, load_path):
                     continue
                 codes = quantized_weight.codes
                 del quantized_weight.codes
-                quantized_weight.code_container = nn.ParameterList([codes])
+                quantized_weight.orig_codes_dtype = codes.dtype
+                quantized_weight.orig_codes_shape = codes.shape
+                quantized_weight.codes_container = nn.ParameterList(
+                    [
+                        nn.Parameter(
+                            torch.as_tensor(codes.untyped_storage(), dtype=torch.float32),
+                            requires_grad=False,
+                        )
+                    ]
+                ) 
                 assert hasattr(quantized_weight, 'codes')  # via @property
         model.model.layers[layer_index] = quantized_block
 
