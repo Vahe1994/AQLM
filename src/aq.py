@@ -105,11 +105,29 @@ class QuantizedWeight(nn.Module):
         self.codebooks = nn.Parameter(
             codebooks, requires_grad=True
         )  # [num_codebooks, codebook_size, out_group_size, in_group_size]
-        self.code_container = nn.ParameterList([nn.Parameter(codes, requires_grad=False)])  #  [num_out_groups, num_in_groups, num_codebooks]])
+        
+        self.orig_codes_dtype = codes.dtype
+        self.orig_codes_shape = codes.shape
+        
+        self.codes_container = nn.ParameterList(
+            [
+                nn.Parameter(
+                    torch.as_tensor(codes.untyped_storage(), device=codes.device, dtype=torch.float32),
+                    requires_grad=False,
+                )
+            ]
+        )  #  [num_out_groups, num_in_groups, num_codebooks]])
 
     @property
     def codes(self):
-        return self.code_container[0]
+        if self.codes_container[0].dtype != torch.float32:
+            print("QuantizedWeight was broken: code_container was cast to a different dtype.")
+            raise RuntimeError()
+        codes = self.codes_container[0]
+        return torch.as_tensor(
+            codes.untyped_storage(), device=codes.device, dtype=self.orig_codes_dtype
+        ).view(*self.orig_codes_shape)
+
 
     def get_codebooks(self) -> torch.Tensor:
         """Get quantization codebooks or reconstruct them from second level quantization (see codebook_values_nbits)"""
