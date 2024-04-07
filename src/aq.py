@@ -105,7 +105,11 @@ class QuantizedWeight(nn.Module):
         self.codebooks = nn.Parameter(
             codebooks, requires_grad=True
         )  # [num_codebooks, codebook_size, out_group_size, in_group_size]
-        self.codes = nn.Parameter(codes, requires_grad=False)  #  [num_out_groups, num_in_groups, num_codebooks]
+        self.code_container = nn.ParameterList([nn.Parameter(codes, requires_grad=False)])  #  [num_out_groups, num_in_groups, num_codebooks]])
+
+    @property
+    def codes(self):
+        return self.code_container[0]
 
     def get_codebooks(self) -> torch.Tensor:
         """Get quantization codebooks or reconstruct them from second level quantization (see codebook_values_nbits)"""
