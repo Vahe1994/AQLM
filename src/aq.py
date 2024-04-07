@@ -105,10 +105,10 @@ class QuantizedWeight(nn.Module):
         self.codebooks = nn.Parameter(
             codebooks, requires_grad=True
         )  # [num_codebooks, codebook_size, out_group_size, in_group_size]
-        
+
+        codes = codes.to(torch.int32, copy=True)  # ensure zero offset and contiguous layout
         self.orig_codes_dtype = codes.dtype
         self.orig_codes_shape = codes.shape
-        
         self.codes_container = nn.ParameterList(
             [
                 nn.Parameter(
@@ -120,13 +120,14 @@ class QuantizedWeight(nn.Module):
 
     @property
     def codes(self):
-        if self.codes_container[0].dtype != torch.float32:
+        codes = self.codes_container[0]
+        if codes.dtype != torch.float32 or codes.ndim != 1 or not codes.is_contiguous():
             print("QuantizedWeight was broken: code_container was cast to a different dtype.")
             raise RuntimeError()
-        codes = self.codes_container[0]
+        offset = codes.storage_offset()
         return torch.as_tensor(
             codes.untyped_storage(), device=codes.device, dtype=self.orig_codes_dtype
-        ).view(*self.orig_codes_shape)
+        )[offset: offset + len(codes)].view(*self.orig_codes_shape)
 
 
     def get_codebooks(self) -> torch.Tensor:

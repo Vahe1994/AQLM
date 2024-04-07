@@ -243,7 +243,7 @@ def load_quantized_model(model, load_path):
             if isinstance(quantized_weight, QuantizedWeight):
                 if hasattr(quantized_weight, 'code_container'):
                     continue
-                codes = quantized_weight.codes
+                codes = quantized_weight.codes.to(torch.int32, copy=True)
                 del quantized_weight.codes
                 quantized_weight.orig_codes_dtype = codes.dtype
                 quantized_weight.orig_codes_shape = codes.shape
