@@ -287,10 +287,11 @@ def quantize_aq(
                 print("curent_avg_bits", overall_bits / model_number_of_params)
                 quantizers["model.layers.%d.%s" % (layer_index, sublayer_name)] = ()  # to be updated
 
+            del aq_handlers
+            assert not loaded_layer
 
             print("PREPARING TO FINETUNE")
             print(layer)
-            assert not loaded_layer
             layer = layer.to(dtype=torch.float32)
             with using_tf32(enabled=True):
                 layer = finetune_groupwise(
@@ -332,7 +333,6 @@ def quantize_aq(
 
         layers[layer_index] = layer.to(layer_device_original)
         del layer
-        del aq_handlers
         torch.cuda.empty_cache()
 
         inps, outs = outs, inps
@@ -353,6 +353,8 @@ def quantize_aq(
     if args.save:
         torch.save(vars(args), os.path.join(args.save, "args.pt"))
         save_not_quantized_weights(model, args.save)
+        if args.on_save:
+            exec(args.on_save)  # a callback e.g. to save progress in slurm or similar distributed infrastructure
 
     if args.wandb:
         wandb.log({"max_cuda_mem_quantize": round(torch.cuda.max_memory_allocated() / 1e9, 2)})
@@ -621,6 +623,9 @@ if __name__ == "__main__":
         action="store_true",
         help="If true, search for previously saved layers and reuse them to save time. Requires --save path.",
     )
+    parser.add_argument("--on_save", type=str, default=None,
+                        help="Optional callback (python code string) to call after each saved layer. Example: when "
+                             "training on preemptible compute, upload partially quantized model and --resume later.")
     parser.add_argument("--devices", metavar="N", type=str, nargs="+", default=None, help="List of devices")
     parser.add_argument(
         "--dtype",
