@@ -203,8 +203,17 @@ def quantize_aq(
         else:
             sequential = [list(find_sublayers(layer).keys())]
 
+        loaded_layer = False
+        if args.resume:
+            assert args.save is not None, "using --resume requires a --save path to resume from"
+            layer_save_path = os.path.join(args.save, f"{layer_index}.pth")
+            if os.path.exists(layer_save_path):
+                print(f"Loading layer {layer_index} from {layer_save_path}")
+                layer = torch.load(layer_save_path, map_location=args.devices[0])
+                loaded_layer = True
+
         # prepare validation  outputs
-        if run_validation:
+        if run_validation and not loaded_layer:   # note: if we skip validation, val_outs will still be updated later
             if len(args.devices) == 1:
                 assert len(val_inps) == len(val_outs) == 1
                 update_outs(layer, val_inps[0], val_outs[0], compute_mse=not args.skip_out_loss, **forward_args)
@@ -214,6 +223,9 @@ def quantize_aq(
                 )
 
         for names in sequential:
+            if loaded_layer:
+                print("Skipping quantization: loaded a previously quantized layer")
+                break
             if len(args.devices) == 1:
                 assert len(inps) == len(outs) == 1  # number of per-device inputs/outputs
                 aq_handlers = init_aq_engines(
@@ -275,8 +287,10 @@ def quantize_aq(
                 print("curent_avg_bits", overall_bits / model_number_of_params)
                 quantizers["model.layers.%d.%s" % (layer_index, sublayer_name)] = ()  # to be updated
 
+
             print("PREPARING TO FINETUNE")
             print(layer)
+            assert not loaded_layer
             layer = layer.to(dtype=torch.float32)
             with using_tf32(enabled=True):
                 layer = finetune_groupwise(
@@ -290,7 +304,8 @@ def quantize_aq(
                 )
             layer = layer.to(dtype=layer_dtype_original)
             print("FINISHED FINETUNING")
-        if args.save:
+
+        if args.save and not loaded_layer:
             os.makedirs(args.save, exist_ok=True)
             layer_save_path = os.path.join(args.save, f"{layer_index}.pth")
             print(f"Saving layer {layer_index}... to {layer_save_path}")
@@ -601,6 +616,11 @@ if __name__ == "__main__":
     )
     parser.add_argument("--load", type=str, default=None, help="Path to load quantized statistics.")
     parser.add_argument("--save", type=str, default=None, help="Path to save quantized statistics.")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="If true, search for previously saved layers and reuse them to save time. Requires --save path.",
+    )
     parser.add_argument("--devices", metavar="N", type=str, nargs="+", default=None, help="List of devices")
     parser.add_argument(
         "--dtype",
