@@ -44,7 +44,7 @@ def quantize_model(model, args):
         seed=args.seed,
         model_path=args.model_path,
         seqlen=model.seqlen,
-        use_fast_tokenizer=args.use_fast_tokenizer
+        use_fast_tokenizer=args.use_fast_tokenizer,
     )
     if args.val_size > 0:
         all_ids = torch.randperm(len(dataloader))
@@ -855,9 +855,12 @@ if __name__ == "__main__":
 
     print("\n============ Load model... ============")
     model = get_model(
-        args.model_path, args.load, args.dtype, args.model_seqlen, 
-        attn_implementation=args.attn_implementation, 
-        trust_remote_code=args.trust_remote_code
+        args.model_path,
+        args.load,
+        args.dtype,
+        args.model_seqlen,
+        attn_implementation=args.attn_implementation,
+        trust_remote_code=args.trust_remote_code,
     ).train(False)
 
     if not args.load and not args.no_quant:
@@ -878,7 +881,7 @@ if __name__ == "__main__":
                 seqlen=model.seqlen,
                 eval_mode=True,
                 use_fast_tokenizer=args.use_fast_tokenizer,
-                trust_remote_code=args.trust_remote_code
+                trust_remote_code=args.trust_remote_code,
             )
             args.dataset_name = dataset
             perplexity_eval(model, testloader, args)

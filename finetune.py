@@ -296,6 +296,18 @@ if __name__ == "__main__":
         choices=[None, "auto"],
         help="accelerate device map",
     )
+    parser.add_argument(
+        "--use_fast_tokenizer",
+        action="store_true",
+        help="Whether to use fast tokenizer.",
+    )
+    parser.add_argument(
+        "--trust_remote_code",
+        action="store_true",
+        help="Whether to trust remote code.",
+    )
+
+
     args = parser.parse_args()
     args.microbatch_size = args.microbatch_size or args.batch_size
     # get device
@@ -312,6 +324,8 @@ if __name__ == "__main__":
         seed=args.seed,
         model_path=args.base_model,
         seqlen=args.model_seqlen,
+        use_fast_tokenizer=args.use_fast_tokenizer,
+        trust_remote_code=args.trust_remote_code,
     )
     if args.val_size > 0:
         all_ids = torch.randperm(len(dataloader))
@@ -322,7 +336,14 @@ if __name__ == "__main__":
         train_dataloader = dataloader
         val_dataloader = None
     # create original model
-    orig_model = get_model(args.base_model, None, args.dtype, args.model_seqlen, args.device_map)
+    orig_model = get_model(
+        args.base_model,
+        None,
+        args.dtype,
+        args.model_seqlen,
+        device_map=args.device_map,
+        trust_remote_code=args.trust_remote_code,
+    )
     if not args.device_map:
         orig_model = orig_model.to(device)
     # cache logits
@@ -333,7 +354,14 @@ if __name__ == "__main__":
         orig_val_hiddens = None
     del orig_model
     torch.cuda.empty_cache()
-    quant_model = get_model(args.base_model, args.quant_model, args.dtype, args.model_seqlen, args.device_map)
+    quant_model = get_model(
+        args.base_model,
+        args.quant_model,
+        args.dtype,
+        args.model_seqlen,
+        device_map=args.device_map,
+        trust_remote_code=args.trust_remote_code,
+    )
     if not args.device_map:
         quant_model = quant_model.to(device)
 
@@ -375,6 +403,8 @@ if __name__ == "__main__":
             model_path=args.base_model,
             seqlen=quant_model.seqlen,
             eval_mode=True,
+            use_fast_tokenizer=args.use_fast_tokenizer,
+            trust_remote_code=args.trust_remote_code
         )
         args.dataset_name = dataset
         perplexity_eval(quant_model, testloader, args)
