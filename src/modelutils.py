@@ -39,17 +39,17 @@ def dispatch_quantized_model(model):
 
 
 def get_model(
-    model_path, 
-    load_quantized=None, 
+    model_path,
+    load_quantized=None,
     dtype="auto",
-    model_seqlen=2048, 
-    device_map=None, 
+    model_seqlen=2048,
+    device_map=None,
     attn_implementation=None,
     trust_remote_code=None,
 ):
     if dtype == "auto":
         dtype = (
-            AutoConfig.from_pretrained(model_path, trust_remote_code=True).torch_dtype or "auto"
+            AutoConfig.from_pretrained(model_path, trust_remote_code=trust_remote_code).torch_dtype or "auto"
         )  # force transformers 4.29.2 to follow the same rules as 4.30.x
     else:
         dtype = getattr(torch, dtype)
