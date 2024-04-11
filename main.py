@@ -74,11 +74,10 @@ def get_inps(
 
     if isinstance(data, torch.Tensor) and data.shape[0] == 1:  # given a single long tensor, split it into sequences
         assert data.ndim == 2, "data must be either a single tensor with a long sequence or a list of pre-cut sequences"
-        data = [
-            data[:, i * model_seqlen: (i + 1) * model_seqlen].to(device)
-            for i in range(data.numel() // model_seqlen)
-        ]
-        print(f"Got {len(data)} sequences of {model_seqlen} tokens, dropped last {data.numel() % model_seqlen} tokens")
+        num_sequences, num_tokens_dropped = data.numel() // model_seqlen, data.numel() % model_seqlen
+        data = [data[:, i * model_seqlen: (i + 1) * model_seqlen].to(device) for i in range(num_sequences)]
+        print(f"Got {len(data)} sequences of {model_seqlen} tokens, dropped last {num_tokens_dropped} tokens")
+        del num_sequences, num_tokens_dropped
     else:
         assert all(sequence.shape[1] == model_seqlen for sequence in data)
 
