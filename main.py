@@ -79,7 +79,7 @@ def get_inps(
             for i in range(0, data.numel() // model_seqlen)
         ]
     else:
-        assert max(sequence.shape[1] for sequence in data) <= model_seqlen
+        assert all(sequence.shape[1] == model_seqlen for sequence in data)
 
     emb = model.get_input_embeddings()
     emb_device = emb.weight.device
