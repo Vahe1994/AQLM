@@ -42,7 +42,7 @@ def kl_div(student_hiddens, teacher_hiddens, temp):
 
 
 @torch.no_grad()
-def evalulate(model, lm_head, loader, hiddens, batch_size):
+def evaluate(model, lm_head, loader, hiddens, batch_size):
     model.eval()
     loss_numerator, loss_denominator = 0, 0
     # convert tensor to list
@@ -80,7 +80,7 @@ def finetune(model, train_loader, train_hiddens, args, device, val_loader=None, 
     run_validation = val_loader is not None and val_hiddens is not None
     # validate before training
     if run_validation:
-        valid_loss_epoch = evalulate(model, lm_head, val_loader, val_hiddens, args.microbatch_size)
+        valid_loss_epoch = evaluate(model, lm_head, val_loader, val_hiddens, args.microbatch_size)
         print(f"Evaluation before training.")
         print(f"valid loss={valid_loss_epoch:.3e}\t")
         best_loss = valid_loss_epoch
@@ -125,7 +125,7 @@ def finetune(model, train_loader, train_hiddens, args, device, val_loader=None, 
         train_loss_epoch = loss_numerator / loss_denominator
 
         if run_validation:
-            valid_loss_epoch = evalulate(model, lm_head, val_loader, val_hiddens, args.microbatch_size)
+            valid_loss_epoch = evaluate(model, lm_head, val_loader, val_hiddens, args.microbatch_size)
 
         # log losses in the end of the epoch
         print("-" * 10)
