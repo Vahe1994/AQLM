@@ -47,9 +47,7 @@ def get_wikitext2(nsamples, seqlen, tokenizer, eval_mode=False):
             i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
             j = i + seqlen
             inp = trainenc.input_ids[:, i:j]
-            tar = inp.clone()
-            tar[:, :-1] = -100
-            trainloader.append((inp, tar))
+            trainloader.append(inp)
         return trainloader
     else:
         testdata = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
@@ -66,9 +64,7 @@ def get_ptb(nsamples, seqlen, tokenizer, eval_mode=False):
             i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
             j = i + seqlen
             inp = trainenc.input_ids[:, i:j]
-            tar = inp.clone()
-            tar[:, :-1] = -100
-            trainloader.append((inp, tar))
+            trainloader.append(inp)
         return trainloader
     else:
         valdata = load_dataset("ptb_text_only", "penn_treebank", split="validation")
@@ -95,9 +91,7 @@ def get_c4(nsamples, seqlen, tokenizer, eval_mode=False):
             i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
             j = i + seqlen
             inp = trainenc.input_ids[:, i:j]
-            tar = inp.clone()
-            tar[:, :-1] = -100
-            trainloader.append((inp, tar))
+            trainloader.append(inp)
         return trainloader
 
     else:
@@ -136,9 +130,7 @@ def get_ptb_new(nsamples, seqlen, tokenizer, eval_mode=False):
             i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
             j = i + seqlen
             inp = trainenc.input_ids[:, i:j]
-            tar = inp.clone()
-            tar[:, :-1] = -100
-            trainloader.append((inp, tar))
+            trainloader.append(inp)
         return trainloader
     else:
         testdata = load_dataset("ptb_text_only", "penn_treebank", split="test")
@@ -165,9 +157,7 @@ def get_c4_new(nsamples, seqlen, tokenizer, eval_mode=False):
             i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
             j = i + seqlen
             inp = trainenc.input_ids[:, i:j]
-            tar = inp.clone()
-            tar[:, :-1] = -100
-            trainloader.append((inp, tar))
+            trainloader.append(inp)
         return trainloader
     else:
         valdata = load_dataset(
@@ -182,7 +172,16 @@ def get_c4_new(nsamples, seqlen, tokenizer, eval_mode=False):
         return valenc
 
 
-def get_loaders(name, nsamples=128, seed=0, seqlen=2048, eval_mode=False, model_path=None):
+def get_loaders(
+    name,
+    nsamples=128,
+    seed=0,
+    seqlen=2048,
+    eval_mode=False,
+    model_path=None,
+    use_fast_tokenizer=False,
+    trust_remote_code=None,
+):
     """
     Loads and prepares data for a Transformers model.
     Args:
@@ -197,6 +196,8 @@ def get_loaders(name, nsamples=128, seed=0, seqlen=2048, eval_mode=False, model_
             see https://github.com/huggingface/transformers/issues/22222#issuecomment-1488578722 for reasons.
         eval_mode (bool, optional). defines slice selection for 'wikitext2', 'c4', 'ptb' datasets.
         leave False for train slice.
+        use_fast_tokenizer: whether to use fast tokenizer
+        trust_remote_code: whether to trust remote code
     Returns:
         data (torch.utils.data.DataLoader or iterable): Data iterable for the dataset.
     Note:
@@ -222,7 +223,9 @@ def get_loaders(name, nsamples=128, seed=0, seqlen=2048, eval_mode=False, model_
     else:
         # for datasets requiring tokenization
         if "llama" in model_path.lower():
-            tokenizer = LlamaTokenizer.from_pretrained(model_path, use_fast=False)
+            tokenizer = LlamaTokenizer.from_pretrained(
+                model_path, use_fast=use_fast_tokenizer, trust_remote_code=trust_remote_code
+            )
 
             # fix for transformer 4.28.0.dev0 compatibility
             if tokenizer.bos_token_id != 1 or tokenizer.eos_token_id != 2:
@@ -234,7 +237,9 @@ def get_loaders(name, nsamples=128, seed=0, seqlen=2048, eval_mode=False, model_
                     pass
                     print(f"bos/eos tokens unchanged: {tokenizer.bos_token_id=},  {tokenizer.eos_token_id=}")
         else:
-            tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False, trust_remote_code=True)
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_path, use_fast=use_fast_tokenizer, trust_remote_code=trust_remote_code
+            )
 
         if name.lower() == "wikitext2":
             data = get_wikitext2(nsamples, seqlen, tokenizer, eval_mode=eval_mode)
