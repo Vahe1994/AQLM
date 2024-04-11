@@ -47,9 +47,7 @@ def get_wikitext2(nsamples, seqlen, tokenizer, eval_mode=False):
             i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
             j = i + seqlen
             inp = trainenc.input_ids[:, i:j]
-            tar = inp.clone()
-            tar[:, :-1] = -100
-            trainloader.append((inp, tar))
+            trainloader.append(inp)
         return trainloader
     else:
         testdata = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
@@ -66,9 +64,7 @@ def get_ptb(nsamples, seqlen, tokenizer, eval_mode=False):
             i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
             j = i + seqlen
             inp = trainenc.input_ids[:, i:j]
-            tar = inp.clone()
-            tar[:, :-1] = -100
-            trainloader.append((inp, tar))
+            trainloader.append(inp)
         return trainloader
     else:
         valdata = load_dataset("ptb_text_only", "penn_treebank", split="validation")
@@ -95,9 +91,7 @@ def get_c4(nsamples, seqlen, tokenizer, eval_mode=False):
             i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
             j = i + seqlen
             inp = trainenc.input_ids[:, i:j]
-            tar = inp.clone()
-            tar[:, :-1] = -100
-            trainloader.append((inp, tar))
+            trainloader.append(inp)
         return trainloader
 
     else:
