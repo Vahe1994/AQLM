@@ -403,13 +403,13 @@ def perplexity_eval(model: PreTrainedModel, testenc: torch.LongTensor, args: Nam
         loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
         neg_log_likelihood = loss.float() * args.model_seqlen
         nlls.append(neg_log_likelihood)
-    ppl = torch.exp(torch.stack(nlls).sum() / (nsamples * args.model_seqlen))
-    print(f"\n{args.dataset_name} perplexity = {ppl.item():.4f}\n")
+    ppl = torch.exp(torch.stack(nlls).sum().item() / (nsamples * args.model_seqlen))
+    print(f"\n{args.dataset_name} perplexity = {ppl:.4f}\n")
 
     get_model_head(model).to(torch.device("cpu"))
 
     if args.wandb:
-        wandb.log({args.dataset_name: ppl.item()})
+        wandb.log({args.dataset_name: ppl})
 
     model.config.use_cache = use_cache
     return ppl
