@@ -42,9 +42,10 @@ def kl_div(student_hiddens, teacher_hiddens, temp):
 
 
 @torch.no_grad()
-def evalulate(model, lm_head, loader, hiddens, batch_size):
+def evaluate(model, lm_head, loader, hiddens, batch_size):
     model.eval()
     loss_numerator, loss_denominator = 0, 0
+    device = next(model.parameters()).device
     # convert tensor to list
     for i in range(0, len(loader), batch_size):
         batch_ids = range(i, i + batch_size)
@@ -80,7 +81,7 @@ def finetune(model, train_loader, train_hiddens, args, device, val_loader=None, 
     run_validation = val_loader is not None and val_hiddens is not None
     # validate before training
     if run_validation:
-        valid_loss_epoch = evalulate(model, lm_head, val_loader, val_hiddens, args.microbatch_size)
+        valid_loss_epoch = evaluate(model, lm_head, val_loader, val_hiddens, args.microbatch_size)
         print(f"Evaluation before training.")
         print(f"valid loss={valid_loss_epoch:.3e}\t")
         best_loss = valid_loss_epoch
@@ -125,7 +126,7 @@ def finetune(model, train_loader, train_hiddens, args, device, val_loader=None, 
         train_loss_epoch = loss_numerator / loss_denominator
 
         if run_validation:
-            valid_loss_epoch = evalulate(model, lm_head, val_loader, val_hiddens, args.microbatch_size)
+            valid_loss_epoch = evaluate(model, lm_head, val_loader, val_hiddens, args.microbatch_size)
 
         # log losses in the end of the epoch
         print("-" * 10)
@@ -322,7 +323,7 @@ if __name__ == "__main__":
         train_dataloader = dataloader
         val_dataloader = None
     # create original model
-    orig_model = get_model(args.base_model, None, args.dtype, args.model_seqlen, args.device_map)
+    orig_model = get_model(args.base_model, None, args.dtype, args.device_map)
     if not args.device_map:
         orig_model = orig_model.to(device)
     # cache logits
@@ -333,7 +334,7 @@ if __name__ == "__main__":
         orig_val_hiddens = None
     del orig_model
     torch.cuda.empty_cache()
-    quant_model = get_model(args.base_model, args.quant_model, args.dtype, args.model_seqlen, args.device_map)
+    quant_model = get_model(args.base_model, args.quant_model, args.dtype, args.device_map)
     if not args.device_map:
         quant_model = quant_model.to(device)
 
@@ -365,15 +366,13 @@ if __name__ == "__main__":
         shutil.copy(os.path.join(args.quant_model, "args.pt"), os.path.join(args.save, "args.pt"))
 
     print("\n============ Evaluating perplexity... ============")
-    if args.eval_model_seqlen:
-        quant_model.seqlen = args.eval_model_seqlen
     torch.cuda.reset_peak_memory_stats()
     for dataset in args.eval_datasets:
         testloader = get_loaders(
             dataset,
             seed=args.seed,
             model_path=args.base_model,
-            seqlen=quant_model.seqlen,
+            seqlen=args.eval_model_seqlen or args.model_seqlen,
             eval_mode=True,
         )
         args.dataset_name = dataset

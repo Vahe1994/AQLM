@@ -162,9 +162,11 @@ python main.py $MODEL_PATH $DATASET_PATH \
  --finetune_batch_size=32 \
  --finetune_max_epochs=10 \
  --finetune_early_stop=3 \
+ --finetune_keep_best \
  --local_batch_size=1 \
  --offload_activations \
  --wandb \
+ --resume \
  --save $SAVE_PATH
 ```
 

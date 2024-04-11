@@ -116,7 +116,6 @@ def main():
     if args.load:
         print("Loading quantized model ...")
         lm.model = load_dequantized_model(lm.model, args.load)
-        lm.model.seqlen = args.model_seqlen
 
     results = evaluator.simple_evaluate(
         model=lm,
