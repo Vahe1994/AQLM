@@ -139,7 +139,7 @@ def get_inps(
         except CatcherExit:
             pass  # exit after catcher finished without running the rest of the model layers
 
-    assert cache["i"] == len(inps), (cache["i"], len(inps))
+    assert cache["i"] == sum(map(len, inps)), (cache["i"], list(map(len, inps)))
     torch.set_num_threads(saved_num_threads)
     layers[0] = layers[0].module
 
