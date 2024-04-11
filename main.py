@@ -306,6 +306,8 @@ def quantize_aq(
             layer_save_path = os.path.join(args.save, f"{layer_index}.pth")
             print(f"Saving layer {layer_index}... to {layer_save_path}")
             torch.save(layer, layer_save_path)
+            if args.on_save:
+                exec(args.on_save)  # a callback e.g. to save progress in slurm or similar distributed infrastructure
 
         if len(args.devices) == 1:
             assert len(inps) == len(outs) == 1
