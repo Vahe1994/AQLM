@@ -76,8 +76,9 @@ def get_inps(
         assert data.ndim == 2, "data must be either a single tensor with a long sequence or a list of pre-cut sequences"
         data = [
             data[:, i * model_seqlen: (i + 1) * model_seqlen].to(device)
-            for i in range(0, data.numel() // model_seqlen)
+            for i in range(data.numel() // model_seqlen)
         ]
+        print(f"Got {len(data)} sequences of {model_seqlen} tokens, dropped last {data.numel() % model_seqlen} tokens")
     else:
         assert all(sequence.shape[1] == model_seqlen for sequence in data)
 
