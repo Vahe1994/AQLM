@@ -514,7 +514,7 @@ def init_aq_engines_parallel(
         total_nsamples = sum(replica_nsamples)
         aq_handler.XTX = sum(
             (replica_handlers[i].XTX * (replica_nsamples[i] / total_nsamples)).to(devices[0], non_blocking=True)
-            for i in range(len(devices) )
+            for i in range(len(devices))
         )
         aq_handler.nsamples = total_nsamples
     return aq_handlers
