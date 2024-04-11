@@ -2,7 +2,7 @@ import os
 import time
 from argparse import Namespace
 from itertools import chain
-from typing import Any, Dict, Iterable, Optional, Sequence
+from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
 
 import torch
 import torch.nn as nn
@@ -34,7 +34,7 @@ except ModuleNotFoundError:
     has_wandb = False
 
 
-def quantize_model(model, args):
+def quantize_model(model: PreTrainedModel, args: Namespace):
     """main entry point to functions for model quantization"""
     tick = time.time()
     print("Loading data ...")
@@ -54,36 +54,32 @@ def quantize_model(model, args):
         train_dataloader = dataloader
         val_dataloader = None
 
-    results = quantize_aq(model, train_dataloader, args, val_dataloader)
+    results = quantize_aq(model, train_dataloader, val_dataloader, args)
     print(f"quantization time: {time.time() - tick:.1f}")
     return results
 
 
 @torch.no_grad()
 def get_inps(
-    model: PreTrainedModel, data_iterable: Iterable, args: Namespace, nsamples: Optional[int] = None
-) -> Sequence[torch.Tensor]:
+    model: PreTrainedModel, data: Sequence, seqlen: int, devices: Sequence[torch.device], offload_activations: bool
+) -> Tuple[Sequence[torch.Tensor], Dict]:
     """
     mocks model launch to collect inputs to the first model layer
     :returns: a list of torch tensors with activations for each device in args.devices.
     Each tensor has shape [nsample_per_device, seq_len, hid_size]
     """
     print("catching layer inputs from data", flush=True)
-
     layers = get_layers(model)
+    device = devices[0] if not offload_activations else torch.device("cpu")
 
-    nsamples = nsamples or args.nsamples or len(data_iterable)
-    device = args.devices[0] if not args.offload_activations else torch.device("cpu")
-    assert nsamples is not None
-
-    if isinstance(data_iterable, torch.Tensor):
-
-        def batch_generator(testenc, seqlen, nsamples):
-            for i in range(nsamples):
-                batch = testenc[:, (i * seqlen) : ((i + 1) * seqlen)].to(device)
-                yield batch
-
-        data_iterable = batch_generator(data_iterable, model.seqlen, nsamples)
+    if isinstance(data, torch.Tensor) and data.shape[0] == 1:  # given a single long tensor, split it into sequences
+        assert data.ndim == 2, "data must be either a single tensor with a long sequence or a list of pre-cut sequences"
+        data = [
+            data[:, start: start + model.seqlen].to(device)
+            for start in range(0, data.shape[1], model.seqlen)
+        ]
+    else:
+        assert max(sequence.shape[1] for sequence in data) <= seqlen
 
     emb = model.get_input_embeddings()
     emb_device = emb.weight.device
@@ -99,15 +95,15 @@ def get_inps(
     layers[0] = layers[0].to(device)
 
     dtype = next(iter(model.parameters())).dtype
-    nsamples_per_device = (nsamples - 1) // len(args.devices) + 1
+    nsamples_per_device = (len(data) - 1) // len(devices) + 1
     inps = [
         torch.zeros(
-            (min(nsamples_per_device, nsamples - i * nsamples_per_device), model.seqlen, model.config.hidden_size),
+            (min(nsamples_per_device, len(data) - i * nsamples_per_device), model.seqlen, model.config.hidden_size),
             dtype=dtype,
-            device=args.devices[i] if not args.offload_activations else "cpu",
-            pin_memory=args.offload_activations,
+            device=devices[i] if not offload_activations else "cpu",
+            pin_memory=offload_activations,
         )
-        for i in range(len(args.devices))
+        for i in range(len(devices))
     ]
     forward_arg_names = ["attention_mask", "position_ids"]
     if model.config.model_type.lower() in FALCON_TYPES:
@@ -133,7 +129,7 @@ def get_inps(
     layers[0] = Catcher(layers[0])
     saved_num_threads = torch.get_num_threads()
     torch.set_num_threads(min(16, saved_num_threads))
-    for batch_inps in data_iterable:
+    for batch_inps in data:
         try:
             if isinstance(batch_inps, (list, tuple)):
                 batch_inps, *_ = batch_inps
@@ -159,7 +155,7 @@ def get_inps(
 
 @torch.no_grad()
 def quantize_aq(
-    model: PreTrainedModel, dataloader: Iterable, args: Namespace, val_dataloader: Optional[Iterable] = None
+    model: PreTrainedModel, dataloader: Iterable, val_dataloader: Optional[Iterable], args: Namespace
 ):
     assert not torch.backends.cuda.matmul.allow_tf32
     print("\nStarting AQ quantization ...")
@@ -174,14 +170,13 @@ def quantize_aq(
         run_validation = False
         val_inps, val_outs = None, None
 
-    num_codebooks = args.num_codebooks
     use_cache = model.config.use_cache
     num_codebooks = args.num_codebooks
     model.config.use_cache = False
 
     quantizers = {}
     overall_bits = 0
-    model_number_of_params = 0
+    number_of_quantized_params = 0
     layers = get_layers(model)
 
     for layer_index in range(len(layers)):
@@ -199,7 +194,7 @@ def quantize_aq(
             forward_args[k] = v.to(args.devices[0]) if isinstance(v, torch.Tensor) else v
 
         if args.true_sequential:
-            sequential = get_sequential_groups(model, args.mlp_only)
+            sequential = get_sequential_groups(model)
         else:
             sequential = [list(find_sublayers(layer).keys())]
 
@@ -283,8 +278,8 @@ def quantize_aq(
 
                 weight_avg_bits = quantized_weight.estimate_nbits_per_parameter()
                 overall_bits += int(weight_avg_bits * torch.numel(aq_handlers[sublayer_name].layer.weight.data))
-                model_number_of_params += torch.numel(aq_handlers[sublayer_name].layer.weight.data)
-                print("curent_avg_bits", overall_bits / model_number_of_params)
+                number_of_quantized_params += torch.numel(aq_handlers[sublayer_name].layer.weight.data)
+                print("curent_avg_bits", overall_bits / number_of_quantized_params)
                 quantizers["model.layers.%d.%s" % (layer_index, sublayer_name)] = ()  # to be updated
 
             del aq_handlers
@@ -358,14 +353,15 @@ def quantize_aq(
 
     if args.wandb:
         wandb.log({"max_cuda_mem_quantize": round(torch.cuda.max_memory_allocated() / 1e9, 2)})
-        wandb.log({"Avg_bits": overall_bits / model_number_of_params})
+        if number_of_quantized_params > 0:  # do not report avg bits if we load all pre-quantized layers via --resume
+            wandb.log({"Avg_bits": overall_bits / number_of_quantized_params})
     model.config.use_cache = use_cache
     print(f"quantize: {torch.cuda.max_memory_allocated()=:,}")
     return quantizers
 
 
 @torch.no_grad()
-def perplexity_eval(model, testenc, args):
+def perplexity_eval(model: PreTrainedModel, testenc: torch.LongTensor, args: Namespace) -> float:
     print(f"\nEvaluating perplexity for {args.dataset_name} dataset ...")
 
     nsamples = testenc.numel() // model.seqlen
@@ -416,6 +412,7 @@ def perplexity_eval(model, testenc, args):
         wandb.log({args.dataset_name: ppl.item()})
 
     model.config.use_cache = use_cache
+    return ppl
 
 
 @torch.no_grad()
