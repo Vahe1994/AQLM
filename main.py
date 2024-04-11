@@ -75,8 +75,8 @@ def get_inps(
     if isinstance(data, torch.Tensor) and data.shape[0] == 1:  # given a single long tensor, split it into sequences
         assert data.ndim == 2, "data must be either a single tensor with a long sequence or a list of pre-cut sequences"
         data = [
-            data[:, start: start + model_seqlen].to(device)
-            for start in range(0, data.shape[1], model_seqlen)
+            data[:, i * model_seqlen: (i + 1) * model_seqlen].to(device)
+            for i in range(0, data.numel() // model_seqlen)
         ]
     else:
         assert max(sequence.shape[1] for sequence in data) <= model_seqlen
@@ -314,17 +314,19 @@ def quantize_aq(
             out_losses = update_outs_parallel(
                 args.devices, layer, inps, outs, compute_mse=not args.skip_out_loss, **forward_args
             )
+        stats_payload["out_loss"] = torch.mean(torch.Tensor(out_losses)).item()
 
         if run_validation:
             if len(args.devices) == 1:
                 assert len(val_inps) == len(val_outs) == 1
                 out_val_losses = update_outs(
-                    layer, val_inps[0], val_outs[0], compute_mse=not args.skip_out_loss, **forward_args
+                    layer, val_inps[0], val_outs[0], compute_mse=not (args.skip_out_loss or loaded_layer), **forward_args
                 )
             else:
                 out_val_losses = update_outs_parallel(
-                    args.devices, layer, val_inps, val_outs, compute_mse=not args.skip_out_loss, **forward_args
+                    args.devices, layer, val_inps, val_outs, compute_mse=not (args.skip_out_loss or loaded_layer), **forward_args
                 )
+            stats_payload["out_val_loss"] = torch.mean(torch.Tensor(out_val_losses)).item()
 
         layers[layer_index] = layer.to(layer_device_original)
         del layer
@@ -336,9 +338,6 @@ def quantize_aq(
 
         # Logging
         stats_payload["layer_time"] = time.time() - start_time
-        stats_payload["out_loss"] = torch.mean(torch.Tensor(out_losses)).item()
-        if run_validation:
-            stats_payload["out_val_loss"] = torch.mean(torch.Tensor(out_val_losses)).item()
         stats_payload["Step"] = layer_index
         if args.wandb:
             wandb.log(stats_payload, step=layer_index)
