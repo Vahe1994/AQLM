@@ -10,7 +10,7 @@ from transformers import AutoConfig, AutoModelForCausalLM
 
 MODEL_ERROR_MSG = "Unsupported model type {} - only 'llama', 'Yi', 'opt' and 'falcon' are supported"
 FALCON_TYPES = ("falcon", "refinedweb", "refinedwebmodel")
-LLAMA_LIKE = ("llama", "Yi", "mistral", "mixtral", "gemma")
+LLAMA_LIKE = ("llama", "Yi", "mistral", "mixtral", "gemma", "cohere")
 
 
 @contextmanager
@@ -28,20 +28,25 @@ def suspend_nn_inits():
 
 def dispatch_quantized_model(model):
     num_devices = torch.cuda.device_count()
-    device_map = {"model.embed_tokens": 0, "model.norm": num_devices - 1, "lm_head": num_devices - 1}
+    device_map = {"model.embed_tokens": 0, "model.norm": num_devices - 1, "lm_head": 0}
     num_layers = len(get_layers(model))
     layers_per_device = math.ceil(num_layers / num_devices)
     for layer_id in range(num_layers):
         device_id = layer_id // layers_per_device
         device_map[f"model.layers.{layer_id}"] = device_id
     model = dispatch_model(model, device_map)
+    # for some reason dispatch doesn't put this modules on needed device
+    model.model.embed_tokens = model.model.embed_tokens.to("cuda:0")
+    model.lm_head = model.lm_head.to("cuda:0")
     return model
 
 
-def get_model(model_path, load_quantized=None, dtype="auto", device_map=None, attn_implementation=None):
+def get_model(
+    model_path, load_quantized=None, dtype="auto", device_map=None, attn_implementation=None, trust_remote_code=False
+):
     if dtype == "auto":
         dtype = (
-            AutoConfig.from_pretrained(model_path, trust_remote_code=True).torch_dtype or "auto"
+            AutoConfig.from_pretrained(model_path, trust_remote_code=trust_remote_code).torch_dtype or "auto"
         )  # force transformers 4.29.2 to follow the same rules as 4.30.x
     else:
         dtype = getattr(torch, dtype)
@@ -54,7 +59,7 @@ def get_model(model_path, load_quantized=None, dtype="auto", device_map=None, at
     with suspend_nn_inits():
         model = AutoModelForCausalLM.from_pretrained(
             pretrained_model_name_or_path=model_path,
-            trust_remote_code=True,
+            trust_remote_code=trust_remote_code,
             torch_dtype=dtype,
             # defer distribution if loading quantized
             device_map=None if load_quantized else device_map,
