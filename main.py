@@ -38,7 +38,7 @@ def quantize_model(model: PreTrainedModel, args: Namespace):
     """main entry point to functions for model quantization"""
     tick = time.time()
     print("Loading data ...")
-    dataloader = get_loaders(
+    data = get_loaders(
         args.dataset,
         nsamples=args.nsamples,
         seed=args.seed,
@@ -46,15 +46,15 @@ def quantize_model(model: PreTrainedModel, args: Namespace):
         seqlen=args.model_seqlen,
     )
     if args.val_size > 0:
-        all_ids = torch.randperm(len(dataloader))
+        all_ids = torch.randperm(len(data))
         train_ids, val_ids = all_ids[args.val_size :], all_ids[: args.val_size]
-        train_dataloader = [dataloader[i] for i in train_ids]
-        val_dataloader = [dataloader[i] for i in val_ids]
+        train_data = [data[i] for i in train_ids]
+        val_data = [data[i] for i in val_ids]
     else:
-        train_dataloader = dataloader
-        val_dataloader = None
+        train_data = data
+        val_data = None
 
-    results = quantize_aq(model, train_dataloader, val_dataloader, args)
+    results = quantize_aq(model, train_data, val_data, args)
     print(f"quantization time: {time.time() - tick:.1f}")
     return results
 
@@ -155,16 +155,16 @@ def get_inps(
 
 @torch.no_grad()
 def quantize_aq(
-    model: PreTrainedModel, dataloader: Iterable, val_dataloader: Optional[Iterable], args: Namespace
+    model: PreTrainedModel, data: Sequence, val_data: Optional[Sequence], args: Namespace
 ):
     assert not torch.backends.cuda.matmul.allow_tf32
     print("\nStarting AQ quantization ...")
-    inps, forward_args = get_inps(model, dataloader, args)
+    inps, forward_args = get_inps(model, data, args.model_seqlen, args.devices, args.offload_activations)
     outs = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
 
-    if val_dataloader:
+    if val_data:
         run_validation = True
-        val_inps, _ = get_inps(model, val_dataloader, args)
+        val_inps, _ = get_inps(model, val_data, args.model_seqlen, args.devices, args.offload_activations)
         val_outs = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in val_inps]
     else:
         run_validation = False
@@ -369,7 +369,7 @@ def perplexity_eval(model: PreTrainedModel, testenc: torch.LongTensor, args: Nam
     use_cache = model.config.use_cache
     model.config.use_cache = False
 
-    inps, forward_args = get_inps(model, testenc, args.seqlen, )
+    inps, forward_args = get_inps(model, testenc, args.model_seqlen, args.devices, args.offload_activations)
     outs = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
     device = args.devices[0]
     for k, v in forward_args.items():
