@@ -43,7 +43,7 @@ def quantize_model(model: PreTrainedModel, args: Namespace):
         nsamples=args.nsamples,
         seed=args.seed,
         model_path=args.model_path,
-        seqlen=model.seqlen,
+        seqlen=args.model_seqlen,
     )
     if args.val_size > 0:
         all_ids = torch.randperm(len(dataloader))
@@ -61,7 +61,7 @@ def quantize_model(model: PreTrainedModel, args: Namespace):
 
 @torch.no_grad()
 def get_inps(
-    model: PreTrainedModel, data: Sequence, seqlen: int, devices: Sequence[torch.device], offload_activations: bool
+    model: PreTrainedModel, data: Sequence, model_seqlen: int, devices: Sequence[torch.device], offload_activations: bool
 ) -> Tuple[Sequence[torch.Tensor], Dict]:
     """
     mocks model launch to collect inputs to the first model layer
@@ -75,11 +75,11 @@ def get_inps(
     if isinstance(data, torch.Tensor) and data.shape[0] == 1:  # given a single long tensor, split it into sequences
         assert data.ndim == 2, "data must be either a single tensor with a long sequence or a list of pre-cut sequences"
         data = [
-            data[:, start: start + model.seqlen].to(device)
-            for start in range(0, data.shape[1], model.seqlen)
+            data[:, start: start + model_seqlen].to(device)
+            for start in range(0, data.shape[1], model_seqlen)
         ]
     else:
-        assert max(sequence.shape[1] for sequence in data) <= seqlen
+        assert max(sequence.shape[1] for sequence in data) <= model_seqlen
 
     emb = model.get_input_embeddings()
     emb_device = emb.weight.device
@@ -98,7 +98,7 @@ def get_inps(
     nsamples_per_device = (len(data) - 1) // len(devices) + 1
     inps = [
         torch.zeros(
-            (min(nsamples_per_device, len(data) - i * nsamples_per_device), model.seqlen, model.config.hidden_size),
+            (min(nsamples_per_device, len(data) - i * nsamples_per_device), model_seqlen, model.config.hidden_size),
             dtype=dtype,
             device=devices[i] if not offload_activations else "cpu",
             pin_memory=offload_activations,
@@ -364,12 +364,12 @@ def quantize_aq(
 def perplexity_eval(model: PreTrainedModel, testenc: torch.LongTensor, args: Namespace) -> float:
     print(f"\nEvaluating perplexity for {args.dataset_name} dataset ...")
 
-    nsamples = testenc.numel() // model.seqlen
+    nsamples = testenc.numel() // args.model_seqlen
 
     use_cache = model.config.use_cache
     model.config.use_cache = False
 
-    inps, forward_args = get_inps(model, testenc, args, nsamples=nsamples)
+    inps, forward_args = get_inps(model, testenc, args.seqlen, )
     outs = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
     device = args.devices[0]
     for k, v in forward_args.items():
@@ -398,12 +398,12 @@ def perplexity_eval(model: PreTrainedModel, testenc: torch.LongTensor, args: Nam
         inp = inps[i // nsamples_per_device][i % nsamples_per_device].to(args.devices[0], non_blocking=True)
         lm_logits = get_lm_logits(inp.to(device), model)
         shift_logits = lm_logits[:, :-1, :].contiguous()
-        shift_labels = testenc[:, (i * model.seqlen) : ((i + 1) * model.seqlen)][:, 1:]
+        shift_labels = testenc[:, (i * args.model_seqlen) : ((i + 1) * args.model_seqlen)][:, 1:]
         loss_fct = nn.CrossEntropyLoss()
         loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-        neg_log_likelihood = loss.float() * model.seqlen
+        neg_log_likelihood = loss.float() * args.model_seqlen
         nlls.append(neg_log_likelihood)
-    ppl = torch.exp(torch.stack(nlls).sum() / (nsamples * model.seqlen))
+    ppl = torch.exp(torch.stack(nlls).sum() / (nsamples * args.model_seqlen))
     print(f"\n{args.dataset_name} perplexity = {ppl.item():.4f}\n")
 
     get_model_head(model).to(torch.device("cpu"))
@@ -853,9 +853,7 @@ if __name__ == "__main__":
         )
 
     print("\n============ Load model... ============")
-    model = get_model(
-        args.model_path, args.load, args.dtype, args.model_seqlen, attn_implementation=args.attn_implementation
-    ).train(False)
+    model = get_model(args.model_path, args.load, args.dtype, attn_implementation=args.attn_implementation).train(False)
 
     if not args.load and not args.no_quant:
         print("\n============ Quantizing model... ============")
@@ -871,7 +869,7 @@ if __name__ == "__main__":
             dataset,
             seed=args.seed,
             model_path=args.model_path,
-            seqlen=model.seqlen,
+            seqlen=args.model_seqlen,
             eval_mode=True,
         )
         args.dataset_name = dataset

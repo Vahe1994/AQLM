@@ -322,7 +322,7 @@ if __name__ == "__main__":
         train_dataloader = dataloader
         val_dataloader = None
     # create original model
-    orig_model = get_model(args.base_model, None, args.dtype, args.model_seqlen, args.device_map)
+    orig_model = get_model(args.base_model, None, args.dtype, args.device_map)
     if not args.device_map:
         orig_model = orig_model.to(device)
     # cache logits
@@ -333,7 +333,7 @@ if __name__ == "__main__":
         orig_val_hiddens = None
     del orig_model
     torch.cuda.empty_cache()
-    quant_model = get_model(args.base_model, args.quant_model, args.dtype, args.model_seqlen, args.device_map)
+    quant_model = get_model(args.base_model, args.quant_model, args.dtype, args.device_map)
     if not args.device_map:
         quant_model = quant_model.to(device)
 
@@ -365,15 +365,13 @@ if __name__ == "__main__":
         shutil.copy(os.path.join(args.quant_model, "args.pt"), os.path.join(args.save, "args.pt"))
 
     print("\n============ Evaluating perplexity... ============")
-    if args.eval_model_seqlen:
-        quant_model.seqlen = args.eval_model_seqlen
     torch.cuda.reset_peak_memory_stats()
     for dataset in args.eval_datasets:
         testloader = get_loaders(
             dataset,
             seed=args.seed,
             model_path=args.base_model,
-            seqlen=quant_model.seqlen,
+            seqlen=args.eval_model_seqlen or args.model_seqlen,
             eval_mode=True,
         )
         args.dataset_name = dataset
