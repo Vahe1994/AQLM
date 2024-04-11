@@ -348,7 +348,8 @@ def quantize_aq(model: PreTrainedModel, data: Sequence, val_data: Optional[Seque
         stats_payload["Step"] = layer_index
         if args.wandb:
             wandb.log(stats_payload, step=layer_index)
-        print(stats_payload)
+        if not loaded_layer:
+            print(stats_payload)
 
     print("=====================\nFinal stats:")
     if args.save:
