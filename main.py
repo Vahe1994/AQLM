@@ -61,7 +61,11 @@ def quantize_model(model: PreTrainedModel, args: Namespace):
 
 @torch.no_grad()
 def get_inps(
-    model: PreTrainedModel, data: Sequence, model_seqlen: int, devices: Sequence[torch.device], offload_activations: bool
+    model: PreTrainedModel,
+    data: Sequence,
+    model_seqlen: int,
+    devices: Sequence[torch.device],
+    offload_activations: bool,
 ) -> Tuple[Sequence[torch.Tensor], Dict]:
     """
     mocks model launch to collect inputs to the first model layer
@@ -75,7 +79,7 @@ def get_inps(
     if isinstance(data, torch.Tensor) and data.shape[0] == 1:  # given a single long tensor, split it into sequences
         assert data.ndim == 2, "data must be either a single tensor with a long sequence or a list of pre-cut sequences"
         num_sequences, num_tokens_dropped = data.numel() // model_seqlen, data.numel() % model_seqlen
-        data = [data[:, i * model_seqlen: (i + 1) * model_seqlen].to(device) for i in range(num_sequences)]
+        data = [data[:, i * model_seqlen : (i + 1) * model_seqlen].to(device) for i in range(num_sequences)]
         print(f"Got {len(data)} sequences of {model_seqlen} tokens, dropped last {num_tokens_dropped} tokens")
         del num_sequences, num_tokens_dropped
 
@@ -155,9 +159,7 @@ def get_inps(
 
 
 @torch.no_grad()
-def quantize_aq(
-    model: PreTrainedModel, data: Sequence, val_data: Optional[Sequence], args: Namespace
-):
+def quantize_aq(model: PreTrainedModel, data: Sequence, val_data: Optional[Sequence], args: Namespace):
     assert not torch.backends.cuda.matmul.allow_tf32
     print("\nStarting AQ quantization ...")
     inps, forward_args = get_inps(model, data, args.model_seqlen, args.devices, args.offload_activations)
@@ -209,7 +211,7 @@ def quantize_aq(
                 loaded_layer = True
 
         # prepare validation  outputs
-        if run_validation and not loaded_layer:   # note: if we skip validation, val_outs will still be updated later
+        if run_validation and not loaded_layer:  # note: if we skip validation, val_outs will still be updated later
             if len(args.devices) == 1:
                 assert len(val_inps) == len(val_outs) == 1
                 update_outs(layer, val_inps[0], val_outs[0], compute_mse=not args.skip_out_loss, **forward_args)
@@ -623,9 +625,13 @@ if __name__ == "__main__":
         action="store_true",
         help="If true, search for previously saved layers and reuse them to save time. Requires --save path.",
     )
-    parser.add_argument("--on_save", type=str, default=None,
-                        help="Optional callback (python code string) to call after each saved layer. Example: when "
-                             "training on preemptible compute, upload partially quantized model and --resume later.")
+    parser.add_argument(
+        "--on_save",
+        type=str,
+        default=None,
+        help="Optional callback (python code string) to call after each saved layer. Example: when "
+        "training on preemptible compute, upload partially quantized model and --resume later.",
+    )
     parser.add_argument("--devices", metavar="N", type=str, nargs="+", default=None, help="List of devices")
     parser.add_argument(
         "--dtype",

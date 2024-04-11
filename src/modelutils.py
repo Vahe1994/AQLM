@@ -38,9 +38,7 @@ def dispatch_quantized_model(model):
     return model
 
 
-def get_model(
-    model_path, load_quantized=None, dtype="auto", device_map=None, attn_implementation=None
-):
+def get_model(model_path, load_quantized=None, dtype="auto", device_map=None, attn_implementation=None):
     if dtype == "auto":
         dtype = (
             AutoConfig.from_pretrained(model_path, trust_remote_code=True).torch_dtype or "auto"
