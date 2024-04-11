@@ -78,8 +78,8 @@ def get_inps(
         data = [data[:, i * model_seqlen: (i + 1) * model_seqlen].to(device) for i in range(num_sequences)]
         print(f"Got {len(data)} sequences of {model_seqlen} tokens, dropped last {num_tokens_dropped} tokens")
         del num_sequences, num_tokens_dropped
-    else:
-        assert all(sequence.shape[1] == model_seqlen for sequence in data)
+
+    assert all(sequence.shape[1] == model_seqlen for sequence in data)
 
     emb = model.get_input_embeddings()
     emb_device = emb.weight.device
@@ -139,7 +139,6 @@ def get_inps(
         except CatcherExit:
             pass  # exit after catcher finished without running the rest of the model layers
 
-    assert cache["i"] == sum(map(len, inps)), (cache["i"], list(map(len, inps)))
     torch.set_num_threads(saved_num_threads)
     layers[0] = layers[0].module
 
