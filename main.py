@@ -138,6 +138,8 @@ def get_inps(
             model(batch_inps, attention_mask=torch.ones_like(batch_inps))
         except CatcherExit:
             pass  # exit after catcher finished without running the rest of the model layers
+
+    assert cache["i"] == len(inps), (cache["i"], len(inps))
     torch.set_num_threads(saved_num_threads)
     layers[0] = layers[0].module
 
@@ -404,7 +406,6 @@ def perplexity_eval(model: PreTrainedModel, testenc: torch.LongTensor, args: Nam
         loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
         neg_log_likelihood = loss.float() * args.model_seqlen
         nlls.append(neg_log_likelihood)
-        print('nll ith =', neg_log_likelihood)
     ppl = torch.exp(torch.stack(nlls).sum()).item() / (nsamples * args.model_seqlen)
     print(f"\n{args.dataset_name} perplexity = {ppl:.4f}\n")
 
