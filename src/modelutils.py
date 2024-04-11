@@ -39,6 +39,9 @@ def dispatch_quantized_model(model):
         device_id = layer_id // layers_per_device
         device_map[f"model.layers.{layer_id}"] = device_id
     model = dispatch_model(model, device_map)
+    # for some reason dispatch doesn't put this modules on needed device
+    model.model.embed_tokens = model.model.embed_tokens.to("cuda:0")
+    model.lm_head = model.lm_head.to("cuda:0")
     return model
 
 
