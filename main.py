@@ -313,17 +313,17 @@ def quantize_aq(model: PreTrainedModel, data: Sequence, val_data: Optional[Seque
             if args.on_save:
                 exec(args.on_save)  # a callback e.g. to save progress in slurm or similar distributed infrastructure
 
+        should_compute_mse = not (args.skip_out_loss or loaded_layer)
         if len(args.devices) == 1:
             assert len(inps) == len(outs) == 1
-            out_losses = update_outs(layer, inps[0], outs[0], compute_mse=not args.skip_out_loss, **forward_args)
+            out_losses = update_outs(layer, inps[0], outs[0], compute_mse=should_compute_mse, **forward_args)
         else:
             out_losses = update_outs_parallel(
-                args.devices, layer, inps, outs, compute_mse=not args.skip_out_loss, **forward_args
+                args.devices, layer, inps, outs, compute_mse=should_compute_mse, **forward_args
             )
         stats_payload["out_loss"] = torch.mean(torch.Tensor(out_losses)).item()
 
         if run_validation:
-            should_compute_mse = not (args.skip_out_loss or loaded_layer)
             if len(args.devices) == 1:
                 assert len(val_inps) == len(val_outs) == 1
                 out_val_losses = update_outs(
