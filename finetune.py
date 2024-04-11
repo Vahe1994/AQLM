@@ -22,12 +22,13 @@ from src.utils import _extract_into_tensor, maybe_get_0th_element
 
 
 @torch.inference_mode()
-def cache_hiddens(model, dataloader, device):
+def cache_hiddens(model, dataloader):
+    device = next(model.parameters()).device
     cached_hiddens = []
     for i in trange(len(dataloader), total=len(dataloader), desc="Caching hiddens", leave=False):
         with torch.autocast(device_type="cuda", enabled=args.amp):
             batch = maybe_get_0th_element(dataloader[i]).to(device)
-        cached_hiddens.append(model.model(batch).last_hidden_state.cpu())
+            cached_hiddens.append(model.model(batch).last_hidden_state.cpu())
     return cached_hiddens
 
 
@@ -46,7 +47,6 @@ def evaluate(model, lm_head, loader, hiddens, batch_size):
     model.eval()
     loss_numerator, loss_denominator = 0, 0
     device = next(model.parameters()).device
-    # device = "cuda:0"
     # convert tensor to list
     for i in range(0, len(loader), batch_size):
         batch_ids = range(i, i + batch_size)
@@ -340,9 +340,9 @@ if __name__ == "__main__":
     if not args.device_map:
         orig_model = orig_model.to(device)
     # cache logits
-    orig_train_hiddens = cache_hiddens(orig_model, train_dataloader, device)
+    orig_train_hiddens = cache_hiddens(orig_model, train_dataloader)
     if val_dataloader:
-        orig_val_hiddens = cache_hiddens(orig_model, val_dataloader, device)
+        orig_val_hiddens = cache_hiddens(orig_model, val_dataloader)
     else:
         orig_val_hiddens = None
     del orig_model

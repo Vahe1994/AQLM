@@ -28,16 +28,17 @@ def suspend_nn_inits():
 
 def dispatch_quantized_model(model):
     num_devices = torch.cuda.device_count()
-    device_map = {"model.embed_tokens": 0, "model.norm": num_devices - 1, "lm_head": 0}
+    device_map = {
+        "model.embed_tokens": 0,
+        "model.norm": num_devices - 1,
+        "lm_head": 0 if model.config.model_type == "cohere" else num_devices - 1,
+    }
     num_layers = len(get_layers(model))
     layers_per_device = math.ceil(num_layers / num_devices)
     for layer_id in range(num_layers):
         device_id = layer_id // layers_per_device
         device_map[f"model.layers.{layer_id}"] = device_id
     model = dispatch_model(model, device_map)
-    # for some reason dispatch doesn't put this modules on needed device
-    model.model.embed_tokens = model.model.embed_tokens.to("cuda:0")
-    model.lm_head = model.lm_head.to("cuda:0")
     return model
 
 
