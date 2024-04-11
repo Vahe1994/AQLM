@@ -320,14 +320,15 @@ def quantize_aq(
         stats_payload["out_loss"] = torch.mean(torch.Tensor(out_losses)).item()
 
         if run_validation:
+            should_compute_mse = not (args.skip_out_loss or loaded_layer)
             if len(args.devices) == 1:
                 assert len(val_inps) == len(val_outs) == 1
                 out_val_losses = update_outs(
-                    layer, val_inps[0], val_outs[0], compute_mse=not (args.skip_out_loss or loaded_layer), **forward_args
+                    layer, val_inps[0], val_outs[0], compute_mse=should_compute_mse, **forward_args
                 )
             else:
                 out_val_losses = update_outs_parallel(
-                    args.devices, layer, val_inps, val_outs, compute_mse=not (args.skip_out_loss or loaded_layer), **forward_args
+                    args.devices, layer, val_inps, val_outs, compute_mse=should_compute_mse, **forward_args
                 )
             stats_payload["out_val_loss"] = torch.mean(torch.Tensor(out_val_losses)).item()
 
