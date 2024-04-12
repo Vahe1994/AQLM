@@ -418,6 +418,14 @@ def _dequantize_weight(
 
 
 @maybe_script
+def _stochastic_rounding(
+        sorted_errors: torch.Tensor, sorted_codes: torch.Tensor, delta_errors: torch.Tensor, tau: float
+):
+    # TODO
+    return sorted_errors[:-1], sorted_codes[:-1]
+
+
+@maybe_script
 def _beam_search_squared_errors(
     XTX: torch.Tensor,
     reference_weight: torch.Tensor,
@@ -580,13 +588,6 @@ def _beam_search_squared_errors(
 
     return best_losses, best_indices
 
-
-@maybe_script
-def _stochastic_rounding(
-        sorted_errors: torch.Tensor, sorted_codes: torch.Tensor, delta_errors: torch.Tensor, tau: float
-):
-    # TODO
-    return sorted_errors[:-1], sorted_codes[:-1]
 
 @maybe_script
 def _beam_search_select_best(
