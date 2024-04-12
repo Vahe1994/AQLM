@@ -22,12 +22,13 @@ from src.utils import _extract_into_tensor, maybe_get_0th_element
 
 
 @torch.inference_mode()
-def cache_hiddens(model, dataloader, device):
+def cache_hiddens(model, dataloader):
+    device = next(model.parameters()).device
     cached_hiddens = []
     for i in trange(len(dataloader), total=len(dataloader), desc="Caching hiddens", leave=False):
         with torch.autocast(device_type="cuda", enabled=args.amp):
             batch = maybe_get_0th_element(dataloader[i]).to(device)
-        cached_hiddens.append(model.model(batch).last_hidden_state.cpu())
+            cached_hiddens.append(model.model(batch).last_hidden_state.cpu())
     return cached_hiddens
 
 
@@ -297,6 +298,16 @@ if __name__ == "__main__":
         choices=[None, "auto"],
         help="accelerate device map",
     )
+    parser.add_argument(
+        "--use_fast_tokenizer",
+        action="store_true",
+        help="Whether to use fast tokenizer.",
+    )
+    parser.add_argument(
+        "--trust_remote_code",
+        action="store_true",
+        help="Whether to trust remote code.",
+    )
     args = parser.parse_args()
     args.microbatch_size = args.microbatch_size or args.batch_size
     # get device
@@ -313,6 +324,8 @@ if __name__ == "__main__":
         seed=args.seed,
         model_path=args.base_model,
         seqlen=args.model_seqlen,
+        use_fast_tokenizer=args.use_fast_tokenizer,
+        trust_remote_code=args.trust_remote_code,
     )
     if args.val_size > 0:
         all_ids = torch.randperm(len(dataloader))
@@ -323,18 +336,20 @@ if __name__ == "__main__":
         train_dataloader = dataloader
         val_dataloader = None
     # create original model
-    orig_model = get_model(args.base_model, None, args.dtype, args.device_map)
+    orig_model = get_model(args.base_model, None, args.dtype, args.device_map, trust_remote_code=args.trust_remote_code)
     if not args.device_map:
         orig_model = orig_model.to(device)
     # cache logits
-    orig_train_hiddens = cache_hiddens(orig_model, train_dataloader, device)
+    orig_train_hiddens = cache_hiddens(orig_model, train_dataloader)
     if val_dataloader:
-        orig_val_hiddens = cache_hiddens(orig_model, val_dataloader, device)
+        orig_val_hiddens = cache_hiddens(orig_model, val_dataloader)
     else:
         orig_val_hiddens = None
     del orig_model
     torch.cuda.empty_cache()
-    quant_model = get_model(args.base_model, args.quant_model, args.dtype, args.device_map)
+    quant_model = get_model(
+        args.base_model, args.quant_model, args.dtype, args.device_map, trust_remote_code=args.trust_remote_code
+    )
     if not args.device_map:
         quant_model = quant_model.to(device)
 
@@ -374,6 +389,8 @@ if __name__ == "__main__":
             model_path=args.base_model,
             seqlen=args.eval_model_seqlen or args.model_seqlen,
             eval_mode=True,
+            use_fast_tokenizer=args.use_fast_tokenizer,
+            trust_remote_code=args.trust_remote_code,
         )
         args.dataset_name = dataset
         perplexity_eval(quant_model, testloader, args)
