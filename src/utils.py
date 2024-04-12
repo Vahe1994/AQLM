@@ -114,6 +114,6 @@ def maybe_get_0th_element(x: Union[Any, Sequence[Any]]) -> Any:
     return x
 
 
-def _extract_into_tensor(tensor_list: List[torch.Tensor], indices: Iterable[int], device=None):
+def _extract_into_tensor(tensor_list: List[torch.Tensor], indices: Iterable[int], device=None, dtype=None):
     extracted_items = [maybe_get_0th_element(tensor_list[i]) for i in indices]
-    return torch.cat(extracted_items, dim=0).to(device)
+    return torch.cat(extracted_items, dim=0).to(device=device, dtype=dtype)

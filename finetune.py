@@ -32,18 +32,18 @@ def cache_hiddens(model, dataloader):
     return cached_hiddens
 
 
-def kl_div(student_hiddens, teacher_hiddens, temp):
+def kl_div(student_hiddens, teacher_hiddens):
     C = student_hiddens.shape[-1]  # num classes
-    return temp**2 * F.kl_div(
-        input=F.log_softmax(student_hiddens.view(-1, C) / temp, dim=-1),
-        target=F.log_softmax(teacher_hiddens.view(-1, C) / temp, dim=-1),
+    return F.kl_div(
+        input=F.log_softmax(student_hiddens.view(-1, C), dim=-1),
+        target=F.log_softmax(teacher_hiddens.view(-1, C), dim=-1),
         log_target=True,
         reduction="batchmean",
     )
 
 
 @torch.no_grad()
-def evaluate(model, lm_head, loader, hiddens, batch_size):
+def evaluate(model, lm_head, loader, hiddens, batch_size, dtype):
     model.eval()
     loss_numerator, loss_denominator = 0, 0
     device = next(model.parameters()).device
@@ -51,17 +51,17 @@ def evaluate(model, lm_head, loader, hiddens, batch_size):
     for i in range(0, len(loader), batch_size):
         batch_ids = range(i, i + batch_size)
         inputs = _extract_into_tensor(loader, batch_ids, device=device)
-        targets = lm_head(_extract_into_tensor(hiddens, batch_ids, device=device).float())
+        targets = lm_head(_extract_into_tensor(hiddens, batch_ids, device=device, dtype=dtype))
         outputs = model(inputs).logits
-        loss = kl_div(outputs, targets.to(outputs.device), args.temperature)
+        loss = kl_div(outputs, targets.to(outputs.device))
         loss_numerator += loss.item()
         loss_denominator += 1
     return loss_numerator / loss_denominator
 
 
 def finetune(model, train_loader, train_hiddens, args, device, val_loader=None, val_hiddens=None):
-    # cast model to float
-    model.float()
+    # cast model to finetune dtype
+    model.to(args.finetune_dtype)
     lm_head = deepcopy(model.lm_head)
     for param in lm_head.parameters():
         param.requires_grad = False
@@ -82,7 +82,7 @@ def finetune(model, train_loader, train_hiddens, args, device, val_loader=None, 
     run_validation = val_loader is not None and val_hiddens is not None
     # validate before training
     if run_validation:
-        valid_loss_epoch = evaluate(model, lm_head, val_loader, val_hiddens, args.microbatch_size)
+        valid_loss_epoch = evaluate(model, lm_head, val_loader, val_hiddens, args.microbatch_size, args.finetune_dtype)
         print(f"Evaluation before training.")
         print(f"valid loss={valid_loss_epoch:.3e}\t")
         best_loss = valid_loss_epoch
@@ -102,11 +102,13 @@ def finetune(model, train_loader, train_hiddens, args, device, val_loader=None, 
             batch_indices = batch_indices.tolist()
             inputs = _extract_into_tensor(train_loader, batch_indices, device=device)
             with torch.no_grad():
-                targets = lm_head(_extract_into_tensor(train_hiddens, batch_indices, device=device).float())
+                targets = lm_head(
+                    _extract_into_tensor(train_hiddens, batch_indices, device=device, dtype=args.finetune_dtype)
+                )
 
             with torch.autocast(device_type="cuda", enabled=args.amp):
                 outputs = model(inputs).logits
-                loss = kl_div(outputs, targets.to(outputs.device), args.temperature)
+            loss = kl_div(outputs, targets.to(device=outputs.device, dtype=args.finetune_dtype))
 
             if not torch.isfinite(loss).item():
                 raise ValueError(f"Fine-tuning loss is {loss}")
@@ -127,7 +129,9 @@ def finetune(model, train_loader, train_hiddens, args, device, val_loader=None, 
         train_loss_epoch = loss_numerator / loss_denominator
 
         if run_validation:
-            valid_loss_epoch = evaluate(model, lm_head, val_loader, val_hiddens, args.microbatch_size)
+            valid_loss_epoch = evaluate(
+                model, lm_head, val_loader, val_hiddens, args.microbatch_size, args.finetune_dtype
+            )
 
         # log losses in the end of the epoch
         print("-" * 10)
@@ -154,6 +158,11 @@ def finetune(model, train_loader, train_hiddens, args, device, val_loader=None, 
 
     if run_validation:
         model.load_state_dict(best_params, strict=False)
+
+
+def print_memory_stats():
+    print(f"GPU max memory allocated: {torch.cuda.max_memory_allocated() / 2 ** 30:.2f} GB.")
+    print(f"GPU max memory reserved: {torch.cuda.max_memory_reserved() / 2 ** 30:.2f} GB.")
 
 
 if __name__ == "__main__":
@@ -246,12 +255,6 @@ if __name__ == "__main__":
         help="training microbatch size",
     )
     parser.add_argument(
-        "--temperature",
-        type=float,
-        default=1.0,
-        help="Distillation temperature",
-    )
-    parser.add_argument(
         "--gradient_checkpointing",
         action="store_true",
         help="Whether to apply gradient checkpointing",
@@ -266,6 +269,13 @@ if __name__ == "__main__":
         type=int,
         default=3,
         help="Terminate finetuning if loss doesn't improve after this number of epochs.",
+    )
+    parser.add_argument(
+        "--finetune_dtype",
+        type=str,
+        default="float32",
+        choices=["float16", "float32", "bfloat16"],
+        help="dtype to finetune the model",
     )
     # Logging params
     parser.add_argument("--wandb", action="store_true", help="Whether to use wandb or store locally.")
@@ -310,6 +320,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     args.microbatch_size = args.microbatch_size or args.batch_size
+    args.finetune_dtype = getattr(torch, args.finetune_dtype)
+    if args.amp:
+        assert args.finetune_dtype == torch.float32, "AMP works only with original model in fp32."
     # get device
     assert torch.cuda.is_available()
     device = "cuda"
@@ -363,6 +376,8 @@ if __name__ == "__main__":
         val_loader=val_dataloader,
         val_hiddens=orig_val_hiddens,
     )
+
+    print_memory_stats()
 
     # offload model to cpu
     quant_model = quant_model.cpu()

@@ -214,7 +214,6 @@ python finetune.py \
   --early_stop=3 \
   --batch_size=8 \
   --microbatch_size=4 \
-  --temperature=1.0 \
   --save $DATA_PATH \
   --gradient_checkpointing
 ```
@@ -226,6 +225,8 @@ Main CLI arguments:
 - `--nsamples` - the number of calibration data _sequences_ (train + validation). If this parameter is not set, take all calibration data avaialble.
 - `--val_size` - the number of validation sequences for early stopping on end-to-end finetuning. By default equal to 0. Must be smaller than `--nsamples`.
 - `--gradient_checkpointing` - whether to use gradient checkpointing. Reduces peak memory usage at the cost of longer runtime.
+- `--finetune_dtype` - which dtype should be used on finetuning. By default `float32`. 
+- `--amp` - whether to use amp on finetuning. Requires `--finetune_dtype=float32`.
 
 **Note** for larger models one would need multi-GPU training. At the moment, FSDP training is not implemented and the model is finetuned on a single process with parameters sharded across available devices.
 
