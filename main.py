@@ -293,8 +293,8 @@ def quantize_aq(model: PreTrainedModel, data: Sequence, val_data: Optional[Seque
 
             print("PREPARING TO FINETUNE")
             print(layer)
-            layer = layer.to(dtype=torch.float32)
-            with using_tf32(enabled=True):
+            layer = layer.to(dtype=args.finetune_dtype)
+            with using_tf32(enabled=(args.finetune_dtype == torch.float32)):
                 layer = finetune_groupwise(
                     layer=layer,
                     train_inps=inps,
@@ -645,6 +645,13 @@ if __name__ == "__main__":
         help="dtype to load the model in",
     )
     parser.add_argument(
+        "--finetune_dtype",
+        type=str,
+        default="float32",
+        choices=["float16", "float32", "bfloat16"],
+        help="dtype to run block finetuning",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=0,
@@ -820,6 +827,11 @@ if __name__ == "__main__":
         help="Skip model quantization and immediately evaluate the loaded model",
     )
     parser.add_argument(
+        "--skip_evaluation",
+        action="store_true",
+        help="Skip model evaluation",
+    )
+    parser.add_argument(
         "--attn_implementation",
         type=str,
         default=None,
@@ -853,6 +865,8 @@ if __name__ == "__main__":
     # validate val size
     if args.nsamples is not None:
         assert args.val_size < args.nsamples, "Number of validation set must be smaller than train + val"
+    # transform type to torch dtype
+    args.finetune_dtype = getattr(torch, args.finetune_dtype)
 
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
@@ -888,24 +902,25 @@ if __name__ == "__main__":
         print("\n============ Quantizing model... ============")
         quantize_model(model, args)
 
-    print("\n============ Evaluating perplexity... ============")
-    torch.cuda.reset_peak_memory_stats()
-    datasets = ["wikitext2", "c4"]
-    if args.new_eval:
-        datasets = ["wikitext2", "c4-new"]
-    for dataset in datasets:
-        testloader = get_loaders(
-            dataset,
-            seed=args.seed,
-            model_path=args.model_path,
-            seqlen=args.model_seqlen,
-            eval_mode=True,
-            use_fast_tokenizer=args.use_fast_tokenizer,
-            trust_remote_code=args.trust_remote_code,
-        )
-        args.dataset_name = dataset
-        perplexity_eval(model, testloader, args)
+    if not args.skip_evaluation:
+        print("\n============ Evaluating perplexity... ============")
+        torch.cuda.reset_peak_memory_stats()
+        datasets = ["wikitext2", "c4"]
+        if args.new_eval:
+            datasets = ["wikitext2", "c4-new"]
+        for dataset in datasets:
+            testloader = get_loaders(
+                dataset,
+                seed=args.seed,
+                model_path=args.model_path,
+                seqlen=args.model_seqlen,
+                eval_mode=True,
+                use_fast_tokenizer=args.use_fast_tokenizer,
+                trust_remote_code=args.trust_remote_code,
+            )
+            args.dataset_name = dataset
+            perplexity_eval(model, testloader, args)
 
-    print(f"eval: {torch.cuda.max_memory_allocated()=:,}")
-    if args.wandb:
-        wandb.log({"max_cuda_mem_eval": round(torch.cuda.max_memory_allocated() / 1e9, 2)})
+        print(f"eval: {torch.cuda.max_memory_allocated()=:,}")
+        if args.wandb:
+            wandb.log({"max_cuda_mem_eval": round(torch.cuda.max_memory_allocated() / 1e9, 2)})
