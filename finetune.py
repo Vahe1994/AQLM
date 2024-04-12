@@ -32,11 +32,11 @@ def cache_hiddens(model, dataloader):
     return cached_hiddens
 
 
-def kl_div(student_hiddens, teacher_hiddens, temp=1.0):
+def kl_div(student_hiddens, teacher_hiddens):
     C = student_hiddens.shape[-1]  # num classes
-    return temp**2 * F.kl_div(
-        input=F.log_softmax(student_hiddens.view(-1, C) / temp, dim=-1),
-        target=F.log_softmax(teacher_hiddens.view(-1, C) / temp, dim=-1),
+    return F.kl_div(
+        input=F.log_softmax(student_hiddens.view(-1, C), dim=-1),
+        target=F.log_softmax(teacher_hiddens.view(-1, C), dim=-1),
         log_target=True,
         reduction="batchmean",
     )
