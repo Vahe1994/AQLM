@@ -47,7 +47,6 @@ def evaluate(model, lm_head, loader, hiddens, batch_size):
     model.eval()
     loss_numerator, loss_denominator = 0, 0
     device = next(model.parameters()).device
-    # device = "cuda:0"
     # convert tensor to list
     for i in range(0, len(loader), batch_size):
         batch_ids = range(i, i + batch_size)
