@@ -40,9 +40,7 @@ def dispatch_quantized_model(model):
     return model
 
 
-def get_model(
-    model_path, load_quantized=None, dtype="auto", model_seqlen=2048, device_map=None, attn_implementation=None
-):
+def get_model(model_path, load_quantized=None, dtype="auto", device_map=None, attn_implementation=None):
     if dtype == "auto":
         dtype = (
             AutoConfig.from_pretrained(model_path, trust_remote_code=True).torch_dtype or "auto"
@@ -76,7 +74,6 @@ def get_model(
         else:
             print("Loading pretrained model ...")
 
-    model.seqlen = model_seqlen
     print("Model loaded sucсessfully ...")
 
     return model
