@@ -270,7 +270,7 @@ def beam_search_optimal_codes(
     scales: Optional[torch.Tensor],
     beam_size: int,
     dim_rng: Optional[random.Random] = None,
-    sparsity_regularizer: float = 0,
+    stochastic_rounding_tau: float = 0.0,
     verbose: bool,
 ):
     """
@@ -285,7 +285,10 @@ def beam_search_optimal_codes(
       random.Random(optional_seed) = shuffle dimensions at random, optionally using the specified seed
 
     :param beam_size: consider up to this many best encoding combinations
-    :param sparsity_regularizer: subtract this value from beam search objective each time you have a zero code somewhere
+    :param stochastic_rounding_tau: if positive, each time the algorithm chooses a code, it will have a probability
+        of replacing it with the second-best choice. If the two best codes increase the error by delta1 and delta2,
+        then the probability of choosing each code is P_i = delta_i ^ -tau / (sum_j_in_choices delta_j ^ -tau).
+        Note that if there is a code that has zero error, the algorithm will choose allways choose such a code
     :param verbose: if True, draw a progressbar and periodically print best loss
     :return: best quantization codes found, same shape as prev_codes
 
@@ -330,8 +333,6 @@ def beam_search_optimal_codes(
         .sum(-1)
     )
     # beam_losses shape: [current beam_size, num_out_groups], initial beam_size = 1
-    if sparsity_regularizer != 0:
-        beam_losses = beam_losses - sparsity_regularizer * (prev_codes == 0).sum(dim=(-1, -2))[None, :]
 
     if verbose:
         progressbar = trange(num_in_groups * num_codebooks)
@@ -357,7 +358,7 @@ def beam_search_optimal_codes(
                 input_group_index=input_group_index,
                 codebook_index=codebook_index,
                 k_best=beam_size,
-                sparsity_regularizer=sparsity_regularizer,
+                stochastic_rounding_tau=stochastic_rounding_tau,
             )  # [current beam_size, codebook_size, num_out_groups]
 
             # part 2: select beam_size new best codes and re-arrange beam to account for the fact that ...
@@ -381,14 +382,7 @@ def beam_search_optimal_codes(
                 best_loss = beam_losses.min(0).values.sum().item() / out_features
                 info = f"in_group {input_group_index} / {num_in_groups} "
                 info += f"| codebook {codebook_index} / {num_codebooks} "
-                if sparsity_regularizer == 0:
-                    info += f"| loss {best_loss:.10f}"
-                else:  # un-regularize to restore MSE loss, report sparsity rate
-                    num_zero_codes = (beam_codes[0] == 0).sum().item()
-                    best_loss = best_loss + sparsity_regularizer / out_features * num_zero_codes
-                    sparsity = num_zero_codes / prev_codes.numel()
-                    info += f"| loss {best_loss:.5f} | sparse {sparsity * 100:.1f}% |"
-
+                info += f"| loss {best_loss:.10f}"
                 progressbar.desc = info
     return beam_codes[0]
 
@@ -435,7 +429,7 @@ def _beam_search_squared_errors(
     input_group_index: int,
     codebook_index: int,
     k_best: int,
-    sparsity_regularizer: float,
+    stochastic_rounding_tau: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Compute MSE or sum-of-squared-error losses for all possible ways to replace quantization codes for one input group
@@ -552,18 +546,47 @@ def _beam_search_squared_errors(
             beam_losses[beam_id, None, :] - 2 * dot_products + XnewBkC_norms_sq - XoldBkC_norms_sq
         )  # shape: [codebook_size, num_out_groups]
 
-        if sparsity_regularizer != 0:
-            candidate_squared_errors += sparsity_regularizer * (prev_codes_part[beam_id] == 0).to(XTX.dtype)[None, :]
-            candidate_squared_errors[0, :] -= sparsity_regularizer
-
         best_beam_squared_errors, best_beam_indices = torch.topk(
-            candidate_squared_errors, k_best, dim=0, largest=False, sorted=False
-        )
+            candidate_squared_errors, k_best + int(stochastic_rounding_tau != 0), dim=0, largest=False, sorted=False
+        )  # shape: [k_best (+1 if tau!=0), num_out_groups] for both errors and indices
+
+        if stochastic_rounding_tau != 0:
+            # compute what would happen if we choose
+            reference_dot_product = torch.einsum(
+                "og,og->o",
+                (reference_weight[:, input_group_slice] - prev_weight_part[beam_id]
+                 ).reshape(num_out_groups, out_group_size * in_group_size),
+                dWTXTXg[beam_id].view(num_out_groups, out_group_size * in_group_size),
+            ).view(1, num_out_groups)  # note: prev_weight_part is already multiplied by scales
+            XrefBkC_norms_sq = torch.bmm(
+                (reference_weight[:, input_group_slice] @ XTX[input_group_slice, input_group_slice]).view(
+                    num_out_groups, 1, out_group_size * in_group_size
+                ),
+                reference_weight[:, input_group_slice].view(num_out_groups, out_group_size * in_group_size, 1),
+            ).reshape(1, num_out_groups)
+            baseline_squared_error = (
+                    beam_losses[beam_id, None, :] - 2 * reference_dot_product + XrefBkC_norms_sq - XoldBkC_norms_sq
+            )  # shape: [1, num_out_groups]
+            best_beam_squared_errors, best_beam_indices = _stochastic_rounding(
+                best_beam_squared_errors, best_beam_indices,
+                delta_errors=best_beam_squared_errors - baseline_squared_error,  # [k_best +1, num_out_groups]
+                tau=stochastic_rounding_tau
+            )
+        else:
+            reference_dot_product = XrefBkC_norms_sq = baseline_squared_error = torch.empty(0, device=XTX.device)
+
         best_losses[beam_id] = best_beam_squared_errors
         best_indices[beam_id] = best_beam_indices
 
     return best_losses, best_indices
 
+
+@maybe_script
+def _stochastic_rounding(
+        sorted_errors: torch.Tensor, sorted_codes: torch.Tensor, delta_errors: torch.Tensor, tau: float
+):
+    # TODO
+    return sorted_errors[:-1], sorted_codes[:-1]
 
 @maybe_script
 def _beam_search_select_best(
