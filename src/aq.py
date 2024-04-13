@@ -287,7 +287,7 @@ def beam_search_optimal_codes(
     :param beam_size: consider up to this many best encoding combinations
     :param stochastic_rounding_tau: if positive, each time the algorithm chooses a code, it will have a probability
         of replacing it with the second-best choice. If the two best codes increase the error by delta1 and delta2,
-        then the probability of choosing each code is P_i = delta_i ^ -tau / (sum_j_in_choices delta_j ^ -tau).
+        then the probability of choosing each code is P_i = delta_i ^ -1/tau / (sum_j_in_choices delta_j ^ -1/tau).
         Note that if there is a code that has zero error, the algorithm will choose allways choose such a code
     :param verbose: if True, draw a progressbar and periodically print best loss
     :return: best quantization codes found, same shape as prev_codes
@@ -419,10 +419,25 @@ def _dequantize_weight(
 
 @maybe_script
 def _stochastic_rounding(
-        sorted_errors: torch.Tensor, sorted_codes: torch.Tensor, delta_errors: torch.Tensor, tau: float
+        sorted_squared_errors: torch.Tensor, sorted_codes: torch.Tensor, delta_errors: torch.Tensor, tau: float
 ):
-    # TODO
-    return sorted_errors[:-1], sorted_codes[:-1]
+    """
+    :param sorted_squared_errors: float32 [k_best + 1, num_out_groups], sorted along 0th dimension (ascending)
+    :param sorted_codes: integer [k_best + 1, num_out_groups], sorted by the corresponding errors
+    :param delta_errors: a tensor of the same shape as sorted_codes; used as inverse sampling weights
+    :param tau: stochastic rounding temperature
+    """
+    if tau <= 0:
+        return sorted_squared_errors[:-1], sorted_codes[:-1]
+
+    scores = torch.pow(delta_errors / delta_errors.sum(), -1 / tau)  # [k_best + 1, num_out_groups]
+    keep_prob = scores[:-1, :] / (scores[:-1, :] + scores[1:, :])  # [k_best, num_out_groups]
+    keep_prob = torch.where(torch.isinf(keep_prob), 1.0, keep_prob)
+    keep = torch.less_equal(torch.rand_like(keep_prob), keep_prob)
+
+    sorted_squared_errors = torch.where(keep, sorted_squared_errors[:-1, :], sorted_squared_errors[1:, :])
+    sorted_codes = torch.where(keep, sorted_codes[:-1, :], sorted_codes[1:, :])
+    return sorted_squared_errors, sorted_codes
 
 
 @maybe_script
@@ -577,8 +592,8 @@ def _beam_search_squared_errors(
             )  # shape: [1, num_out_groups]
             best_beam_squared_errors, best_beam_indices = _stochastic_rounding(
                 best_beam_squared_errors, best_beam_indices,
-                delta_errors=best_beam_squared_errors - baseline_squared_error,  # [k_best +1, num_out_groups]
-                tau=stochastic_rounding_tau
+                delta_errors=best_beam_squared_errors.relu().sqrt() - baseline_squared_error.relu().sqrt(),
+                tau=stochastic_rounding_tau  # ^-- the above line uses relu for numerical stability at near-zero errors
             )
         else:
             reference_dot_product = XrefBkC_norms_sq = baseline_squared_error = torch.empty(0, device=XTX.device)
