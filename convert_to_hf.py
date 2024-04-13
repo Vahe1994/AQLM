@@ -33,7 +33,7 @@ def pack_int_data(data: torch.IntTensor, nbits: int) -> torch.IntTensor:
 
 def get_num_layers(config) -> int:
     match config.model_type:
-        case "llama" | "mistral" | "mixtral" | "gemma":
+        case "llama" | "mistral" | "mixtral" | "gemma" | "cohere":
             return config.num_hidden_layers
         case unknown_type:
             raise NotImplementedError(f"Can't get number of layers for {unknown_type}")
@@ -41,7 +41,7 @@ def get_num_layers(config) -> int:
 
 def get_layers_prefix(config) -> str:
     match config.model_type:
-        case "llama" | "mistral" | "mixtral" | "gemma":
+        case "llama" | "mistral" | "mixtral" | "gemma" | "cohere":
             return "model.layers"
         case unknown_type:
             raise NotImplementedError(f"Can't get layers prefix for {unknown_type}")
