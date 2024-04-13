@@ -26,23 +26,31 @@ def suspend_nn_inits():
         torch.nn.init.kaiming_uniform_, torch.nn.init.uniform_, torch.nn.init.normal_ = saved_inits  # restoring
 
 
-def dispatch_quantized_model(model):
+def dispatch_quantized_model(model, master_gpu_load=1.0):
     num_devices = torch.cuda.device_count()
     device_map = {"model.embed_tokens": 0, "model.norm": num_devices - 1, "lm_head": 0}
     num_layers = len(get_layers(model))
-    layers_per_device = math.ceil(num_layers / num_devices)
-    for layer_id in range(num_layers):
-        device_id = layer_id // layers_per_device
+    total_load = master_gpu_load + (num_devices - 1)
+    master_layers_per_device = math.ceil(master_gpu_load * num_layers / total_load)
+    slave_layers_per_device = math.ceil((num_layers - master_layers_per_device) / (num_devices - 1))
+    for layer_id in range(master_layers_per_device):
+        device_map[f"model.layers.{layer_id}"] = 0
+
+    for layer_id in range(master_layers_per_device, num_layers):
+        device_id = (layer_id - master_layers_per_device) // slave_layers_per_device + 1
         device_map[f"model.layers.{layer_id}"] = device_id
     model = dispatch_model(model, device_map)
-    # for some reason dispatch doesn't put this modules on needed device
-    model.model.embed_tokens = model.model.embed_tokens.to("cuda:0")
-    model.lm_head = model.lm_head.to("cuda:0")
     return model
 
 
 def get_model(
-    model_path, load_quantized=None, dtype="auto", device_map=None, attn_implementation=None, trust_remote_code=False
+    model_path,
+    load_quantized=None,
+    dtype="auto",
+    device_map=None,
+    attn_implementation=None,
+    trust_remote_code=False,
+    master_gpu_load=1.0,
 ):
     if dtype == "auto":
         dtype = (
@@ -73,7 +81,7 @@ def get_model(
             model = load_quantized_model(model, load_quantized)
             if device_map == "auto":
                 assert model.config.model_type in LLAMA_LIKE, "Dispatching is implemented only for Llama-like models."
-                model = dispatch_quantized_model(model)
+                model = dispatch_quantized_model(model, master_gpu_load)
         else:
             print("Loading pretrained model ...")
 

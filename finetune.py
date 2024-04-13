@@ -155,6 +155,8 @@ def finetune(model, train_loader, train_hiddens, args, device, val_loader=None, 
                 worse_count += 1
                 if worse_count >= args.early_stop:
                     break
+        # empty cache
+        torch.cuda.empty_cache()
 
     if run_validation:
         model.load_state_dict(best_params, strict=False)
@@ -277,6 +279,12 @@ if __name__ == "__main__":
         choices=["float16", "float32", "bfloat16"],
         help="dtype to finetune the model",
     )
+    parser.add_argument(
+        "--master_gpu_load",
+        type=float,
+        default=1.0,
+        help="Number of transformer layers allocated on master device.",
+    )
     # Logging params
     parser.add_argument("--wandb", action="store_true", help="Whether to use wandb or store locally.")
     # Save params
@@ -361,7 +369,12 @@ if __name__ == "__main__":
     del orig_model
     torch.cuda.empty_cache()
     quant_model = get_model(
-        args.base_model, args.quant_model, args.dtype, args.device_map, trust_remote_code=args.trust_remote_code
+        args.base_model,
+        args.quant_model,
+        args.dtype,
+        args.device_map,
+        trust_remote_code=args.trust_remote_code,
+        master_gpu_load=args.master_gpu_load,
     )
     if not args.device_map:
         quant_model = quant_model.to(device)
