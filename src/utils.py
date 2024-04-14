@@ -58,6 +58,14 @@ def maybe_script(fn: callable) -> callable:
     return torch.jit.script(fn) if should_script else fn
 
 
+def maybe_compile(**flags) -> callable:
+    """Apply torch.jit.script to function unless one is using TPU. TPU does not support torch.jit.script."""
+    using_tpu = bool(os.environ.get("TPU_NAME"))
+    # this is a reserved variable that must be set to TPU address (e.g. grpc://11.22.33.44:1337) for TPU to function
+    should_compile = int(os.environ.get("AQ_USE_JIT", not using_tpu))
+    return torch.compile(**flags) if should_compile else lambda fn: fn
+
+
 @contextlib.contextmanager
 def using_tf32(enabled: bool):
     was_cudnn = torch.backends.cudnn.allow_tf32
