@@ -76,6 +76,7 @@ def get_inps(
     """
     print("catching layer inputs from data", flush=True)
     layers = get_layers(model)
+
     device = devices[0] if not offload_activations else torch.device("cpu")
 
     if isinstance(data, torch.Tensor) and data.shape[0] == 1:  # given a single long tensor, split it into sequences
@@ -102,12 +103,13 @@ def get_inps(
 
     dtype = next(iter(model.parameters())).dtype
     nsamples_per_device = (len(data) - 1) // len(devices) + 1
+
     inps = [
         torch.zeros(
             (min(nsamples_per_device, len(data) - i * nsamples_per_device), model_seqlen, model.config.hidden_size),
             dtype=dtype,
             device=devices[i] if not offload_activations else "cpu",
-            pin_memory=offload_activations,
+            pin_memory=offload_activations if torch.cuda.is_available() else False,
         )
         for i in range(len(devices))
     ]
@@ -845,7 +847,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     if args.devices is None:
-        args.devices = [torch.device(f"cuda:{i}") for i in range(torch.cuda.device_count())]
+        if torch.cuda.is_available():
+            args.devices = [torch.device(f"cuda:{i}") for i in range(torch.cuda.device_count())]
+        else:
+            args.devices = [torch.device("cpu")]
     else:
         args.devices = [torch.device(device_str) for device_str in args.devices]
     assert all(isinstance(device, torch.device) for device in args.devices)

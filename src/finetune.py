@@ -49,7 +49,6 @@ def finetune_groupwise(
             )
         else:
             assert train_inps[i].device == train_outs[i].device == torch.device("cpu")
-            assert train_inps[i].is_pinned() and train_outs[i].is_pinned()
 
     # replicate non-trainable parameters to each GPU
     replicas = kwargs_by_device = None
