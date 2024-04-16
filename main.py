@@ -107,7 +107,7 @@ def get_inps(
             (min(nsamples_per_device, len(data) - i * nsamples_per_device), model_seqlen, model.config.hidden_size),
             dtype=dtype,
             device=devices[i] if not offload_activations else "cpu",
-            pin_memory=offload_activations and devices != [torch.device('cpu')],
+            pin_memory=offload_activations and devices != [torch.device("cpu")],
         )
         for i in range(len(devices))
     ]
