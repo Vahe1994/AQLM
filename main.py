@@ -184,6 +184,7 @@ def quantize_aq(model: PreTrainedModel, data: Sequence, val_data: Optional[Seque
     overall_bits = 0
     number_of_quantized_params = 0
     layers = get_layers(model)
+
     for layer_index in range(len(layers)):
         print(f"\n---------------- Layer {layer_index} of {len(layers)} ----------------")
         stats_payload = {}
