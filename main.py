@@ -845,7 +845,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     if args.devices is None:
-        args.devices = [torch.device(f"cuda:{i}") for i in range(torch.cuda.device_count())]
+        if torch.cuda.is_available():
+            args.devices = [torch.device(f"cuda:{i}") for i in range(torch.cuda.device_count())]
+        else:
+            args.devices = [torch.device("cpu")]
     else:
         args.devices = [torch.device(device_str) for device_str in args.devices]
     assert all(isinstance(device, torch.device) for device in args.devices)
