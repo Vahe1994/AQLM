@@ -74,7 +74,7 @@ inline torch::Tensor scale_bias_unflatten_output(
 
   auto output_sizes = input_sizes.vec();
   output_sizes.pop_back();
-  output_sizes.push_back(-1);
+  output_sizes.push_back(flat_output.size(-1));
   auto output = flat_output.reshape(output_sizes).clone();
   return output;
 }
