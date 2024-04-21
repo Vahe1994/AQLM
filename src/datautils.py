@@ -221,25 +221,9 @@ def get_loaders(
                 "Check data path or use one of [c4, wikitext2, ptb, pajama, none]",
             )
     else:
-        # for datasets requiring tokenization
-        if "llama" in model_path.lower():
-            tokenizer = LlamaTokenizer.from_pretrained(
-                model_path, use_fast=use_fast_tokenizer, trust_remote_code=trust_remote_code
-            )
-
-            # fix for transformer 4.28.0.dev0 compatibility
-            if tokenizer.bos_token_id != 1 or tokenizer.eos_token_id != 2:
-                try:
-                    tokenizer.bos_token_id = 1
-                    tokenizer.eos_token_id = 2
-                    print(f"bos/eos tokens updated: {tokenizer.bos_token_id=},  {tokenizer.eos_token_id=}")
-                except AttributeError:
-                    pass
-                    print(f"bos/eos tokens unchanged: {tokenizer.bos_token_id=},  {tokenizer.eos_token_id=}")
-        else:
-            tokenizer = AutoTokenizer.from_pretrained(
-                model_path, use_fast=use_fast_tokenizer, trust_remote_code=trust_remote_code
-            )
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_path, use_fast=use_fast_tokenizer, trust_remote_code=trust_remote_code
+        )
 
         if name.lower() == "wikitext2":
             data = get_wikitext2(nsamples, seqlen, tokenizer, eval_mode=eval_mode)
