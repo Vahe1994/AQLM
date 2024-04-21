@@ -14,7 +14,7 @@ using namespace metal;
 
 template<typename T>
 kernel void Code1x16MatVec(
-  constant short int* A [[buffer(0)]],
+  constant uint16_t* A [[buffer(0)]],
   constant T*         B [[buffer(1)]],
   device   T*         C [[buffer(2)]],
   constant T*         codebook [[buffer(3)]],
@@ -22,13 +22,13 @@ kernel void Code1x16MatVec(
   constant int&       prob_k   [[buffer(5)]],
   uint index [[thread_position_in_grid]]
 ) {
-    int num_codes = prob_k / 8;
-    constant short int* codes_row = A + index * num_codes;
+    uint num_codes = prob_k / 8;
+    constant uint16_t* codes_row = A + index * num_codes;
 
     float res = 0;
-    for (int i = 0; i < num_codes; ++i) {
-        constant T* encoded_vector = codebook + codes_row[i] * 8;
-        for (int j = 0; j < 8; ++j) {
+    for (uint i = 0; i < num_codes; ++i) {
+        constant T* encoded_vector = codebook + static_cast<size_t>(codes_row[i]) * 8;
+        for (uint j = 0; j < 8; ++j) {
             res += static_cast<float>(encoded_vector[j] * B[i * 8 + j]);
         }
     }
@@ -38,7 +38,7 @@ kernel void Code1x16MatVec(
 template
 [[host_name("aqlm_gemv_1x16_kernel_half")]]
 kernel void Code1x16MatVec<half>(
-  constant short int* A [[buffer(0)]],
+  constant uint16_t* A [[buffer(0)]],
   constant half*         B [[buffer(1)]],
   device   half*         C [[buffer(2)]],
   constant half*         codebook [[buffer(3)]],
@@ -50,7 +50,7 @@ kernel void Code1x16MatVec<half>(
 template
 [[host_name("aqlm_gemv_1x16_kernel_float")]]
 kernel void Code1x16MatVec<float>(
-  constant short int* A [[buffer(0)]],
+  constant uint16_t* A [[buffer(0)]],
   constant float*         B [[buffer(1)]],
   device   float*         C [[buffer(2)]],
   constant float*         codebook [[buffer(3)]],

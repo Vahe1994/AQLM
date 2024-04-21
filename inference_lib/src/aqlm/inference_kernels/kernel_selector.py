@@ -43,7 +43,6 @@ def get_forward_pass_kernel(
         1,
         8,
     ):
-        print("MPS kernel")
         from .mps_kernel import MPS_FOLDER
         
         return torch.ops.aqlm.code1x16_matmat_mps
