@@ -200,9 +200,9 @@ def quantize_aq(model: PreTrainedModel, data: Sequence, val_data: Optional[Seque
             forward_args[k] = v.to(args.devices[0]) if isinstance(v, torch.Tensor) else v
 
         if args.true_sequential:
-            sequential = get_sequential_groups(model)
+            sequential = get_sequential_groups(model, layer_filter=args.layer_filter)
         else:
-            sequential = [list(find_sublayers(layer).keys())]
+            sequential = [list(find_sublayers(layer, layer_filter=args.layer_filter).keys())]
 
         loaded_layer = False
         if args.resume:
@@ -667,6 +667,12 @@ if __name__ == "__main__":
         help="Whether to run in true sequential model.",
     )
     parser.add_argument(
+        "--layer_filter",
+        type=str,
+        default=".*",
+        help="Select which linear layers to quantize (all by default).",
+    )
+    parser.add_argument(
         "--num_codebooks",
         type=int,
         default=1,
@@ -710,7 +716,6 @@ if __name__ == "__main__":
         default=1,
         help="Split codebook vectors into this many groups for quantizations. Only used when quantized codebooks.",
     )
-
     parser.add_argument(
         "--init_max_iter",
         type=int,

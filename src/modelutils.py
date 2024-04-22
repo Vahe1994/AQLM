@@ -1,5 +1,6 @@
 import math
 import os
+import re
 from contextlib import contextmanager
 
 import torch
@@ -137,32 +138,32 @@ def get_layers(model):
         raise ValueError(MODEL_ERROR_MSG.format(model.config.model_type))
 
 
-def find_sublayers(module, layers=(nn.Conv2d, nn.Linear)):
+def find_sublayers(module, layers=(nn.Conv2d, nn.Linear), layer_filter=".*"):
     res = {}
     for name, layer in module.named_modules():
-        if isinstance(layer, layers):
+        if isinstance(layer, layers) and re.search(layer_filter, name):
             res[name] = layer
     return res
 
 
-def get_sequential_groups(model):
+def get_sequential_groups(model, layer_filter=".*"):
     if model.config.model_type in LLAMA_LIKE:
         assert "mixtral" not in model.config.model_type.lower()  # check that this is not mixtral
-        return [
+        projs = [
             ["self_attn.k_proj", "self_attn.v_proj", "self_attn.q_proj"],
             ["self_attn.o_proj"],
             ["mlp.up_proj", "mlp.gate_proj"],
             ["mlp.down_proj"],
         ]
     elif model.config.model_type.lower() in FALCON_TYPES:
-        return [
+        projs = [
             ["self_attention.query_key_value"],
             ["self_attention.dense"],
             ["mlp.dense_h_to_4h"],
             ["mlp.dense_4h_to_h"],
         ]
     elif model.config.model_type == "opt":
-        return [
+        projs = [
             ["self_attn.q_proj"],
             ["self_attn.k_proj"],
             ["self_attn.v_proj"],
@@ -172,6 +173,7 @@ def get_sequential_groups(model):
         ]
     else:
         raise ValueError(MODEL_ERROR_MSG.format(model.config.model_type))
+    return [proj for proj in projs if re.search(layer_filter, proj)]
 
 
 def read_quant_weight_from_file(load_path, block_i, layer_name, device):
