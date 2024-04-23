@@ -1,10 +1,13 @@
 """Utility functions for fine-tuning quantized models using the PV algorithm"""
 import functools
+from argparse import Namespace
+from copy import deepcopy
 
 import torch
 import torch.nn as nn
 
-from src.aq import QuantizedWeight
+from src.aq import QuantizedWeight, QuantizedLinear
+from src.code_optimizer import CodeOptimizer
 
 
 def rgetattr(obj, attr, *args):
@@ -61,7 +64,7 @@ def create_dequantized_model_and_optimizer(args: Namespace, base_model: nn.Modul
         module_name_to_engine[name] = wrapped_replacer
         rsetattr(dequantized_model, name, wrapped_replacer)
 
-    code_optimizer = AQLMCodeSGD(
+    code_optimizer = CodeOptimizer(
         module_name_to_engine, lr=args.code_lr, delta_decay=args.delta_decay, beam_size=args.beam_size,
         betas=args.code_betas, amsgrad=True, lamb=True, dtype=torch.float32)
     return dequantized_model, code_optimizer
