@@ -122,12 +122,12 @@ class QuantizedWeight(nn.Module):
         return codes
 
     def wrap_codes_for_fsdp_(self, **kwargs):
-        """Modify parameters in-place to make it compatible with FullyShardedDataParallel"""
+        """Make this module compatible with FullyShardedDataParallel; modifies state dict in-place"""
         assert self.codes is not None and self.codes_storage is None
         self.codes_storage, self.codes = IntCodes(self.codes, **kwargs), None
 
     def unwrap_codes_(self):
-        """Modify parameters in-place to undo the effect of wrap_codes_for_fsdp_"""
+        """Undo the effect of wrap_codes_for_fsdp_; modifies state dict in-place"""
         assert self.codes is None and self.codes_storage is not None
         self.codes, self.codes_storage = nn.Parameter(self.codes_storage(), requires_grad=False), None
 
