@@ -18,7 +18,7 @@ except ModuleNotFoundError:
 from main import perplexity_eval
 from src.datautils import get_loaders
 from src.modelutils import get_layers, get_model, save_not_quantized_weights
-from src.utils import _extract_into_tensor, maybe_get_0th_element
+from src.aq_ops import maybe_get_0th_element, _extract_into_tensor
 
 
 @torch.inference_mode()

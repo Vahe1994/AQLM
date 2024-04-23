@@ -24,7 +24,7 @@ from src.modelutils import (
     get_sequential_groups,
     save_not_quantized_weights,
 )
-from src.utils import using_tf32
+from src.aq_ops import using_tf32
 
 try:
     import wandb
