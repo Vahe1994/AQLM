@@ -22,7 +22,7 @@ from src.utils import _extract_into_tensor, maybe_get_0th_element
 
 
 @torch.inference_mode()
-def cache_hiddens(model, dataloader):
+def cache_hiddens(model, dataloader, args):
     device = next(model.parameters()).device
     cached_hiddens = []
     for i in trange(len(dataloader), total=len(dataloader), desc="Caching hiddens", leave=False):
@@ -353,9 +353,9 @@ def main():
     if not args.device_map:
         orig_model = orig_model.to(device)
     # cache logits
-    orig_train_hiddens = cache_hiddens(orig_model, train_dataloader)
+    orig_train_hiddens = cache_hiddens(orig_model, train_dataloader, args)
     if val_dataloader:
-        orig_val_hiddens = cache_hiddens(orig_model, val_dataloader)
+        orig_val_hiddens = cache_hiddens(orig_model, val_dataloader, args)
     else:
         orig_val_hiddens = None
     del orig_model
