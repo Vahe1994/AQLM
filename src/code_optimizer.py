@@ -71,7 +71,7 @@ class CodeOptimizer(torch.optim.Optimizer):
 
             if self.betas[1]:
                 self.second_momentum[name] = self.betas[1] * self.second_momentum[name] + (
-                            1 - self.betas[1]) * grad.pow(2)
+                        1 - self.betas[1]) * grad.pow(2)
                 v_hat = self.second_momentum[name] / (1 - self.betas[1] ** self._step_i)
             else:
                 v_hat = grad.pow(2)
@@ -80,8 +80,8 @@ class CodeOptimizer(torch.optim.Optimizer):
                 self.v_hat_max[name] = torch.maximum(self.v_hat_max[name], v_hat)
                 v_hat = self.v_hat_max[name]
 
-            weight = engine.layer.weight.float()
             update = m_hat / (torch.sqrt(v_hat) + self.eps)
+            weight = engine.quantized_weight().to(update.dtype)
             if self.lamb:
                 update_norm = torch.norm(update, p='fro')
                 weight_norm = torch.norm(weight, p='fro')
@@ -91,8 +91,8 @@ class CodeOptimizer(torch.optim.Optimizer):
             self.delta[name][...] = self.delta[name] * self.delta_feedback - self.lr * update
             target_weight = (weight + self.delta[name])
             engine.quantized_weight.beam_search_update_codes_(
-                XTX=None, reference_weight=target_weight, dim_rng=random.Random(None), verbose=verbose > 1, **kwargs
-            )
+                reference_weight=target_weight, dim_rng=random.Random(None), verbose=verbose > 1, **kwargs
+            )  # beam search updates codes to minimize ||target_weight - quantized_weight()||^2
             engine.layer.weight[...] = engine.quantized_weight()  # de-quantize again
             self.delta[name][...] = target_weight - engine.quantized_weight()
 
