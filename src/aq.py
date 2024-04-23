@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 from tqdm.auto import trange
 
-from src.aq_ops import _dequantize_weight, ellipsis
+from src.aq_ops import _dequantize_weight, ellipsis, IntCodes
 from src.beam_search_xtx import beam_search_optimal_codes as beam_search_minimize_activation_mse
 from src.beam_search_l2 import beam_search_optimal_codes as beam_search_minimize_weight_mse
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
@@ -47,12 +47,15 @@ class QuantizedWeight(nn.Module):
         codebook_value_num_groups: int = 1,
         scale_nbits: int = 0,
         straight_through_gradient: Optional[bool] = None,
+        code_dtype: torch.dtype = torch.int32,
         **init_kwargs,
     ):
         super().__init__()
         self.out_features, self.in_features = reference_weight.shape
         assert self.in_features % in_group_size == 0
         assert self.out_features % out_group_size == 0
+        if nbits_per_codebook > torch.iinfo(code_dtype).bits - code_dtype.is_signed:
+            raise ValueError(f"Code dtype cannot store {nbits_per_codebook} bits; please specify code_dtype manually")
 
         self.out_group_size, self.in_group_size = out_group_size, in_group_size
         self.num_codebooks = num_codebooks
@@ -105,15 +108,28 @@ class QuantizedWeight(nn.Module):
         self.codebooks = nn.Parameter(
             codebooks, requires_grad=True
         )  # [num_codebooks, codebook_size, out_group_size, in_group_size]
-        self.codes = nn.Parameter(
-            codes.to(torch.int32),
-            requires_grad=False,
+        self.codes: Optional[nn.Parameter] = nn.Parameter(
+            codes.to(code_dtype), requires_grad=False
         )  # [num_out_groups, num_in_groups, num_codebooks]
-        self.codes_storage = None
+        self.codes_storage: Optional[IntCodes] = None  # storage for FSDP compatibility
 
     def get_codes(self) -> torch.IntTensor:
         """Get a writable view to codes, regardless of how codes are stored"""
-        return self.codes.to(torch.int32)  # in case codes were downcast to int16 or uint8
+        assert (self.codes is None) != (self.codes_storage is None), "must have either .codes or storage, but not both"
+        codes = self.codes if self.codes is not None else self.codes_storage()
+        if torch.iinfo(codes.dtype).bits < 32:
+            codes = codes.to(torch.int32)  # cast to int32 to allow indexing if codes are int16 or uint8
+        return codes
+
+    def wrap_codes_for_fsdp_(self, **kwargs):
+        """Modify parameters in-place to make it compatible with FullyShardedDataParallel"""
+        assert self.codes is not None and self.codes_storage is None
+        self.codes_storage, self.codes = IntCodes(self.codes, **kwargs), None
+
+    def unwrap_codes_(self):
+        """Modify parameters in-place to undo the effect of wrap_codes_for_fsdp_"""
+        assert self.codes is None and self.codes_storage is not None
+        self.codes, self.codes_storage = nn.Parameter(self.codes_storage(), requires_grad=False), None
 
     def get_codebooks(self) -> torch.Tensor:
         """Get quantization codebooks or reconstruct them from second level quantization (see codebook_values_nbits)"""

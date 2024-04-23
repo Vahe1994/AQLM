@@ -8,6 +8,7 @@ import os
 from typing import Optional, Callable, Sequence, Iterator, Union, Any, List, Iterable
 
 import torch
+from torch import nn
 from torch.nn import functional as F
 
 
@@ -112,3 +113,29 @@ def maybe_get_0th_element(x: Union[Any, Sequence[Any]]) -> Any:
 def _extract_into_tensor(tensor_list: List[torch.Tensor], indices: Iterable[int], device=None, dtype=None):
     extracted_items = [maybe_get_0th_element(tensor_list[i]) for i in indices]
     return torch.cat(extracted_items, dim=0).to(device=device, dtype=dtype)
+
+
+class IntCodes(nn.Module):
+    """
+    A storage for integer codes that makes them compatible with FullyShardedDataParallel,
+    see https://github.com/pytorch/pytorch/issues/123528 for details
+    """
+    def __init__(self, codes: torch.tensor, storage_dtype: torch.dtype = torch.float64):
+        super().__init__()
+        assert torch.finfo(storage_dtype).bits % torch.iinfo(codes.dtype).bits == 0
+        self.dtype, self.shape, self.numel = codes.dtype, codes.shape, codes.numel()
+        size_ratio = torch.finfo(storage_dtype).bits // torch.iinfo(codes.dtype).bits
+        codes = F.pad(codes.flatten().clone(), pad=[0, -codes.numel() % size_ratio])
+        assert len(codes.untyped_storage()) == codes.nbytes  # no offset / stride / tail
+        self.storage_dtype = storage_dtype
+        self.data = nn.Parameter(
+            torch.as_tensor(codes.untyped_storage(), device=codes.device, dtype=storage_dtype),
+            requires_grad=False)
+
+    def forward(self):
+        assert self.data.is_contiguous() and self.data.dtype == self.storage_dtype
+        byte_offset = self.data.storage_offset() * self.data.nbytes // self.data.numel()
+        return torch.as_tensor(
+            self.data.untyped_storage()[byte_offset: byte_offset + self.data.nbytes],
+            device=self.data.device, dtype=self.dtype
+        )[:self.numel].view(*self.shape)
