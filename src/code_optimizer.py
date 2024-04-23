@@ -48,7 +48,7 @@ class CodeOptimizer(torch.optim.Optimizer):
             }
         if self.amsgrad:
             self.v_hat_max = {
-                name: torch.zeros_like(engine.layer.weight, requires_grad=False, dtype=dtype)
+                name: torch.zeros_like(engine.layer.weight, requires_grad=False, dtype=statistics_dtype)
                 for name, engine in self.engines.items()
             }
 
