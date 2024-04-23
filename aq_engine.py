@@ -47,7 +47,6 @@ class AQEngine(nn.Module):
         assert isinstance(args.devices, (list, tuple)) and len(args.devices) >= 1, f"Found devices = {args.devices}"
         assert args.devices[0] == self.device, (args.devices[0], self.XTX.device)
         self.quantized_weight = QuantizedWeight(
-            XTX=self.XTX.to(device=self.device, dtype=torch.float32),
             reference_weight=self.layer.weight.detach().to(device=self.device, dtype=torch.float32),
             out_group_size=args.out_group_size,
             in_group_size=args.in_group_size,
@@ -165,7 +164,7 @@ class AQEngine(nn.Module):
         )
         reference_weight = self.layer.weight.detach()[out_channel_selection].to(dtype)
         return self.quantized_weight.beam_search_update_codes_(
-            self.XTX.to(dtype), reference_weight, selection=selection, **kwargs
+            XTX=self.XTX.to(dtype), reference_weight=reference_weight, selection=selection, **kwargs
         ).clone()
 
     @torch.no_grad()
@@ -177,12 +176,13 @@ class AQEngine(nn.Module):
         seed: Optional[int] = None,
         **kwargs,
     ):
-        """Update self.quantized_weight.codes in-place via beam search"""
+        """Update quantized_weight codes in-place via beam search"""
         if len(devices) == 1:  # single device
             assert replicas is None
             dtype = self.quantized_weight.codebooks.dtype
             self.quantized_weight.beam_search_update_codes_(
-                self.XTX.to(dtype), self.layer.weight.detach().to(dtype), dim_rng=random.Random(seed), **kwargs
+                XTX=self.XTX.to(dtype), reference_weight=self.layer.weight.detach().to(dtype),
+                dim_rng=random.Random(seed), **kwargs
             )
         else:
             assert replicas[0] is self
@@ -203,7 +203,7 @@ class AQEngine(nn.Module):
             )
             # gather all code parts and assign them to each replica
             for device, replica in zip(devices, replicas):
-                replica.quantized_weight.codes[...] = Gather.apply(device, 0, *new_code_parts_by_replica)
+                replica.quantized_weight.get_codes()[...] = Gather.apply(device, 0, *new_code_parts_by_replica)
 
 
 def replace_parameter_(module: nn.Module, name: str, new_value: torch.Tensor):

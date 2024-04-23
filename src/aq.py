@@ -8,7 +8,8 @@ from torch.utils.checkpoint import checkpoint
 from tqdm.auto import trange
 
 from src.aq_ops import _dequantize_weight, ellipsis
-from src.beam_search_xtx import beam_search_optimal_codes
+from src.beam_search_xtx import beam_search_optimal_codes as beam_search_minimize_activation_mse
+from src.beam_search_l2 import beam_search_optimal_codes as beam_search_minimize_weight_mse
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
 
 
@@ -37,7 +38,6 @@ class QuantizedWeight(nn.Module):
     def __init__(
         self,
         *,
-        XTX: torch.Tensor,
         reference_weight: torch.Tensor,
         in_group_size: int,
         out_group_size: int,
@@ -108,7 +108,12 @@ class QuantizedWeight(nn.Module):
         self.codes = nn.Parameter(
             codes.to(torch.int32),
             requires_grad=False,
-        )  #  [num_out_groups, num_in_groups, num_codebooks]
+        )  # [num_out_groups, num_in_groups, num_codebooks]
+        self.codes_storage = None
+
+    def get_codes(self) -> torch.IntTensor:
+        """Get a writable view to codes, regardless of how codes are stored"""
+        return self.codes.to(torch.int32)  # in case codes were downcast to int16 or uint8
 
     def get_codebooks(self) -> torch.Tensor:
         """Get quantization codebooks or reconstruct them from second level quantization (see codebook_values_nbits)"""
@@ -173,23 +178,25 @@ class QuantizedWeight(nn.Module):
             Formally, the indices must be in range [ 0 , self.out_features // self.out_group_size )
 
         """
-        weight = _dequantize_weight(self.codes[selection], self.get_codebooks(), self.get_scales()[selection])
+        weight = _dequantize_weight(self.get_codes()[selection], self.get_codebooks(), self.get_scales()[selection])
         return weight
 
     @torch.no_grad()
     def beam_search_update_codes_(
         self,
-        XTX: torch.Tensor,
-        reference_weight: torch.Tensor,
         *,
+        XTX: Optional[torch.Tensor] = None,
+        reference_weight: torch.Tensor,
         selection: Union[slice, ellipsis, torch.LongTensor] = ...,
         **kwargs,
     ) -> torch:
         """
-        Update self.codes in-place via beam search so as to minimize squared errors. Return the updated codes.
-        :param XTX: pairwise products of input features matmul(X.transpose(), X), shape: [in_features, in_features]
-        :note: if XTX is divided by dataset size, this function will return *mean* squared error
+        Update own codes in-place via beam search so as to minimize squared errors. Return the updated codes.
         :param reference_weight: original weight matrix that is being quantized, shape: [out_features, in_features]
+        :param XTX: pairwise products of input features matmul(X.transpose(), X), shape: [in_features, in_features]
+          - if XTX is divided by dataset size, this function will return *mean* squared error
+          - if XTX is not specified, this function minimizes squared error between weights, as if XTX was identity
+
         :note: if selection is specified, reference_weight must instead be [num_selected_out_features, in_features]
         :param selection:  By default, this function updates all codes, If selection specified, it will instead
             update only the codes for a portion of output dimensions (used for parallelism).
@@ -199,15 +206,24 @@ class QuantizedWeight(nn.Module):
         :param kwargs: any additional keyword arguments are forwarded to beam_search_optimal_codes function
         :returns: the updated codes
         """
-        self.codes[selection] = beam_search_optimal_codes(
-            XTX=XTX,
-            reference_weight=reference_weight,
-            codebooks=self.get_codebooks(),
-            prev_codes=self.codes[selection],
-            scales=self.get_scales()[selection],
-            **kwargs,
-        )
-        return self.codes[selection]
+        if XTX is not None:
+            self.get_codes()[selection] = beam_search_minimize_activation_mse(
+                XTX=XTX,
+                reference_weight=reference_weight,
+                codebooks=self.get_codebooks(),
+                prev_codes=self.get_codes()[selection],
+                scales=self.get_scales()[selection],
+                **kwargs,
+            )
+        else:
+            self.get_codes()[selection] = beam_search_minimize_weight_mse(
+                reference_weight=reference_weight,
+                codebooks=self.get_codebooks(),
+                prev_codes=self.get_codes()[selection],
+                scales=self.get_scales(),
+                **kwargs
+            )
+        return self.get_codes()[selection]
 
     def estimate_nbits_per_parameter(self) -> float:
         """Calculate the effective number of bits per original matrix parameters"""

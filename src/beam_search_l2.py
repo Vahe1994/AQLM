@@ -1,5 +1,6 @@
 """Beam search that minimizes ||Wref - Wq||^2 w.r.t. Wq"""
 import random
+import time
 from typing import Optional, List
 
 import torch
@@ -18,6 +19,7 @@ def beam_search_optimal_codes(
         stochastic_rounding_tau: float = 0.0,
         chunk_size_bytes: int = 2 ** 32,
         dim_rng: Optional[random.Random] = None,
+        verbose: bool = False
 ) -> torch.Tensor:
     """
     Update codes using beam search to minimize L2 error in code values (regardless of activations)
@@ -38,6 +40,7 @@ def beam_search_optimal_codes(
     :return: best quantization codes found, same shape as prev_codes
 
     """
+    t0 = time.perf_counter()
     # reshape references, codes and codebooks so they are no longer group-wise
     out_features, in_features = reference_weight.shape
     num_out_groups, num_in_groups, num_codebooks = prev_codes.shape
@@ -56,11 +59,15 @@ def beam_search_optimal_codes(
     dim_order = list(range(num_codebooks))
     if dim_rng is not None:
         dim_rng.shuffle(dim_order)
-    return _beam_search_update_codes_groupwise(
+    new_codes_groupwise = _beam_search_update_codes_groupwise(
         reference=reference, codebooks=codebooks, codes=prev_codes,
         beam_size=beam_size, stochastic_rounding_tau=stochastic_rounding_tau,
         chunk_size_values=chunk_size_bytes // reference[0, 0].nbytes,
-        dim_order=dim_order).reshape(num_out_groups, num_in_groups, num_codebooks)
+        dim_order=dim_order)
+    new_codes_groupwise = new_codes_groupwise.reshape(num_out_groups, num_in_groups, num_codebooks)
+    if verbose:
+        print(f"Beam search for {reference_weight.numel()} weights finished in {time.perf_counter() - t0} seconds.")
+    return new_codes_groupwise
 
 
 @torch.inference_mode
