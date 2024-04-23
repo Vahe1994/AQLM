@@ -165,7 +165,7 @@ def print_memory_stats():
     print(f"GPU max memory reserved: {torch.cuda.max_memory_reserved() / 2 ** 30:.2f} GB.")
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(add_help=True)
     # Model params
     parser.add_argument(
@@ -415,3 +415,7 @@ if __name__ == "__main__":
     print(f"eval: {torch.cuda.max_memory_allocated()=:,}")
     if args.wandb:
         wandb.log({"max_cuda_mem_eval": round(torch.cuda.max_memory_allocated() / 1e9, 2)})
+
+
+if __name__ == "__main__":
+    main()
