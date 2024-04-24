@@ -25,7 +25,8 @@ except ModuleNotFoundError:
     has_wandb = False
 
 
-def add_finetuning_args(parser: argparse.ArgumentParser):
+
+def add_model_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--base_model",
         type=str,
@@ -40,49 +41,29 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     )
     # Data params
     parser.add_argument(
-        "--dataset",
-        type=str,
-        required=True,
-        help="Training dataset name (from HF datasets) or path to data where to extract calibration data from",
-    )
-    parser.add_argument(
-        "--split",
-        type=str,
-        default="train",
-        help="Training dataset split name, e.g. 'train'",
-    )
-    parser.add_argument(
-        "--cache_dir",
-        type=str,
-        default=None,
-        help="Cache dir for huggingface datasets",
-    )
-    parser.add_argument(
-        "--overwrite_cache",
-        action="store_true",
-        help="If set, re-run data preprocessing even if it is cached",
-    )
-    parser.add_argument(
-        "--num_workers",
-        type=int,
-        default=16,
-        help="Number of CPU workers for preprocessing and data loading",
-    )
-
-    parser.add_argument(
         "--model_seqlen",
         type=int,
         default=4096,
         help="Model seqlen and calibration data context length.",
     )
     parser.add_argument(
-        "--eval_datasets",
-        nargs="+",
+        "--dtype",
         type=str,
-        default=["wikitext2", "c4"],
-        help="Datasets to run evaluation on",
+        default="auto",
+        choices=["auto", "float16", "float32", "bfloat16"],
+        help="dtype to load the model in",
     )
-    # Training params
+    parser.add_argument(
+        "--block_type", type=str, required=True,
+        help="string name of a transformer layer to wrap, e.g. LlamaDecoderLayer"
+    )
+    parser.add_argument(
+        "--attn_implementation", type=str, default=None,
+        help="Attention implementation for both teacher and student models: eager, sdpa, or flash_attention_2"
+    )
+
+
+def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--lr",
         type=float,
@@ -132,12 +113,44 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         help="Seed for calibration data and initialization. "
         "Note that the main training is not strictly deterministic.",
     )
+
+
+def add_data_args(parser: argparse.ArgumentParser):
     parser.add_argument(
-        "--dtype",
+        "--dataset",
         type=str,
-        default="auto",
-        choices=["auto", "float16", "float32", "bfloat16"],
-        help="dtype to load the model in",
+        required=True,
+        help="Training dataset name (from HF datasets) or path to data where to extract calibration data from",
+    )
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="train",
+        help="Training dataset split name, e.g. 'train'",
+    )
+    parser.add_argument(
+        "--cache_dir",
+        type=str,
+        default=None,
+        help="Cache dir for huggingface datasets",
+    )
+    parser.add_argument(
+        "--overwrite_cache",
+        action="store_true",
+        help="If set, re-run data preprocessing even if it is cached",
+    )
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=16,
+        help="Number of CPU workers for preprocessing and data loading",
+    )
+    parser.add_argument(
+        "--eval_datasets",
+        nargs="+",
+        type=str,
+        default=["wikitext2", "c4"],
+        help="Datasets to run evaluation on",
     )
     parser.add_argument(
         "--use_fast_tokenizer",
@@ -148,14 +161,6 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         "--trust_remote_code",
         action="store_true",
         help="Whether to trust remote code.",
-    )
-    parser.add_argument(
-        "--block_type", type=str, required=True,
-        help="string name of a transformer layer to wrap, e.g. LlamaDecoderLayer"
-    )
-    parser.add_argument(
-        "--attn_implementation", type=str, default=None,
-        help="Attention implementation for both teacher and student models: eager, sdpa, or flash_attention_2"
     )
 
 
@@ -254,6 +259,8 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(add_help=True)
+    add_model_args(parser)
+    add_data_args(parser)
     add_finetuning_args(parser)
     args = parser.parse_args()
 
