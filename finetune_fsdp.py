@@ -1,15 +1,10 @@
 """Early prototype of FSDP fine-tuning; TODO clean-up imports"""
 import argparse
-import os
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.distributed
 import transformers
 from torch.distributed.fsdp import FullyShardedDataParallel
 
 from src.aq_ops import IntCodes
-from src.datautils import stream_red_pajama
 from src.modelutils import get_model
 
 try:
