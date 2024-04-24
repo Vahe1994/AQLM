@@ -198,6 +198,9 @@ if __name__ == "__main__":
         print(base_model)
         for n, p in base_model.named_parameters():
             print(n, p.shape, p.dtype)
+
+    y = base_model(torch.arange(10).reshape(1, 10).to(device))
+    print(y)
     raise NotImplementedError()
 
     quantized_model = get_model(
