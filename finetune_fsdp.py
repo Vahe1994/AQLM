@@ -152,7 +152,6 @@ if __name__ == "__main__":
 
 
     args.microbatch_size = args.microbatch_size or args.batch_size
-    args.finetune_dtype = getattr(torch, args.finetune_dtype)
     if args.amp:
         assert args.finetune_dtype == torch.float32, "AMP works only with original model in fp32."
 
