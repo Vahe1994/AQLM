@@ -31,7 +31,7 @@ class CodeOptimizer(torch.optim.Optimizer):
         self.amsgrad = amsgrad
         self.lamb = lamb
 
-        if delta_feedback > 0:
+        if delta_feedback:
             self.delta = {
                 name: torch.zeros_like(engine.layer.weight, requires_grad=False, dtype=statistics_dtype)
                 for name, engine in self.engines.items()
@@ -101,5 +101,5 @@ class CodeOptimizer(torch.optim.Optimizer):
         for name, engine in self.engines.items():
             if set_to_none:
                 engine.layer.weight.grad = None
-            else:
+            elif engine.layer.weight.grad is not None:
                 engine.layer.weight.grad.zero_()
