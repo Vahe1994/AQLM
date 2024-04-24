@@ -153,6 +153,10 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         "--block_type", type=str, required=True,
         help="string name of a transformer layer to wrap, e.g. LlamaDecoderLayer"
     )
+    parser.add_argument(
+        "--attn_implementation", type=str, default=None,
+        help="Attention implementation for both teacher and student models: eager, sdpa, or flash_attention_2"
+    )
 
 
 if __name__ == "__main__":
@@ -177,7 +181,8 @@ if __name__ == "__main__":
     tokenizer.eos_token_id = 2
 
     base_model = get_model(
-        args.base_model, load_quantized=None, dtype=args.dtype, trust_remote_code=args.trust_remote_code
+        args.base_model, load_quantized=None, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
+        attn_implementation=args.attn_implementation,
     ).to(dtype=args.dtype if args.dtype != 'auto' else None)
 
     if args.gradient_checkpointing:
@@ -200,7 +205,8 @@ if __name__ == "__main__":
     )
 
     quantized_model = get_model(
-        args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code
+        args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
+        attn_implementation=args.attn_implementation
     ).to(torch.float32)  # master parameters
 
     if args.gradient_checkpointing:
