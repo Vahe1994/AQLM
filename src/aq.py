@@ -34,7 +34,6 @@ class QuantizedLinear(nn.Module):
 
 class QuantizedWeight(nn.Module):
     EPS = 1e-9
-    codes_storage: Optional[IntCodes] = None  # storage for FSDP compatibility
 
     def __init__(
         self,
@@ -112,6 +111,7 @@ class QuantizedWeight(nn.Module):
         self.codes: Optional[nn.Parameter] = nn.Parameter(
             codes.to(code_dtype), requires_grad=False
         )  # [num_out_groups, num_in_groups, num_codebooks]
+        self.codes_storage: Optional[IntCodes] = None  # storage for FSDP compatibility
 
     def get_codes(self) -> torch.IntTensor:
         """Get a writable view to codes, regardless of how codes are stored"""
