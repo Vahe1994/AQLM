@@ -185,6 +185,8 @@ if __name__ == "__main__":
         attn_implementation=args.attn_implementation,
     ).to(dtype=args.dtype if args.dtype != 'auto' else None)
 
+    base_model.train(True)  # note: gradient checkpoints do not work without train(True)
+    # TODO disable and set all params requires_grad to False
     if args.gradient_checkpointing:
         base_model.gradient_checkpointing_enable()
         base_model.enable_input_require_grads()
