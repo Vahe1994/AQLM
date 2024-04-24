@@ -251,7 +251,7 @@ def get_loaders(
     return data
 
 
-def get_red_pajama(
+def stream_red_pajama(
     seqlen,
     tokenizer,
     batch_size,
