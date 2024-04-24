@@ -180,7 +180,10 @@ if __name__ == "__main__":
     for name, module in quantized_model.modules():
         if isinstance(module, QuantizedWeight):
             print(f"Converting {name} for FSDP")
+            assert module.codes is not None
+            module.codes = module.codes.to(torch.int32)
             module.wrap_codes_for_fsdp_()
+            assert module.codes is None and isinstance(module.codes_storage, IntCodes)
     quantized_model = FullyShardedDataParallel(
         quantized_model, auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, IntCodes)
     )
