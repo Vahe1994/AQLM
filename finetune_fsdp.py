@@ -178,7 +178,7 @@ if __name__ == "__main__":
 
     base_model = get_model(
         args.base_model, load_quantized=None, dtype=args.dtype, trust_remote_code=args.trust_remote_code
-    )
+    ).to(args.dtype if args.dtype != 'auto' else None)
 
     transformer_block_types = []
     for module in base_model.modules():
