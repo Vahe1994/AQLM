@@ -4,6 +4,7 @@ import torch.distributed
 import transformers
 from torch.distributed.fsdp import FullyShardedDataParallel
 
+from src.aq import QuantizedWeight
 from src.aq_ops import IntCodes
 from src.modelutils import get_model
 
@@ -176,6 +177,10 @@ if __name__ == "__main__":
     )
     if args.dtype != 'auto':
         quantized_model = quantized_model.to(getattr(torch, args.dtype))
+    for name, module in quantized_model.modules():
+        if isinstance(module, QuantizedWeight):
+            print(f"Converting {name} for FSDP")
+            module.wrap_codes_for_fsdp_()
     quantized_model = FullyShardedDataParallel(
         quantized_model, auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, IntCodes)
     )
