@@ -215,6 +215,7 @@ if __name__ == "__main__":
     quantized_model = FullyShardedDataParallel(
         quantized_model,
         auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, (IntCodes,) + transformer_block_types),
+        use_orig_params=True,
         device_id=device,
     )
     print(quantized_model)
