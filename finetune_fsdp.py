@@ -1,150 +1,196 @@
 """Early prototype of FSDP fine-tuning; TODO clean-up imports"""
-import os
 import argparse
-import functools
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
-from torchvision import datasets, transforms
-
-import time
-import random
-from tqdm.auto import trange, tqdm
-import numpy as np
-import ipynbname  # pip install ipynbname
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+import torch.distributed
 import transformers
-from argparse import Namespace
+from torch.distributed.fsdp import FullyShardedDataParallel
 
-import torch.distributed as dist
-import torch.multiprocessing as mp
-from torch.utils.data.distributed import DistributedSampler
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    CPUOffload,
-    BackwardPrefetch,
-)
-from torch.distributed.fsdp.wrap import (
-    size_based_auto_wrap_policy,
-    enable_wrap,
-    wrap,
-)
-
-from src.aq import QuantizedWeight, QuantizedLinear
-from aq_engine import AQEngine
+from src.aq_ops import IntCodes
+from src.datautils import stream_red_pajama
 from src.modelutils import get_model
-from src.datautils import get_loaders
-from finetune import kl_div
+
+try:
+    import wandb
+    has_wandb = True
+except ModuleNotFoundError:
+    has_wandb = False
 
 
-def _run_p_step(args, base_model, quantized_model, codebook_optimizer, train_data, device):
-    assert len(train_data) % args.codebook_grad_accumulation_steps == 0
-    codebook_optimizer.zero_grad()
-    with tqdm(train_data, desc="P step") as progress:
-        total_loss = 0.0
-        for i, batch in enumerate(progress):
-            batch = torch.as_tensor(batch, device=device)
-            with torch.no_grad():
-                teacher_logits = base_model(batch).logits
-            with torch.cuda.amp.autocast(enabled=args.autocast_dtype is None, dtype=args.autocast_dtype):
-                student_logits = quantized_model(batch).logits
-                loss = kl_div(student_logits, teacher_logits, temp=1.0)
 
-            (loss / args.codebook_grad_accumulation_steps).backward()
-            if (i + 1) % args.codebook_grad_accumulation_steps == 0:
-                codebook_optimizer.step()
-                codebook_optimizer.zero_grad()
+def add_finetuning_args(parser: argparse.ArgumentParser):
+    parser.add_argument(
+        "--base_model",
+        type=str,
+        required=True,
+        help="path or name of the teacher model",
+    )
+    parser.add_argument(
+        "--quantized_model",
+        type=str,
+        required=True,
+        help="path to quantized model",
+    )
+    # Data params
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        help="Dataset name [c4, pajama] or path to data where to extract calibration data from.",
+    )
+    parser.add_argument(
+        "--nsamples",
+        type=int,
+        default=1024,
+        help="number of samples",
+    )
+    parser.add_argument(
+        "--model_seqlen",
+        type=int,
+        default=4096,
+        help="Model seqlen and calibration data context length.",
+    )
+    parser.add_argument(
+        "--eval_model_seqlen",
+        type=int,
+        default=None,
+        help="Model seqlen on validation. By default is equal to model_seqlen.",
+    )
+    parser.add_argument(
+        "--val_size",
+        type=int,
+        default=0,
+        help="size of validation split",
+    )
+    parser.add_argument(
+        "--eval_datasets",
+        nargs="+",
+        type=str,
+        default=["wikitext2", "c4"],
+        help="Datasets to run evaluation on",
+    )
+    # Training params
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=1e-5,
+        help="finetuning learning rate",
+    )
+    parser.add_argument(
+        "--adam_beta1",
+        type=float,
+        default=0.90,
+        help="Adam beta1",
+    )
+    parser.add_argument(
+        "--adam_beta2",
+        type=float,
+        default=0.95,
+        help="Adam beta2",
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=10,
+        help="Maximum number of epochs",
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=1,
+        help="training batch size",
+    )
+    parser.add_argument(
+        "--microbatch_size",
+        type=int,
+        default=None,
+        help="training microbatch size",
+    )
+    parser.add_argument(
+        "--gradient_checkpointing",
+        action="store_true",
+        help="Whether to apply gradient checkpointing",
+    )
+    parser.add_argument(
+        "--amp",
+        action="store_true",
+        help="Whether to use amp",
+    )
+    parser.add_argument("--wandb", action="store_true", help="Whether to use wandb or store locally.")
+    parser.add_argument("--save", type=str, default=None, help="Path to save quantized statistics.")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Seed for calibration data and initialization. "
+        "Note that the main training is not strictly deterministic.",
+    )
+    parser.add_argument(
+        "--offload_activations",
+        action="store_true",
+        help="Offload activations to RAM to save GPU memory.",
+    )
+    parser.add_argument(
+        "--dtype",
+        type=str,
+        default="auto",
+        choices=["auto", "float16", "float32", "bfloat16"],
+        help="dtype to load the model in",
+    )
+    parser.add_argument(
+        "--use_fast_tokenizer",
+        action="store_true",
+        help="Whether to use fast tokenizer.",
+    )
+    parser.add_argument(
+        "--trust_remote_code",
+        action="store_true",
+        help="Whether to trust remote code.",
+    )
 
-            total_loss = loss.item() / (i + 1) + total_loss * i / (i + 1)
-            progress.desc = f"P step: updating continuous params, loss = {total_loss:.9f}"
-            del student_logits, teacher_logits, loss
-        print("Average loss (after P step):", total_loss)
-        assert (i + 1) % args.codebook_grad_accumulation_steps == 0
-        codebook_optimizer.zero_grad(set_to_none=True)
-        return total_loss
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(add_help=True)
+    add_finetuning_args(parser)
+    args = parser.parse_args()
 
 
-if __name__ == '__main__':
-    dist.init_process_group("nccl")
-    rank = os.environ["LOCAL_RANK"]
+    args.microbatch_size = args.microbatch_size or args.batch_size
+    args.finetune_dtype = getattr(torch, args.finetune_dtype)
+    if args.amp:
+        assert args.finetune_dtype == torch.float32, "AMP works only with original model in fp32."
+
+    assert torch.cuda.is_available() and torch.distributed.is_available()
+    torch.distributed.init_process_group()
+
+    rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
     device = torch.device(f"cuda:{rank}")
     torch.cuda.set_device(device)
 
-
-    class args:
-        base_model = "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T"
-        quant_model = "/extra_disk_1/jheuristic/tinyllama-3t-1x14/"
-        dtype = 'bfloat16'
-        model_seqlen = 1024  # can be 2048 for 1.1B, 4096-8192 for larger models
-
-        dataset = 'pajama'
-        nsamples = 128
-        seed = 42
-        beam_size = 1
-
-        code_lr = 3e-5
-        code_betas = (0.0, 0.95)
-        codebook_lr = 1e-5
-        codebook_betas = (0.9, 0.95)
-        codebook_grad_accumulation_steps = 8
-
-        autocast_dtype = torch.bfloat16  # bfloat16 or None (not using grad scaler!)
-        training_dtype = torch.float32
-        accumulator_dtype = torch.float64
-        eval_after_v_step = True  # run slow evaluation after every V step; takes time; use for debugging only
-
-
-    train_data = get_loaders(
-        args.dataset,
-        nsamples=args.nsamples,
-        seed=args.seed,
-        model_path=args.base_model,
-        seqlen=args.model_seqlen,
-    )
-
-    my_auto_wrap_policy = functools.partial(
-        size_based_auto_wrap_policy, min_num_params=2 ** 16
-    )
+    tokenizer = transformers.AutoTokenizer.from_pretrained(args.base_model)
+    tokenizer.bos_token_id = 1
+    tokenizer.eos_token_id = 2
 
     base_model = get_model(
-        args.base_model,
-        None,
-        args.dtype,
-        args.model_seqlen,
+        args.base_model, load_quantized=None, dtype=args.dtype, trust_remote_code=args.trust_remote_code
     )
-
-    base_model = FSDP(base_model, auto_wrap_policy=my_auto_wrap_policy, device_id=device)
+    base_model = FullyShardedDataParallel(base_model, device_id=device)
 
     quantized_model = get_model(
-        args.base_model,
-        args.quant_model,
-        args.dtype,
-        args.model_seqlen,
+        args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code
     )
 
-    quantized_model = quantized_model.to(args.training_dtype)
-
-
-    def wrap_if_code(module, recurse, *args, **kwargs):
-        if recurse:
-            return True
-        return isinstance(module, nn.ParameterList) and len(module) == 1  # TODO double-check
-
-
-    quantized_model = FSDP(quantized_model, auto_wrap_policy=wrap_if_code, device_id=device, use_orig_params=True)
-
-    codebook_optimizer = torch.optim.Adam(
-        quantized_model.parameters(),
-        lr=args.codebook_lr,
-        betas=args.codebook_betas,
-        amsgrad=True,
+    quantized_model = FullyShardedDataParallel(
+        quantized_model, auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, IntCodes)
     )
 
-    for epoch in range(1, 100):
-        _run_p_step(args, base_model, quantized_model, codebook_optimizer, train_data, device)
+    if args.wandb:
+        assert has_wandb, "`wandb` not installed, try pip install `wandb`"
+        wandb.init(config=args)
 
-    dist.destroy_process_group()
+    def iterate_minibatches():
+        for input_ids in stream_red_pajama(args.model_seqlen, tokenizer, batch_size=args.microbatch_size):
+
+

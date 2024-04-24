@@ -249,38 +249,3 @@ def get_loaders(
 
     print(f"Loaded data from {name}; {len(data)=} sequences")
     return data
-
-
-def stream_red_pajama(
-    seqlen,
-    tokenizer,
-    batch_size,
-    eval_mode=False,
-    return_last_batch=True,
-):
-    assert not eval_mode, "Only train set is supported in RedPajama"
-    
-    traindata = load_dataset("togethercomputer/RedPajama-Data-1T-Sample", split="train")
-    tokenizer.bos_token_id = 1
-    tokenizer.eos_token_id = 2
-    
-    batch = list()
-    for example in DataLoader(traindata, shuffle=True):
-        trainenc = tokenizer(example["text"], return_tensors="pt")
-                
-        if trainenc.input_ids.shape[1] < seqlen:
-            continue
-            
-        i = random.randint(0, trainenc.input_ids.shape[1] - seqlen - 1)
-        j = i + seqlen
-        inp = trainenc.input_ids[:, i:j]
-        assert inp.shape[1] == seqlen
-            
-        batch.append(inp)
-        
-        if len(batch) == batch_size:
-            yield torch.cat(batch)
-            batch.clear()
-            
-    if return_last_batch and batch:
-        yield torch.cat(batch)

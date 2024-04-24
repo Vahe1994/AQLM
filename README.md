@@ -201,7 +201,7 @@ are optimized to minimize KL-divergence with teacher logits. Typically, we use t
 The command to launch the script should look like this: 
 
 ```bash
-python finetune.py \
+python finetune_legacy.py \
   --base_model $MODEL_PATH \
   --quant_model $INPUT_PATH \
   --dataset $DATASET_PATH \
