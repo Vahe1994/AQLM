@@ -181,11 +181,14 @@ if __name__ == "__main__":
         args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code
     )
     if args.dtype != 'auto':
-        quantized_model = quantized_model.to(getattr(torch, args.dtype))
+        quantized_model = quantized_model.to(getattr(torch, args.dtype)) ##TODO THINK AGAIN
+
     for name, module in quantized_model.named_modules():
         if isinstance(module, QuantizedWeight):
             print(f"Converting {name} for FSDP")
             assert module.codes is not None
+            if not hasattr(module, 'codes_storage'):
+                module.codes_storage = None  # backwards compatibility with older snapshots
             module.codes = nn.Parameter(module.codes.to(torch.int32), requires_grad=module.codes.requires_grad)
             module.wrap_codes_for_fsdp_()
             print('STORAGE', module.codes_storage)
