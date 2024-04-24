@@ -185,6 +185,7 @@ if __name__ == "__main__":
         attn_implementation=args.attn_implementation,
     ).to(dtype=args.dtype if args.dtype != 'auto' else None)
 
+    base_model.train(True)
     # TODO disable and set all params requires_grad to False
     if args.gradient_checkpointing:
         base_model.gradient_checkpointing_enable()
@@ -239,7 +240,6 @@ if __name__ == "__main__":
     for name, param in quantized_model.named_parameters():
         print(name, param.shape, param.dtype)
 
-    base_model.train(True)
 
 
     input_ids = torch.arange(4 * 2048).reshape(-1, 2048).to(device)
