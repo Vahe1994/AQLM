@@ -187,6 +187,7 @@ if __name__ == "__main__":
     if not transformer_block_types:
         raise ValueError(f"Could not find {args.block_type} among model layers")
     transformer_block_types = tuple(transformer_block_types)
+    assert any(isinstance(module, transformer_block_types) for module in base_model.modules())
 
     base_model = FullyShardedDataParallel(
         base_model,
@@ -208,11 +209,16 @@ if __name__ == "__main__":
             module.wrap_codes_for_fsdp_()
             assert module.codes is None and isinstance(module.codes_storage, IntCodes)
 
+    assert any(isinstance(module, transformer_block_types) for module in base_model.modules())
+    assert any(isinstance(module, IntCodes) for module in base_model.modules())
+
     quantized_model = FullyShardedDataParallel(
-        quantized_model, auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, (IntCodes,) + transformer_block_types),
+        quantized_model,
+        auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, (IntCodes,) + transformer_block_types),
         device_id=device,
     )
     print(quantized_model)
+    print(quantized_model(torch.arange(10).reshape(1, 10).to(device)))
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
         wandb.init(config=args)
