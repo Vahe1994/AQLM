@@ -244,15 +244,16 @@ if __name__ == "__main__":
     base_model = load_base_model(args, device)
     quantized_model = load_quantized_model(args, device)
 
-    print(quantized_model)
-    for name, param in quantized_model.named_parameters():
-        print(name, param.shape, param.dtype)
+    if rank == 0:
+        print(quantized_model)
+        for name, param in quantized_model.named_parameters():
+            print(name, param.shape, param.dtype)
 
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
         wandb.init(config=args)
 
-    #DEBUG AREA
+    #TODO this is DEBUG AREA
     base_model.train(True)
     for param in base_model.parameters():
         if param.dtype == torch.bfloat16:
