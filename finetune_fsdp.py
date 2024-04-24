@@ -252,7 +252,7 @@ if __name__ == "__main__":
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
         wandb.init(config=args)
 
-    input_ids = torch.arange(8 * 2048).reshape(-1, 2048).to(device)
+    input_ids = torch.arange(16 * 2048).reshape(-1, 2048).to(device) % 16_000
     for i in tqdm(range(100)):
         with torch.cuda.amp.autocast(enabled=args.amp, dtype=torch.bfloat16):
             y = quantized_model(input_ids)
