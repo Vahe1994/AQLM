@@ -1,6 +1,6 @@
 """Early prototype of FSDP fine-tuning; TODO clean-up imports"""
 import argparse
-
+import tqdm
 import transformers
 
 import torch
@@ -221,7 +221,10 @@ if __name__ == "__main__":
     print(quantized_model)
     for name, param in quantized_model.named_parameters():
         print(name, param.shape, param.dtype)
-    print(quantized_model(torch.arange(10).reshape(1, 10).to(device)))
+
+    input_ids = torch.arange(2048).reshape(1, -1).to(device)
+    for i in tqdm(range(100)):
+        y = quantized_model(input_ids)
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
         wandb.init(config=args)
