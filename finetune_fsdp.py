@@ -1,9 +1,11 @@
-"""Early prototype of FSDP fine-tuning; TODO clean-up imports"""
+"""Fine-tune an LLM that was previously quantized with AQLM"""
 import argparse
+from functools import partial
 from typing import Tuple
 
 from tqdm.auto import tqdm
 import transformers
+import datasets
 
 import torch
 import torch.nn as nn
@@ -13,6 +15,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel
 
 from src.aq import QuantizedWeight
 from src.aq_ops import IntCodes
+from src.datautils import group_texts
 from src.modelutils import get_model
 
 try:
@@ -20,7 +23,6 @@ try:
     has_wandb = True
 except ModuleNotFoundError:
     has_wandb = False
-
 
 
 def add_finetuning_args(parser: argparse.ArgumentParser):
@@ -40,25 +42,38 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--dataset",
         type=str,
-        help="Dataset name [c4, pajama] or path to data where to extract calibration data from.",
+        required=True,
+        help="Training dataset name (from HF datasets) or path to data where to extract calibration data from",
     )
     parser.add_argument(
-        "--nsamples",
-        type=int,
-        default=1024,
-        help="number of samples",
+        "--split",
+        type=str,
+        default="train",
+        help="Training dataset split name, e.g. 'train'",
     )
+    parser.add_argument(
+        "--cache_dir",
+        type=str,
+        default=None,
+        help="Cache dir for huggingface datasets",
+    )
+    parser.add_argument(
+        "--overwrite_cache",
+        action="store_true",
+        help="If set, re-run data preprocessing even if it is cached",
+    )
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=16,
+        help="Number of CPU workers for preprocessing and data loading",
+    )
+
     parser.add_argument(
         "--model_seqlen",
         type=int,
         default=4096,
         help="Model seqlen and calibration data context length.",
-    )
-    parser.add_argument(
-        "--val_size",
-        type=int,
-        default=0,
-        help="size of validation split",
     )
     parser.add_argument(
         "--eval_datasets",
@@ -87,22 +102,16 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         help="Adam beta2",
     )
     parser.add_argument(
-        "--epochs",
-        type=int,
-        default=10,
-        help="Maximum number of epochs",
-    )
-    parser.add_argument(
         "--batch_size",
         type=int,
         default=1,
-        help="training batch size",
+        help="training batch size - how many samples are processed per optimizer step, between all GPUs in total",
     )
     parser.add_argument(
         "--microbatch_size",
         type=int,
         default=None,
-        help="training microbatch size",
+        help="training microbatch size - how many samples are processed per GPU per forward pass",
     )
     parser.add_argument(
         "--gradient_checkpointing",
@@ -212,6 +221,34 @@ def load_quantized_model(args: argparse.Namespace, device: torch.device) -> Full
         use_orig_params=True,
         device_id=device,
     )
+
+
+def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.PreTrainedTokenizer) -> datasets.Dataset:
+    dataset = datasets.load_dataset(
+        args.dataset_name,
+        split=args.split,
+        cache_dir=args.cache_dir,
+        trust_remote_code=args.trust_remote_code,
+        streaming=False
+    )
+    text_column_name = 'text' if 'text' in dataset.column_names else dataset.column_names[0]
+    tokenized_dataset = dataset.map(
+        lambda examples: tokenizer(examples[text_column_name]),
+        batched=True,
+        num_proc=args.num_workers,
+        remove_columns=dataset.column_names,
+        load_from_cache=not args.overwrite_cache,
+        desc="Running tokenizer on dataset",
+    )
+
+    lm_dataset = tokenized_dataset.map(
+        partial(group_texts, block_size=args.model_seqlen),
+        batched=True,
+        num_proc=args.num_workers,
+        load_from_cache_file=not args.overwrite_cache,
+        desc=f"Grouping texts in chunks of {args.model_seqlen}",
+    )
+    return lm_dataset
 
 
 
