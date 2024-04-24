@@ -235,7 +235,6 @@ def load_quantized_model(model, load_path):
     """Load quantized model"""
 
     for layer_index in range(len(model.model.layers)):
-        print(model.model.layers[layer_index].input_layernorm.weight.device)
         model.model.layers[layer_index] = torch.load(
             os.path.join(load_path, str(layer_index) + ".pth"),
             map_location=model.model.layers[layer_index].input_layernorm.weight.device,
