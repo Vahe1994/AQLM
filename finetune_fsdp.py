@@ -161,6 +161,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     args.microbatch_size = args.microbatch_size or args.batch_size
+    if args.dtype != 'auto':
+        args.dtype = getattr(torch, args.dtype)
     if args.amp:
         assert args.dtype == torch.float32, "AMP works only with original model in fp32."
 
@@ -178,7 +180,7 @@ if __name__ == "__main__":
 
     base_model = get_model(
         args.base_model, load_quantized=None, dtype=args.dtype, trust_remote_code=args.trust_remote_code
-    ).to(args.dtype if args.dtype != 'auto' else None)
+    ).to(dtype=args.dtype if args.dtype != 'auto' else None)
 
     transformer_block_types = []
     for module in base_model.modules():
