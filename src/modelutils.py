@@ -48,7 +48,7 @@ def get_model(
         dtype = (
             AutoConfig.from_pretrained(model_path, trust_remote_code=trust_remote_code).torch_dtype or "auto"
         )  # force transformers 4.29.2 to follow the same rules as 4.30.x
-    else:
+    elif isinstance(dtype, str):
         dtype = getattr(torch, dtype)
 
     model_kwargs = {}
