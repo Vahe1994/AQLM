@@ -252,7 +252,7 @@ def get_loaders(
     return data
 
 
-def group_texts(examples: Sequence[Sequence[int]], block_size: int):
+def group_texts(examples: Sequence[Sequence[int]], block_size: int, add_labels: bool = True):
     """Group training examples together and split them into blocks of up to block_size tokens"""
     # based on https://github.com/huggingface/transformers/blob/main/examples/pytorch/language-modeling/run_clm.py
     # Concatenate all texts.
@@ -266,5 +266,6 @@ def group_texts(examples: Sequence[Sequence[int]], block_size: int):
         k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
         for k, t in concatenated_examples.items()
     }
-    result["labels"] = result["input_ids"].copy()
+    if add_labels:
+        result["labels"] = result["input_ids"].copy()
     return result

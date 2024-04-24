@@ -1,4 +1,7 @@
-"""Fine-tune an LLM that was previously quantized with AQLM"""
+"""
+Fine-tune an LLM that was previously quantized with AQLM;
+based on https://github.com/huggingface/transformers/blob/main/examples/pytorch/language-modeling/run_clm.py
+"""
 import argparse
 from functools import partial
 from typing import Tuple
@@ -245,16 +248,14 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
         load_from_cache=not args.overwrite_cache,
         desc="Running tokenizer on dataset",
     )
-
     lm_dataset = tokenized_dataset.map(
-        partial(group_texts, block_size=args.model_seqlen),
+        partial(group_texts, block_size=args.model_seqlen, add_labels=False),
         batched=True,
         num_proc=args.num_workers,
         load_from_cache_file=not args.overwrite_cache,
         desc=f"Grouping texts in chunks of {args.model_seqlen}",
     )
     return lm_dataset
-
 
 
 if __name__ == "__main__":
@@ -283,6 +284,12 @@ if __name__ == "__main__":
     tokenizer = transformers.AutoTokenizer.from_pretrained(args.base_model)
     tokenizer.bos_token_id = 1
     tokenizer.eos_token_id = 2
+
+    if rank != 0:
+        torch.distributed.barrier()
+    prepare_training_dataset(args, tokenizer)
+    if rank == 0:
+        torch.distributed.barrier()
 
     base_model = load_base_model(args, device)
     quantized_model = load_quantized_model(args, device)
