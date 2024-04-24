@@ -1,5 +1,7 @@
 """Early prototype of FSDP fine-tuning; TODO clean-up imports"""
 import argparse
+from typing import Tuple
+
 from tqdm.auto import tqdm
 import transformers
 
@@ -128,11 +130,6 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         "Note that the main training is not strictly deterministic.",
     )
     parser.add_argument(
-        "--offload_activations",
-        action="store_true",
-        help="Offload activations to RAM to save GPU memory.",
-    )
-    parser.add_argument(
         "--dtype",
         type=str,
         default="auto",
@@ -159,6 +156,69 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     )
 
 
+def infer_block_classes(model: nn.Module, block_type: str) -> Tuple[type, ...]:
+    """find transformer block classes that should be wrapped with inner FullyShardedDataParallel (auto_wrap_policy)"""
+    transformer_block_types = []
+    for module in model.modules():
+        if module.__class__.__name__ == block_type:
+            transformer_block_types.append(type(module))
+    if not transformer_block_types:
+        raise ValueError(f"Could not find {block_type} among model layers")
+    assert any(isinstance(module, transformer_block_types) for module in model.modules())
+    return tuple(transformer_block_types)
+
+
+def load_base_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
+    base_model = get_model(
+        args.base_model, load_quantized=None, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
+        attn_implementation=args.attn_implementation,
+    ).to(dtype=args.dtype if args.dtype != 'auto' else None)
+    base_model.train(False)
+    for param in base_model.parameters():
+        param.requires_grad = False
+
+    transformer_block_types = infer_block_classes(base_model, args.block_type)
+    return FullyShardedDataParallel(
+        base_model,
+        auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, transformer_block_types),
+        device_id=device
+    )
+
+def load_quantized_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
+    quantized_model = get_model(
+        args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
+        attn_implementation=args.attn_implementation
+    ).to(torch.float32)  # master parameters
+
+    quantized_model.train(True)  # note: HF gradient checkpoints do not work for some models without train(True); see
+    # https://github.com/huggingface/transformers/blob/2d92db8/src/transformers/models/llama/modeling_llama.py#L1006
+    if args.gradient_checkpointing:
+        quantized_model.gradient_checkpointing_enable()
+        quantized_model.enable_input_require_grads()
+
+    transformer_block_types = infer_block_classes(quantized_model, args.block_type)
+
+    # convert QuantizedModel state dict to make it compatible with FSDP
+    for name, module in quantized_model.named_modules():
+        if isinstance(module, QuantizedWeight):
+            assert module.codes is not None
+            if not hasattr(module, 'codes_storage'):
+                module.codes_storage = None  # backwards compatibility with older snapshots
+            module.codes = nn.Parameter(module.codes.to(torch.int32), requires_grad=module.codes.requires_grad)
+            module.wrap_codes_for_fsdp_()
+            assert module.codes is None and isinstance(module.codes_storage, IntCodes)
+    assert any(isinstance(module, IntCodes) for module in quantized_model.modules())
+
+    blocks_to_wrap = (IntCodes,) + transformer_block_types
+    return FullyShardedDataParallel(
+        quantized_model,
+        auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, blocks_to_wrap),
+        use_orig_params=True,
+        device_id=device,
+    )
+
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(add_help=True)
     add_finetuning_args(parser)
@@ -180,75 +240,21 @@ if __name__ == "__main__":
     tokenizer.bos_token_id = 1
     tokenizer.eos_token_id = 2
 
-    base_model = get_model(
-        args.base_model, load_quantized=None, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
-        attn_implementation=args.attn_implementation,
-    ).to(dtype=args.dtype if args.dtype != 'auto' else None)
+    base_model = load_base_model(args, device)
+    quantized_model = load_quantized_model(args, device)
 
-    base_model.train(True)
-    # TODO disable and set all params requires_grad to False
-    if args.gradient_checkpointing:
-        base_model.gradient_checkpointing_enable()
-        base_model.enable_input_require_grads()
-
-    transformer_block_types = []
-    for module in base_model.modules():
-        if module.__class__.__name__ == args.block_type:
-            transformer_block_types.append(type(module))
-    if not transformer_block_types:
-        raise ValueError(f"Could not find {args.block_type} among model layers")
-    transformer_block_types = tuple(transformer_block_types)
-    assert any(isinstance(module, transformer_block_types) for module in base_model.modules())
-
-    base_model = FullyShardedDataParallel(
-        base_model,
-        auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, transformer_block_types),
-        device_id=device
-    )
-
-    quantized_model = get_model(
-        args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
-        attn_implementation=args.attn_implementation
-    ).to(torch.float32)  # master parameters
-
-    quantized_model.train(True)  # note: HF gradient checkpoints do not work for some models without train(True); see
-    # https://github.com/huggingface/transformers/blob/2d92db8/src/transformers/models/llama/modeling_llama.py#L1006
-    if args.gradient_checkpointing:
-        quantized_model.gradient_checkpointing_enable()
-        quantized_model.enable_input_require_grads()
-
-    # convert QuantizedModel state dict to make it compatible with FSDP
-    for name, module in quantized_model.named_modules():
-        if isinstance(module, QuantizedWeight):
-            assert module.codes is not None
-            if not hasattr(module, 'codes_storage'):
-                module.codes_storage = None  # backwards compatibility with older snapshots
-            module.codes = nn.Parameter(module.codes.to(torch.int32), requires_grad=module.codes.requires_grad)
-            module.wrap_codes_for_fsdp_()
-            assert module.codes is None and isinstance(module.codes_storage, IntCodes)
-
-    assert any(isinstance(module, transformer_block_types) for module in quantized_model.modules())
-    assert any(isinstance(module, IntCodes) for module in quantized_model.modules())
-
-    quantized_model = FullyShardedDataParallel(
-        quantized_model,
-        auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, (IntCodes,) + transformer_block_types),
-        use_orig_params=True,
-        device_id=device,
-    )
     print(quantized_model)
     for name, param in quantized_model.named_parameters():
         print(name, param.shape, param.dtype)
 
-
-
-    input_ids = torch.arange(4 * 2048).reshape(-1, 2048).to(device)
-    for i in tqdm(range(100)):
-        with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
-            y = base_model(input_ids)
-        y.logits.norm().backward()
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
         wandb.init(config=args)
+
+    input_ids = torch.arange(4 * 2048).reshape(-1, 2048).to(device)
+    for i in tqdm(range(100)):
+        with torch.cuda.amp.autocast(enabled=args.amp, dtype=torch.bfloat16):
+            y = quantized_model(input_ids)
+        y.logits.norm().backward()
 
 
