@@ -120,7 +120,7 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
 
 def add_data_args(parser: argparse.ArgumentParser):
     parser.add_argument(
-        "--dataset",
+        "--dataset_name",
         type=str,
         required=True,
         help="Training dataset name (from HF datasets) or path to data where to extract calibration data from",
