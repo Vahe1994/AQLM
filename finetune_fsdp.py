@@ -188,6 +188,7 @@ if __name__ == "__main__":
             assert module.codes is not None
             module.codes = nn.Parameter(module.codes.to(torch.int32), requires_grad=module.codes.requires_grad)
             module.wrap_codes_for_fsdp_()
+            print(module.codes_storage)
             assert module.codes is None and isinstance(module.codes_storage, IntCodes)
     quantized_model = FullyShardedDataParallel(
         quantized_model, auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, IntCodes)
