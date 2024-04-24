@@ -1,6 +1,6 @@
 """Early prototype of FSDP fine-tuning; TODO clean-up imports"""
 import argparse
-import tqdm
+from tqdm.auto import tqdm
 import transformers
 
 import torch
