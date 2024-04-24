@@ -209,8 +209,8 @@ if __name__ == "__main__":
             module.wrap_codes_for_fsdp_()
             assert module.codes is None and isinstance(module.codes_storage, IntCodes)
 
-    assert any(isinstance(module, transformer_block_types) for module in base_model.modules())
-    assert any(isinstance(module, IntCodes) for module in base_model.modules())
+    assert any(isinstance(module, transformer_block_types) for module in quantized_model.modules())
+    assert any(isinstance(module, IntCodes) for module in quantized_model.modules())
 
     quantized_model = FullyShardedDataParallel(
         quantized_model,
