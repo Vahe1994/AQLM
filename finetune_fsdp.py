@@ -163,8 +163,6 @@ if __name__ == "__main__":
     args.microbatch_size = args.microbatch_size or args.batch_size
     if args.dtype != 'auto':
         args.dtype = getattr(torch, args.dtype)
-    if args.amp:
-        assert args.dtype == torch.float32, "AMP works only with original model in fp32."
 
     assert torch.cuda.is_available() and torch.distributed.is_available()
     torch.distributed.init_process_group()
