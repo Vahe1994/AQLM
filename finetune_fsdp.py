@@ -177,6 +177,13 @@ if __name__ == "__main__":
     )
     base_model = FullyShardedDataParallel(base_model, device_id=device)
 
+    if rank == 0:
+        print(base_model)
+        for n, p in base_model.named_parameters():
+            print(n, p.shape, p.dtype)
+    raise NotImplementedError()
+
+
     quantized_model = get_model(
         args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code
     ).to(torch.float32)  # master parameters
@@ -198,8 +205,4 @@ if __name__ == "__main__":
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
         wandb.init(config=args)
 
-    print(base_model)
-    for n, p in base_model.named_parameters():
-        print(n, p.shape, p.dtype)
-    raise NotImplementedError()
 
