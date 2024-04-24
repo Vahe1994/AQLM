@@ -149,6 +149,9 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         action="store_true",
         help="Whether to trust remote code.",
     )
+    parser.add_argument(
+        "--block_type", type=str, help="string name of a transformer layer to wrap, e.g. LlamaDecoderLayer"
+    )
 
 
 if __name__ == "__main__":
@@ -175,14 +178,26 @@ if __name__ == "__main__":
     base_model = get_model(
         args.base_model, load_quantized=None, dtype=args.dtype, trust_remote_code=args.trust_remote_code
     )
-    base_model = FullyShardedDataParallel(base_model, device_id=device)
+
+    transformer_block_types = []
+    for module in base_model.modules():
+        if module.__class__.__name__ == args.block_type:
+            transformer_block_types.append(type(module))
+    if not transformer_block_types:
+        raise ValueError(f"Could not find {args.block_type} among model layers")
+    transformer_block_types = tuple(transformer_block_types)
+
+    base_model = FullyShardedDataParallel(
+        base_model,
+        auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, transformer_block_types),
+        device_id=device
+    )
 
     if rank == 0:
         print(base_model)
         for n, p in base_model.named_parameters():
             print(n, p.shape, p.dtype)
     raise NotImplementedError()
-
 
     quantized_model = get_model(
         args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code
@@ -199,7 +214,8 @@ if __name__ == "__main__":
             assert module.codes is None and isinstance(module.codes_storage, IntCodes)
 
     quantized_model = FullyShardedDataParallel(
-        quantized_model, auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, IntCodes)
+        quantized_model, auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, IntCodes),
+        device_id=device_id
     )
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
