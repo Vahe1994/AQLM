@@ -161,6 +161,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     args.microbatch_size = args.microbatch_size or args.batch_size
+    print(args.dtype)
     if args.dtype != 'auto':
         args.dtype = getattr(torch, args.dtype)
 
