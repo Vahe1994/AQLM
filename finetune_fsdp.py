@@ -181,7 +181,7 @@ if __name__ == "__main__":
         if isinstance(module, QuantizedWeight):
             print(f"Converting {name} for FSDP")
             assert module.codes is not None
-            module.codes = module.codes.to(torch.int32)
+            module.codes = nn.Parameter(module.codes.to(torch.int32), requires_grad=module.codes.requires_grad)
             module.wrap_codes_for_fsdp_()
             assert module.codes is None and isinstance(module.codes_storage, IntCodes)
     quantized_model = FullyShardedDataParallel(
