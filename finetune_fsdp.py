@@ -177,7 +177,7 @@ if __name__ == "__main__":
     )
     if args.dtype != 'auto':
         quantized_model = quantized_model.to(getattr(torch, args.dtype))
-    for name, module in quantized_model.modules():
+    for name, module in quantized_model.named_modules():
         if isinstance(module, QuantizedWeight):
             print(f"Converting {name} for FSDP")
             assert module.codes is not None
