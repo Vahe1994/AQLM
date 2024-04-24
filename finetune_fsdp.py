@@ -204,8 +204,8 @@ if __name__ == "__main__":
     ).to(torch.float32)  # master parameters
 
     if args.gradient_checkpointing:
-        base_model.gradient_checkpointing_enable()
-        base_model.enable_input_require_grads()
+        quantized_model.gradient_checkpointing_enable()
+        quantized_model.enable_input_require_grads()
 
     # convert QuantizedModel state dict to make it compatible with FSDP
     for name, module in quantized_model.named_modules():
