@@ -1,7 +1,12 @@
 """Early prototype of FSDP fine-tuning; TODO clean-up imports"""
 import argparse
-import torch.distributed
+
 import transformers
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.distributed
 from torch.distributed.fsdp import FullyShardedDataParallel
 
 from src.aq import QuantizedWeight
