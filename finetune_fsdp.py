@@ -150,7 +150,8 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         help="Whether to trust remote code.",
     )
     parser.add_argument(
-        "--block_type", type=str, help="string name of a transformer layer to wrap, e.g. LlamaDecoderLayer"
+        "--block_type", type=str, required=True,
+        help="string name of a transformer layer to wrap, e.g. LlamaDecoderLayer"
     )
 
 
