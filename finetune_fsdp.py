@@ -218,6 +218,8 @@ if __name__ == "__main__":
         device_id=device,
     )
     print(quantized_model)
+    for name, param in quantized_model.named_parameters():
+        print(name, param.shape, param.dtype)
     print(quantized_model(torch.arange(10).reshape(1, 10).to(device)))
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
