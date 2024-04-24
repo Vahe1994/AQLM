@@ -180,6 +180,10 @@ if __name__ == "__main__":
         args.base_model, load_quantized=None, dtype=args.dtype, trust_remote_code=args.trust_remote_code
     ).to(dtype=args.dtype if args.dtype != 'auto' else None)
 
+    if args.gradient_checkpointing:
+        base_model.gradient_checkpointing_enable()
+        base_model.enable_input_require_grads()
+
     transformer_block_types = []
     for module in base_model.modules():
         if module.__class__.__name__ == args.block_type:
@@ -198,6 +202,10 @@ if __name__ == "__main__":
     quantized_model = get_model(
         args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code
     ).to(torch.float32)  # master parameters
+
+    if args.gradient_checkpointing:
+        base_model.gradient_checkpointing_enable()
+        base_model.enable_input_require_grads()
 
     # convert QuantizedModel state dict to make it compatible with FSDP
     for name, module in quantized_model.named_modules():
