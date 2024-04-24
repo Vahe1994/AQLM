@@ -179,21 +179,18 @@ if __name__ == "__main__":
 
     quantized_model = get_model(
         args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code
-    )
-    if args.dtype != 'auto':
-        quantized_model = quantized_model.to(getattr(torch, args.dtype)) ##TODO THINK AGAIN
+    ).to(torch.float32)  # master parameters
 
+    # convert QuantizedModel state dict to make it compatible with FSDP
     for name, module in quantized_model.named_modules():
         if isinstance(module, QuantizedWeight):
-            print(f"Converting {name} for FSDP")
             assert module.codes is not None
             if not hasattr(module, 'codes_storage'):
                 module.codes_storage = None  # backwards compatibility with older snapshots
             module.codes = nn.Parameter(module.codes.to(torch.int32), requires_grad=module.codes.requires_grad)
             module.wrap_codes_for_fsdp_()
-            print('STORAGE', module.codes_storage)
-            print('CODES', module.codes)
             assert module.codes is None and isinstance(module.codes_storage, IntCodes)
+
     quantized_model = FullyShardedDataParallel(
         quantized_model, auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, IntCodes)
     )
@@ -202,7 +199,7 @@ if __name__ == "__main__":
         wandb.init(config=args)
 
     print(base_model)
-    print("QQQQQ" * 50)
-    print(quantized_model)
+    for n, p in base_model.named_parameters():
+        print(n, p.shape, p.dtype)
     raise NotImplementedError()
 
