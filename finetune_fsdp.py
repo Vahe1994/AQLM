@@ -190,7 +190,5 @@ if __name__ == "__main__":
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
         wandb.init(config=args)
 
-    def iterate_minibatches():
-        for input_ids in stream_red_pajama(args.model_seqlen, tokenizer, batch_size=args.microbatch_size):
-
+    raise NotImplementedError()
 
