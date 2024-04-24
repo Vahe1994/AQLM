@@ -252,6 +252,16 @@ if __name__ == "__main__":
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
         wandb.init(config=args)
 
+    #DEBUG AREA
+    base_model.train(True)
+    for param in base_model.parameters():
+        if param.dtype == torch.bfloat16:
+            param.requires_grad = True
+    if args.gradient_checkpointing:
+        base_model.gradient_checkpointing_enable()
+        base_model.enable_input_require_grads()
+
+
     input_ids = torch.arange(16 * 2048).reshape(-1, 2048).to(device) % 16_000
     for i in tqdm(range(100)):
         with torch.cuda.amp.autocast(enabled=args.amp, dtype=torch.bfloat16):
