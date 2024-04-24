@@ -222,9 +222,9 @@ if __name__ == "__main__":
     for name, param in quantized_model.named_parameters():
         print(name, param.shape, param.dtype)
 
-    input_ids = torch.arange(4 * 2048).reshape(-1, 2048).to(device)
+    input_ids = torch.arange(2 * 2048).reshape(-1, 2048).to(device)
     for i in tqdm(range(100)):
-        y = base_model(input_ids)
+        y = quantized_model(input_ids)
         y.logits.norm().backward()
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
