@@ -55,12 +55,6 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         help="Model seqlen and calibration data context length.",
     )
     parser.add_argument(
-        "--eval_model_seqlen",
-        type=int,
-        default=None,
-        help="Model seqlen on validation. By default is equal to model_seqlen.",
-    )
-    parser.add_argument(
         "--val_size",
         type=int,
         default=0,
@@ -89,7 +83,7 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--adam_beta2",
         type=float,
-        default=0.95,
+        default=0.98,
         help="Adam beta2",
     )
     parser.add_argument(
@@ -121,7 +115,7 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         help="Whether to use amp",
     )
     parser.add_argument("--wandb", action="store_true", help="Whether to use wandb or store locally.")
-    parser.add_argument("--save", type=str, default=None, help="Path to save quantized statistics.")
+    parser.add_argument("--save", type=str, default=None, help="Path to save training snapshot.")
     parser.add_argument(
         "--seed",
         type=int,
@@ -185,6 +179,7 @@ def load_base_model(args: argparse.Namespace, device: torch.device) -> FullyShar
         device_id=device
     )
 
+
 def load_quantized_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
     quantized_model = get_model(
         args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
@@ -237,6 +232,10 @@ if __name__ == "__main__":
     device = torch.device(f"cuda:{rank}")
     torch.cuda.set_device(device)
 
+    if args.wandb:
+        assert has_wandb, "`wandb` not installed, try pip install `wandb`"
+        wandb.init(config=args)
+
     tokenizer = transformers.AutoTokenizer.from_pretrained(args.base_model)
     tokenizer.bos_token_id = 1
     tokenizer.eos_token_id = 2
@@ -248,10 +247,6 @@ if __name__ == "__main__":
         print(quantized_model)
         for name, param in quantized_model.named_parameters():
             print(name, param.shape, param.dtype)
-
-    if args.wandb:
-        assert has_wandb, "`wandb` not installed, try pip install `wandb`"
-        wandb.init(config=args)
 
     #TODO this is DEBUG AREA
     base_model.train(True)
