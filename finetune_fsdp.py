@@ -150,7 +150,6 @@ if __name__ == "__main__":
     add_finetuning_args(parser)
     args = parser.parse_args()
 
-
     args.microbatch_size = args.microbatch_size or args.batch_size
     if args.amp:
         assert args.finetune_dtype == torch.float32, "AMP works only with original model in fp32."
@@ -175,14 +174,17 @@ if __name__ == "__main__":
     quantized_model = get_model(
         args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code
     )
-
+    if args.dtype != 'auto':
+        quantized_model = quantized_model.to(getattr(torch, args.dtype))
     quantized_model = FullyShardedDataParallel(
         quantized_model, auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, IntCodes)
     )
-
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
         wandb.init(config=args)
 
+    print(base_model)
+    print("QQQQQ" * 50)
+    print(quantized_model)
     raise NotImplementedError()
 
