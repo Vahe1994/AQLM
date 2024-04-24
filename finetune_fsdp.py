@@ -185,7 +185,6 @@ if __name__ == "__main__":
         attn_implementation=args.attn_implementation,
     ).to(dtype=args.dtype if args.dtype != 'auto' else None)
 
-    base_model.train(True)  # note: gradient checkpoints do not work without train(True)
     # TODO disable and set all params requires_grad to False
     if args.gradient_checkpointing:
         base_model.gradient_checkpointing_enable()
@@ -211,6 +210,8 @@ if __name__ == "__main__":
         attn_implementation=args.attn_implementation
     ).to(torch.float32)  # master parameters
 
+    quantized_model.train(True)  # note: HF gradient checkpoints do not work for some models without train(True); see
+    # https://github.com/huggingface/transformers/blob/2d92db8/src/transformers/models/llama/modeling_llama.py#L1006
     if args.gradient_checkpointing:
         quantized_model.gradient_checkpointing_enable()
         quantized_model.enable_input_require_grads()
@@ -237,6 +238,9 @@ if __name__ == "__main__":
     print(quantized_model)
     for name, param in quantized_model.named_parameters():
         print(name, param.shape, param.dtype)
+
+    base_model.train(True)
+
 
     input_ids = torch.arange(4 * 2048).reshape(-1, 2048).to(device)
     for i in tqdm(range(100)):
