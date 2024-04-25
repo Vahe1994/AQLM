@@ -396,6 +396,22 @@ if __name__ == "__main__":
         grad_steps_accumulated=0,
     )
 
+    # load state
+    if args.save is None or not os.path.exists(args.save):
+        if args.save is not None and rank == 0:
+            print(f"No checkpoint found at {args.save}")
+    else:
+        with one_rank_at_a_time(local=True):
+            quantized_model.load_state_dict(torch.load(
+                os.path.join(args.save, 'quantized_model_state_dict.pt'),
+                map_location='cpu'))
+        with one_rank_at_a_time(local=True):
+            optimizer.load_state_dict(torch.load(
+                os.path.join(args.save, f'optimizer_state_dict_{rank}.pt'),
+                map_location='cpu'))
+        metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
+        print(f"Loaded training state from {args.save}: {metadata}")
+
     def _save_state():
         if args.save is None:
             return
@@ -414,25 +430,6 @@ if __name__ == "__main__":
         torch.save(optimizer.state_dict(), os.path.join(args.save, f'optimizer_state_dict_{rank}.pt'))
         torch.distributed.barrier()
 
-    def _load_state():
-        if args.save is None or not os.path.exists(args.save):
-            if args.save is not None and rank == 0:
-                print(f"No checkpoint found at {args.save}")
-            return
-        torch.distributed.barrier()
-        with one_rank_at_a_time(local=True):
-            quantized_model.load_state_dict(torch.load(
-                os.path.join(args.save, 'quantized_model_state_dict.pt'),
-                map_location='cpu'))
-        with one_rank_at_a_time(local=True):
-            optimizer.load_state_dict(torch.load(
-                os.path.join(args.save, f'optimizer_state_dict_{rank}.pt'),
-                map_location='cpu'))
-        metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
-        print(f"Loaded training state from {args.save}: {metadata}")
-        torch.distributed.barrier()
-
-    _load_state()
 
     for current_epoch in range(args.max_epochs):
         if current_epoch < metadata['current_epoch']:
