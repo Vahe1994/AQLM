@@ -379,9 +379,6 @@ if __name__ == "__main__":
     assert tokenizer.eos_token_id is not None
     tokenizer.pad_token = tokenizer.eos_token
 
-    import faulthandler
-
-    faulthandler.dump_traceback_later(60, repeat=True)
     with master_rank_first(local=True):
         dataset = prepare_training_dataset(args, tokenizer)
         if args.save_dataset_and_exit is not None:
@@ -396,6 +393,9 @@ if __name__ == "__main__":
     train_dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
     )
+
+    print(next(iter(train_dataloader)))
+    raise 123
 
     assert args.batch_size is not None, "please specify batch size"
     if args.microbatch_size is None:
