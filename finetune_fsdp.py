@@ -521,7 +521,9 @@ if __name__ == "__main__":
                     if perplexity_scores[metric_name] < metadata['best_eval_perplexity']:
                         print(f"New best perplexity ({metric_name}) = {perplexity_scores[metric_name]:.9f}")
                         metadata['best_eval_perplexity'] = perplexity_scores[args.eval_datasets[0]]
-                        _save_best_model()
+                        metadata['best_step'] = metadata['total_optimizer_steps']
+                        if args.keep_best_model:
+                            _save_best_model()
                 if args.save_every_steps and metadata['total_optimizer_steps'] % args.save_every_steps == 0:
                     _save_state()
 
