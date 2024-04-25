@@ -442,9 +442,10 @@ if __name__ == "__main__":
         if args.save is not None and rank == 0:
             print(f"No checkpoint found at {args.save}")
     else:
-        quantized_model.load_state_dict(torch.load(
-            os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'),
-            map_location='cpu'))
+        with FullyShardedDataParallel.state_dict_type(quantized_model, StateDictType.LOCAL_STATE_DICT):
+            quantized_model.load_state_dict(torch.load(
+                os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'),
+                map_location='cpu'))
         optimizer.load_state_dict(torch.load(
             os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'),
             map_location='cpu'))
@@ -464,7 +465,8 @@ if __name__ == "__main__":
         if rank == 0:
             print(f"Saving snapshot to {args.save}")
             torch.save(metadata, os.path.join(args.save, 'metadata.pt'))
-        torch.save(quantized_model.state_dict(), os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'))
+        with FullyShardedDataParallel.state_dict_type(quantized_model, StateDictType.LOCAL_STATE_DICT):
+            torch.save(quantized_model.state_dict(), os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'))
         torch.save(optimizer.state_dict(), os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'))
         torch.distributed.barrier()
 
