@@ -390,11 +390,10 @@ if __name__ == "__main__":
         dataset, rank=rank, num_replicas=world_size, shuffle=True, seed=args.seed)
 
     def collate_fn(batch_dict):
-        num_rows = len(next(iter(batch_dict.values())))
-        batch_rows = [{key: batch_dict[key][i] for key in batch_dict} for i in range(num_rows)]
         if rank == 0:
-            print('batch_rows', batch_rows)
-            print('collated', transformers.default_data_collator(batch_rows))
+            print('batch_dict', batch_dict)
+        # num_rows = len(next(iter(batch_dict.values())))
+        # batch_rows = [{key: batch_dict[key][i] for key in batch_dict} for i in range(num_rows)]
         raise 123
         return transformers.default_data_collator(batch_rows)
     train_dataloader = torch.utils.data.DataLoader(
