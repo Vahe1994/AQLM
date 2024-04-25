@@ -238,7 +238,7 @@ def load_quantized_model(args: argparse.Namespace, device: torch.device) -> Full
             if not hasattr(module, 'codes_storage'):
                 module.codes_storage = None  # backwards compatibility with older snapshots
             module.codes = nn.Parameter(module.codes.to(torch.int32), requires_grad=module.codes.requires_grad)
-            module.wrap_codes_for_fsdppreprocessing_chunk_length_()
+            module.wrap_codes_for_fsdp_()
             assert module.codes is None and isinstance(module.codes_storage, IntCodes)
     assert any(isinstance(module, IntCodes) for module in quantized_model.modules())
 
