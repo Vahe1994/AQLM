@@ -145,8 +145,8 @@ class IntCodes(nn.Module):
 @contextlib.contextmanager
 def one_rank_at_a_time(local: bool):
     distributed = torch.distributed.is_initialized()
-    rank = os.environ.get("LOCAL_RANK" if local else "RANK", 0) if distributed else 0
-    world_size = os.environ.get("LOCAL_WORLD_SIZE" if local else "WORLD_SIZE", 0) if distributed else 1
+    rank = int(os.environ.get("LOCAL_RANK" if local else "RANK", 0)) if distributed else 0
+    world_size = int(os.environ.get("LOCAL_WORLD_SIZE" if local else "WORLD_SIZE", 0)) if distributed else 1
     for current_rank in range(world_size):
         if distributed:
             torch.distributed.barrier()
@@ -157,12 +157,9 @@ def one_rank_at_a_time(local: bool):
 @contextlib.contextmanager
 def master_rank_first(local: bool, master_rank: int = 0):
     distributed = torch.distributed.is_initialized()
-    rank = os.environ.get("LOCAL_RANK" if local else "RANK", 0) if distributed else 0
-    print('MY RANK', rank, distributed, master_rank, distributed and rank != master_rank)
+    rank = int(os.environ.get("LOCAL_RANK" if local else "RANK", 0)) if distributed else 0
     if distributed and rank != master_rank:
-        print("WAITING FOR MASTER")
         torch.distributed.barrier()
     yield
     if distributed and rank == master_rank:
-        print("WAITING FOR NON-MASTER")
         torch.distributed.barrier()
