@@ -4,6 +4,7 @@ based on https://github.com/huggingface/transformers/blob/main/examples/pytorch/
 """
 import argparse
 import os
+from copy import deepcopy
 from functools import partial
 from typing import Tuple, Optional
 
@@ -28,6 +29,20 @@ try:
     has_wandb = True
 except ModuleNotFoundError:
     has_wandb = False
+
+
+def _monkeypatch_pickle_compatibility():
+    """Compatibility between old and new pickled layers; because fixing it for the fourth time is better than writing a proper saver once >.<"""
+    import transformers.activations
+    if not hasattr(transformers.activations, 'SiLUActivation'):
+        transformers.activations.SiLUActivation = deepcopy(torch.nn.SiLU)
+        transformers.activations.SiLUActivation.inplace = False
+        # https://github.com/huggingface/transformers/issues/28496
+    if not hasattr(transformers.models.llama.modeling_llama.LlamaAttention, 'attention_dropout'):
+        transformers.models.llama.modeling_llama.LlamaAttention.attention_dropout = 0
+
+
+_monkeypatch_pickle_compatibility()
 
 
 def add_model_args(parser: argparse.ArgumentParser):
