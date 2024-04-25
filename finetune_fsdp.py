@@ -32,7 +32,8 @@ except ModuleNotFoundError:
 
 
 def _monkeypatch_pickle_compatibility():
-    """Compatibility between old and new pickled layers; because fixing it for the fourth time is better than writing a proper saver once >.<"""
+    """Compatibility between old *pickled* layers and new transformers"""
+    # because patching it for the fourth time is better than writing a proper saver once >.<
     import transformers.activations
     if not hasattr(transformers.activations, 'SiLUActivation'):
         transformers.activations.SiLUActivation = deepcopy(torch.nn.SiLU)
