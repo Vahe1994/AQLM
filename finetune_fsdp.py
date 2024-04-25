@@ -462,7 +462,7 @@ if __name__ == "__main__":
 
                 metadata['total_optimizer_steps'] += 1
                 if metadata['total_optimizer_steps'] % args.eval_every_steps == 0:
-                    evaluate(quantized_model, args.eval_datasets)
+                    evaluate(args, quantized_model)
                 if metadata['total_optimizer_steps'] % args.save_every_steps == 0:
                     _save_state()
 
