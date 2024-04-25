@@ -420,6 +420,7 @@ if __name__ == "__main__":
             StateDictType.FULL_STATE_DICT,
             state_dict_config=FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
     ):
-        print(quantized_model.state_dict())
+        for name, tensor in quantized_model.state_dict().items():
+            print(name, tensor.shape, tensor.dtype)
 
 
