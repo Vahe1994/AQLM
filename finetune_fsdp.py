@@ -206,7 +206,6 @@ def add_data_args(parser: argparse.ArgumentParser):
         action="store_true",
         help="Whether to trust remote code.",
     )
-
     parser.add_argument(
         "--save_dataset_and_exit",
         type=str,
@@ -342,7 +341,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     return lm_dataset
 
 
-def evaluate(args: argparse.Namespace, model: nn.Module):
+def evaluate_perplexity(args: argparse.Namespace, model: nn.Module):
     rank = torch.distributed.get_rank()
     perplexities = {}
     for dataset_name in args.eval_datasets:
@@ -390,7 +389,10 @@ if __name__ == "__main__":
     args.amp_dtype = getattr(torch, args.amp_dtype) if args.amp_dtype is not None else None
     if args.save_every_steps is not None:
         assert args.save is not None, f"save_every_steps={args.save_every_steps}, but --save path not specified"
-
+    if args.keep_best_model:
+        assert args.save is not None, f"--keep_best_model requires --save path"
+        assert args.eval_every_steps is not None, f"--keep_best_model requires --eval_every_steps"
+        assert args.eval_datasets is not None, f"--keep_best_model requires --eval_datasets"
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
         wandb.init(config=args)
@@ -431,6 +433,9 @@ if __name__ == "__main__":
         loss_numerator=0,
         loss_denominator=0,
         grad_steps_accumulated=0,
+        early_stop_on=next(iter(args.eval_datasets)) if args.eval_datasets else None,
+        best_eval_perplexity=float('inf'),
+        best_step=0,
     )
 
     # load state
@@ -470,6 +475,7 @@ if __name__ == "__main__":
             model_state_dict = quantized_model.state_dict()
             if rank == 0:
                 torch.save(model_state_dict, os.path.join(args.save, f'best_combined_model_state_dict.pt'))
+                print(f"Saved {os.path.join(args.save, f'best_combined_model_state_dict.pt')}")
 
 
     for current_epoch in range(args.max_epochs):
@@ -511,7 +517,11 @@ if __name__ == "__main__":
                     metadata['loss_numerator'] = metadata['loss_denominator'] = 0
 
                 if args.eval_every_steps and metadata['total_optimizer_steps'] % args.eval_every_steps == 0:
-                    evaluate(args, quantized_model)
+                    perplexity_scores = evaluate_perplexity(args, quantized_model)
+                    if perplexity_scores[args.eval_datasets[0]] < metadata['best_eval_perplexity']:
+                        print(f"New best perplexity = {perplexity_scores[args.eval_datasets[0]]:.5f}")
+                        metadata['best_eval_perplexity'] = perplexity_scores[args.eval_datasets[0]]
+                        _save_best_model()
                 if args.save_every_steps and metadata['total_optimizer_steps'] % args.save_every_steps == 0:
                     _save_state()
 
