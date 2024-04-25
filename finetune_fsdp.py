@@ -236,6 +236,56 @@ def add_data_args(parser: argparse.ArgumentParser):
     )
 
 
+def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.PreTrainedTokenizer) -> datasets.Dataset:
+    if os.path.exists(args.dataset_name):
+        dataset = datasets.load_from_disk(args.dataset_name)
+    else:
+        dataset = datasets.load_dataset(
+            args.dataset_name,
+            split=args.split,
+            cache_dir=args.cache_dir,
+            trust_remote_code=args.trust_remote_code,
+            streaming=False,
+        )
+
+    def is_tokenized(dataset):
+        return 'input_ids' in dataset.column_names
+    if is_tokenized(dataset):
+        if torch.distributed.get_rank() == 0:
+            print("Dataset already tokenized")
+        return dataset
+
+    text_column_name = 'text' if 'text' in dataset.column_names else next(iter(dataset.column_names))
+
+    if args.preprocessing_chunk_length is not None:
+        dataset = dataset.map(
+            lambda examples: {text_column_name: split_long_texts(
+                examples[text_column_name], args.preprocessing_chunk_length)},
+            batched=True,
+            num_proc=args.preprocessing_num_workers if args.preprocessing_num_workers is not None else args.num_workers,
+            remove_columns=list(dataset.column_names),
+            load_from_cache_file=not args.overwrite_cache,
+            desc=f"Splitting dataset over newline into chunks of ~{args.preprocessing_chunk_length} characters",
+        )
+
+    tokenized_dataset = dataset.map(
+        lambda example: tokenizer(example[text_column_name]),
+        num_proc=args.preprocessing_num_workers if args.preprocessing_num_workers is not None else args.num_workers,
+        remove_columns=list(dataset.column_names),
+        load_from_cache_file=not args.overwrite_cache,
+        desc="Running tokenizer on dataset",
+    )
+    lm_dataset = tokenized_dataset.map(
+        partial(group_texts, block_size=args.model_seqlen, add_labels=False),
+        batched=True,
+        num_proc=args.preprocessing_num_workers if args.preprocessing_num_workers is not None else args.num_workers,
+        load_from_cache_file=not args.overwrite_cache,
+        desc=f"Grouping texts in chunks of {args.model_seqlen}",
+    )
+    assert is_tokenized(lm_dataset)
+    return lm_dataset
+
+
 def infer_block_classes(model: nn.Module, block_type: str) -> Tuple[type, ...]:
     """find transformer block classes that should be wrapped with inner FullyShardedDataParallel (auto_wrap_policy)"""
     transformer_block_types = []
@@ -314,56 +364,6 @@ def compute_loss_on_batch(
             reduction="batchmean",
         ).mean()
     return loss
-
-
-def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.PreTrainedTokenizer) -> datasets.Dataset:
-    if os.path.exists(args.dataset_name):
-        dataset = datasets.load_from_disk(args.dataset_name)
-    else:
-        dataset = datasets.load_dataset(
-            args.dataset_name,
-            split=args.split,
-            cache_dir=args.cache_dir,
-            trust_remote_code=args.trust_remote_code,
-            streaming=False,
-        )
-
-    def is_tokenized(dataset):
-        return 'input_ids' in dataset.column_names
-    if is_tokenized(dataset):
-        if torch.distributed.get_rank() == 0:
-            print("Dataset already tokenized")
-        return dataset
-
-    text_column_name = 'text' if 'text' in dataset.column_names else next(iter(dataset.column_names))
-
-    if args.preprocessing_chunk_length is not None:
-        dataset = dataset.map(
-            lambda examples: {text_column_name: split_long_texts(
-                examples[text_column_name], args.preprocessing_chunk_length)},
-            batched=True,
-            num_proc=args.preprocessing_num_workers if args.preprocessing_num_workers is not None else args.num_workers,
-            remove_columns=list(dataset.column_names),
-            load_from_cache_file=not args.overwrite_cache,
-            desc=f"Splitting dataset over newline into chunks of ~{args.preprocessing_chunk_length} characters",
-        )
-
-    tokenized_dataset = dataset.map(
-        lambda example: tokenizer(example[text_column_name]),
-        num_proc=args.preprocessing_num_workers if args.preprocessing_num_workers is not None else args.num_workers,
-        remove_columns=list(dataset.column_names),
-        load_from_cache_file=not args.overwrite_cache,
-        desc="Running tokenizer on dataset",
-    )
-    lm_dataset = tokenized_dataset.map(
-        partial(group_texts, block_size=args.model_seqlen, add_labels=False),
-        batched=True,
-        num_proc=args.preprocessing_num_workers if args.preprocessing_num_workers is not None else args.num_workers,
-        load_from_cache_file=not args.overwrite_cache,
-        desc=f"Grouping texts in chunks of {args.model_seqlen}",
-    )
-    assert is_tokenized(lm_dataset)
-    return lm_dataset
 
 
 def compute_validation_perplexities(args: argparse.Namespace, model: nn.Module, eval_datasets: dict):
