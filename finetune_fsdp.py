@@ -322,14 +322,15 @@ if __name__ == "__main__":
 
     if rank != 0:
         torch.distributed.barrier()
-    dataset = prepare_training_dataset(args, tokenizer)
-    sampler = torch.utils.data.DistributedSampler(
-        dataset, rank=rank, num_replicas=world_size, shuffle=True, seed=args.seed)
-    collate_fn = transformers.data.data_collator.DataCollatorForLanguageModeling(
-        tokenizer, mlm=False, return_tensors='pt')
-    train_dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
-    )
+    #TODO
+    # dataset = prepare_training_dataset(args, tokenizer)
+    # sampler = torch.utils.data.DistributedSampler(
+    #     dataset, rank=rank, num_replicas=world_size, shuffle=True, seed=args.seed)
+    # collate_fn = transformers.data.data_collator.DataCollatorForLanguageModeling(
+    #     tokenizer, mlm=False, return_tensors='pt')
+    # train_dataloader = torch.utils.data.DataLoader(
+    #     dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
+    # )
     if rank == 0:
         torch.distributed.barrier()
 
@@ -364,38 +365,39 @@ if __name__ == "__main__":
     loss_numerator = loss_denominator = 0
     grad_steps_accumulated = 0
 
-    for current_epoch in range(training_metadata['current_epoch'], args.max_epochs):
-        sampler.set_epoch(current_epoch)
-        for batch_index, batch in enumerate(train_dataloader):
-            batch.pop('labels', None)
-            if batch_index <= training_metadata['microbatches_since_epoch_start']:
-                continue  # skip batch
-            batch = {k: v.to(device) for k, v in batch.items()}
+    if False:
+        for current_epoch in range(training_metadata['current_epoch'], args.max_epochs):
+            sampler.set_epoch(current_epoch)
+            for batch_index, batch in enumerate(train_dataloader):
+                batch.pop('labels', None)
+                if batch_index <= training_metadata['microbatches_since_epoch_start']:
+                    continue  # skip batch
+                batch = {k: v.to(device) for k, v in batch.items()}
 
 
-            with torch.no_grad():
-                teacher_logprobs = F.log_softmax(base_model(**batch).logits, dim=-1)
-            with torch.cuda.amp.autocast(enabled=args.amp, dtype=torch.bfloat16):
-                student_logprobs = F.log_softmax(quantized_model(**batch).logits, dim=-1)
-                loss = F.kl_div(
-                    input=student_logprobs.flatten(0, -2),
-                    target=teacher_logprobs.flatten(0, -2),
-                    log_target=True,
-                    reduction="batchmean",
-                )
+                with torch.no_grad():
+                    teacher_logprobs = F.log_softmax(base_model(**batch).logits, dim=-1)
+                with torch.cuda.amp.autocast(enabled=args.amp, dtype=torch.bfloat16):
+                    student_logprobs = F.log_softmax(quantized_model(**batch).logits, dim=-1)
+                    loss = F.kl_div(
+                        input=student_logprobs.flatten(0, -2),
+                        target=teacher_logprobs.flatten(0, -2),
+                        log_target=True,
+                        reduction="batchmean",
+                    )
 
-            loss_numerator += loss.item()
-            loss_denominator += 1
-            grad_steps_accumulated += 1
-            if grad_steps_accumulated < grad_accumulation_steps:
-                (loss / grad_accumulation_steps).backward()
-            else:
-                (loss / grad_accumulation_steps).backward()
-                optimizer.step()
-                optimizer.zero_grad()
-                grad_steps_accumulated = 0
+                loss_numerator += loss.item()
+                loss_denominator += 1
+                grad_steps_accumulated += 1
+                if grad_steps_accumulated < grad_accumulation_steps:
+                    (loss / grad_accumulation_steps).backward()
+                else:
+                    (loss / grad_accumulation_steps).backward()
+                    optimizer.step()
+                    optimizer.zero_grad()
+                    grad_steps_accumulated = 0
 
-            training_metadata['microbatches_since_epoch_start'] = batch_index
+                training_metadata['microbatches_since_epoch_start'] = batch_index
 
     #TODO DEBUG ZONE
     base_model.train(True)
