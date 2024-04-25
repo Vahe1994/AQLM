@@ -16,6 +16,7 @@ import torch.nn.functional as F
 import torch.utils.data
 import torch.distributed
 from torch.distributed.fsdp import FullyShardedDataParallel, StateDictType, FullStateDictConfig
+from tqdm.auto import tqdm
 
 from src.aq import QuantizedWeight
 from src.aq_ops import IntCodes, master_rank_first, one_rank_at_a_time
@@ -128,13 +129,13 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--eval_every_steps",
         type=int,
-        default=1000,
+        default=None,
         help="evaluate once in this many optimizer steps (this many updates to model parameters)",
     )
     parser.add_argument(
         "--save_every_steps",
         type=int,
-        default=1000,
+        default=None,
         help="save state once in this many optimizer steps (this many updates to model parameters)",
     )
     parser.add_argument("--keep_best_model", action="store_true", help="Save best model state separately")
@@ -412,8 +413,11 @@ if __name__ == "__main__":
 
     optimizer = torch.optim.Adam(quantized_model.parameters(), lr=args.lr, betas=(args.adam_beta1, args.adam_beta2))
     metadata = dict(
-        current_epoch=0, microbatches_since_epoch_start=0, total_optimizer_steps=0,
-        loss_numerator=0, loss_denominator=0,
+        current_epoch=0,
+        microbatches_since_epoch_start=0,
+        total_optimizer_steps=0,
+        loss_numerator=0,
+        loss_denominator=0,
         grad_steps_accumulated=0,
     )
 
@@ -457,7 +461,8 @@ if __name__ == "__main__":
             continue  # skip finished epochs
         sampler.set_epoch(current_epoch)
 
-        for batch_index, batch in enumerate(train_dataloader):
+        batch_iter = tqdm(train_dataloader, desc=f"Training epoch #{current_epoch}") if rank == 0 else train_dataloader
+        for batch_index, batch in enumerate(batch_iter):
             batch.pop('labels', None)
             if batch_index <= metadata['microbatches_since_epoch_start']:
                 continue  # skip batches processed before checkpoint
@@ -479,10 +484,12 @@ if __name__ == "__main__":
                 metadata['grad_steps_accumulated'] = 0
 
                 metadata['total_optimizer_steps'] += 1
-                if metadata['total_optimizer_steps'] % args.eval_every_steps == 0:
+                if args.eval_every_steps and metadata['total_optimizer_steps'] % args.eval_every_steps == 0:
                     evaluate(args, quantized_model)
-                if metadata['total_optimizer_steps'] % args.save_every_steps == 0:
+                if args.save_every_steps and metadata['total_optimizer_steps'] % args.save_every_steps == 0:
                     _save_state()
 
         metadata['microbatches_since_epoch_start'] = 0
         metadata['current_epoch'] += 1
+
+    _save_state()
