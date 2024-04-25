@@ -388,6 +388,9 @@ if __name__ == "__main__":
     assert tokenizer.eos_token_id is not None
     tokenizer.pad_token = tokenizer.eos_token
 
+    import faulthandler
+
+    faulthandler.dump_traceback_later(60, repeat=True)
     with master_rank_first(local=True):
         dataset = prepare_training_dataset(args, tokenizer)
         if args.save_dataset_and_exit is not None:
