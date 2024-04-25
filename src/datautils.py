@@ -286,7 +286,12 @@ def group_texts(examples: Sequence[Sequence[int]], block_size: int, add_labels: 
 
 
 @torch.inference_mode()
-def evaluate_perplexity(model: nn.Module, data: torch.Tensor, seqlen: int, device: torch.device) -> float:
+def evaluate_perplexity(
+        model: nn.Module,
+        data: torch.Tensor,
+        seqlen: int,
+        device: torch.device,
+        amp_dtype: Optional[torch.dtype] = None) -> float:
     """Perplexity evaluation as per https://github.com/IST-DASLab/gptq (standard among quantization research)"""
     rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
     world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
@@ -305,7 +310,8 @@ def evaluate_perplexity(model: nn.Module, data: torch.Tensor, seqlen: int, devic
         if sequence_index % world_size != rank:
             continue
         input_ids = input_ids.to(device)
-        lm_logits = model(input_ids).logits
+        with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype or torch.float32):
+            lm_logits = model(input_ids).logits
 
         shift_logits = lm_logits[:, :-1, :].contiguous()
         shift_labels = input_ids[:, 1:]
@@ -314,13 +320,9 @@ def evaluate_perplexity(model: nn.Module, data: torch.Tensor, seqlen: int, devic
         neg_log_likelihood = loss.float() * seqlen
         if sequence_index < num_sequences_without_padding:
             total_nll += neg_log_likelihood
-            total_tokens += shift_labels.numel()
+        total_tokens += shift_labels.numel()
 
     if world_size > 0:
-        if rank == 0:
-            print("BEFORE", total_nll, total_tokens)
         torch.distributed.all_reduce_coalesced([total_nll, total_tokens], op=torch.distributed.ReduceOp.SUM)
-        if rank == 0:
-            print("AFTER", total_nll, total_tokens)
     ppl = torch.exp(total_nll / total_tokens)
     return ppl.item()
