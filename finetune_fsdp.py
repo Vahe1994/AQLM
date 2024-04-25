@@ -20,7 +20,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel, StateDictType, Full
 
 from src.aq import QuantizedWeight
 from src.aq_ops import IntCodes
-from src.datautils import group_texts
+from src.datautils import group_texts, split_long_texts
 from src.modelutils import get_model
 
 try:
@@ -163,6 +163,12 @@ def add_data_args(parser: argparse.ArgumentParser):
         help="Number of CPU workers for preprocessing; overrides num_workers",
     )
     parser.add_argument(
+        "--preprocessing_chunk_length",
+        type=int,
+        default=None,
+        help="Texts exceeding this length will be split approximately in the middle",
+    )
+    parser.add_argument(
         "--eval_datasets",
         nargs="+",
         type=str,
@@ -254,10 +260,22 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
         streaming=False,
     )
     text_column_name = 'text' if 'text' in dataset.column_names else dataset.column_names[0]
+
+    if args.preprocessing_chunk_length is not None:
+        dataset = dataset.map(
+            partial(
+                split_long_texts, text_column_name=text_column_name, split_max_length=args.preprocessing_chunk_length
+            ),
+            batched=True,
+            num_proc=args.preprocessing_num_workers if args.preprocessing_num_workers is not None else args.num_workers,
+            remove_columns=list(dataset.column_names),
+            load_from_cache_file=not args.overwrite_cache,
+            desc=f"Splitting dataset over newline into chunks of ~{args.preprocessing_chunk_length} characters",
+        )
+
     tokenized_dataset = dataset.map(
         lambda examples: tokenizer(examples[text_column_name]),
         batched=True,
-        batch_size=32,  # reduce batch size for parallel processing with very long texts
         num_proc=args.preprocessing_num_workers if args.preprocessing_num_workers is not None else args.num_workers,
         remove_columns=list(dataset.column_names),
         load_from_cache_file=not args.overwrite_cache,
@@ -280,10 +298,6 @@ if __name__ == "__main__":
     add_finetuning_args(parser)
     args = parser.parse_args()
 
-    args.microbatch_size = args.microbatch_size or args.batch_size
-    if args.dtype != 'auto':
-        args.dtype = getattr(torch, args.dtype)
-
     assert torch.cuda.is_available() and torch.distributed.is_available()
     torch.distributed.init_process_group()
 
@@ -291,6 +305,13 @@ if __name__ == "__main__":
     world_size = torch.distributed.get_world_size()
     device = torch.device(f"cuda:{rank}")
     torch.cuda.set_device(device)
+
+    if args.microbatch_size is None:
+        args.microbatch_size = args.batch_size // world_size
+    assert args.batch_size % (world_size * args.microbatch_size) == 0
+    grad_accumulation_steps = args.batch_size // (world_size * args.microbatch_size)
+    if args.dtype != 'auto':
+        args.dtype = getattr(torch, args.dtype)
 
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
@@ -323,11 +344,11 @@ if __name__ == "__main__":
             print(name, param.shape, param.dtype)
 
     optimizer = torch.optim.Adam(quantized_model.parameters(), lr=args.lr, betas=(args.adam_beta1, args.adam_beta2))
-    training_metadata = dict(current_epoch=0, batches_since_epoch_start=0)
+    training_metadata = dict(current_epoch=0, microbatches_since_epoch_start=0)
 
     def _save_state():
         os.makedirs(args.save, exist_ok=True)
-        #TODO
+        #TODO global state dict
         torch.save(training_metadata, os.path.join(args.save, 'metadata.pt'))
         torch.save(quantized_model.state_dict(), os.path.join(args.save, 'quantized_model_state_dict.pt'))
         torch.save(optimizer.state_dict(), os.path.join(args.save, 'optimizer_state_dict.pt'))
@@ -335,17 +356,51 @@ if __name__ == "__main__":
     def _load_state():
         if not os.path.exists(args.save):
             print(f"No checkpoint found at {args.save}")
-        #TODO
+        #TODO global state dict
+        optimizer.load_state_dict(torch.load(os.path.join(args.save, 'optimizer_state_dict.pt', map_location='cpu')))
+        quantized_model.load_state_dict(torch.load(os.path.join(args.save, 'quantized_model_state_dict.pt', map_location='cpu')))
         training_metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
         print(f"Loaded training state: {training_metadata}")
-        quantized_model.load_state_dict(torch.load(os.path.join(args.save, 'quantized_model_state_dict.pt', map_location='cpu')))
 
+    raise 123 #DEBUG
 
-
+    loss_numerator = loss_denominator = 0
+    grad_steps_accumulated = 0
 
     for current_epoch in range(training_metadata['current_epoch'], args.max_epochs):
-
         sampler.set_epoch(current_epoch)
+        for batch_index, batch in enumerate(train_dataloader):
+            batch.pop('labels', None)
+            if batch_index <= training_metadata['microbatches_since_epoch_start']:
+                continue  # skip batch
+            batch = {k: v.to(device) for k, v in batch.items()}
+
+
+            with torch.no_grad():
+                teacher_logprobs = F.log_softmax(base_model(**batch).logits, dim=-1)
+            with torch.cuda.amp.autocast(enabled=args.amp, dtype=torch.bfloat16):
+                student_logprobs = F.log_softmax(quantized_model(**batch).logits, dim=-1)
+                loss = F.kl_div(
+                    input=student_logprobs.flatten(0, -2),
+                    target=teacher_logprobs.flatten(0, -2),
+                    log_target=True,
+                    reduction="batchmean",
+                )
+
+            loss_numerator += loss.item()
+            loss_denominator += 1
+            grad_steps_accumulated += 1
+            if grad_steps_accumulated < grad_accumulation_steps:
+                (loss / grad_accumulation_steps).backward()
+            else:
+                (loss / grad_accumulation_steps).backward()
+                optimizer.step()
+                optimizer.zero_grad()
+                grad_steps_accumulated = 0
+
+            training_metadata['microbatches_since_epoch_start'] = batch_index
+
+    #TODO DEBUG ZONE
     base_model.train(True)
     for param in base_model.parameters():
         if param.dtype == torch.bfloat16:
@@ -358,7 +413,7 @@ if __name__ == "__main__":
     input_ids = torch.arange(8 * 2048).reshape(-1, 2048).to(device) % 16_000
     for i in tqdm(range(1)):
         with torch.cuda.amp.autocast(enabled=args.amp, dtype=torch.bfloat16):
-            y = quantized_model(input_ids)
+            y = quantized_model(input_ids).logits
         y.logits.norm().backward()
 
     with FullyShardedDataParallel.state_dict_type(

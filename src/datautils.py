@@ -252,8 +252,22 @@ def get_loaders(
     return data
 
 
+def split_long_texts(inputs, text_column_name: str, split_max_length: int):
+    """Split examples that exceed split_max_length into multiple sub-examples"""
+    outputs = []
+    for index, input_str in inputs[text_column_name]:
+        while True:
+            truncation_index = input_str.find('\n', split_max_length)
+            if truncation_index == -1:
+                outputs.append(input_str)
+                break
+            outputs.append(input_str[:truncation_index])
+            input_str = input_str[truncation_index + 1:]  # continue after \n
+    return {text_column_name: outputs}
+
+
 def group_texts(examples: Sequence[Sequence[int]], block_size: int, add_labels: bool = True):
-    """Group training examples together and split them into blocks of up to block_size tokens"""
+    """Group tokenized examples together and split them into blocks of up to block_size tokens"""
     # based on https://github.com/huggingface/transformers/blob/main/examples/pytorch/language-modeling/run_clm.py
     # Concatenate all texts.
     concatenated_examples = {k: list(chain(*examples[k])) for k in examples.keys()}
@@ -269,3 +283,4 @@ def group_texts(examples: Sequence[Sequence[int]], block_size: int, add_labels: 
     if add_labels:
         result["labels"] = result["input_ids"].copy()
     return result
+
