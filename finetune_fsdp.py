@@ -147,8 +147,14 @@ def add_data_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--num_workers",
         type=int,
-        default=16,
+        default=8,
         help="Number of CPU workers for preprocessing and data loading",
+    )
+    parser.add_argument(
+        "--preprocessing_num_workers",
+        type=int,
+        default=None,
+        help="Number of CPU workers for preprocessing; overrides num_workers",
     )
     parser.add_argument(
         "--eval_datasets",
@@ -245,7 +251,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     tokenized_dataset = dataset.map(
         lambda examples: tokenizer(examples[text_column_name]),
         batched=True,
-        num_proc=args.num_workers,
+        num_proc=args.preprocessing_num_workers if args.preprocessing_num_workers is not None else args.num_workers,
         remove_columns=list(dataset.column_names),
         load_from_cache_file=not args.overwrite_cache,
         desc="Running tokenizer on dataset",
@@ -253,7 +259,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     lm_dataset = tokenized_dataset.map(
         partial(group_texts, block_size=args.model_seqlen, add_labels=False),
         batched=True,
-        num_proc=args.num_workers,
+        num_proc=args.preprocessing_num_workers if args.preprocessing_num_workers is not None else args.num_workers,
         load_from_cache_file=not args.overwrite_cache,
         desc=f"Grouping texts in chunks of {args.model_seqlen}",
     )
