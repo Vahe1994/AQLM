@@ -397,10 +397,6 @@ if __name__ == "__main__":
         dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
     )
 
-    print(dataset)
-    print(next(iter(train_dataloader)))
-    raise 123
-
     assert args.batch_size is not None, "please specify batch size"
     if args.microbatch_size is None:
         args.microbatch_size = args.batch_size // world_size
@@ -411,7 +407,6 @@ if __name__ == "__main__":
         args.dtype = getattr(torch, args.dtype)
     if args.amp_dtype is not None:
         args.amp_dtype = getattr(torch, args.amp_dtype)
-
 
     with one_rank_at_a_time(local=True):
         base_model = load_base_model(args, device)
