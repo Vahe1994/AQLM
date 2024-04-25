@@ -252,10 +252,10 @@ def get_loaders(
     return data
 
 
-def split_long_texts(inputs, text_column_name: str, split_max_length: int):
+def split_long_texts(inputs: Sequence[str], split_max_length: int):
     """Split examples that exceed split_max_length into multiple sub-examples"""
     outputs = []
-    for index, input_str in inputs[text_column_name]:
+    for index, input_str in enumerate(inputs):
         while True:
             truncation_index = input_str.find('\n', split_max_length)
             if truncation_index == -1:
@@ -263,7 +263,7 @@ def split_long_texts(inputs, text_column_name: str, split_max_length: int):
                 break
             outputs.append(input_str[:truncation_index])
             input_str = input_str[truncation_index + 1:]  # continue after \n
-    return {text_column_name: outputs}
+    return outputs
 
 
 def group_texts(examples: Sequence[Sequence[int]], block_size: int, add_labels: bool = True):

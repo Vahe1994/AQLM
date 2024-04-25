@@ -238,7 +238,7 @@ def load_quantized_model(args: argparse.Namespace, device: torch.device) -> Full
             if not hasattr(module, 'codes_storage'):
                 module.codes_storage = None  # backwards compatibility with older snapshots
             module.codes = nn.Parameter(module.codes.to(torch.int32), requires_grad=module.codes.requires_grad)
-            module.wrap_codes_for_fsdp_()
+            module.wrap_codes_for_fsdppreprocessing_chunk_length_()
             assert module.codes is None and isinstance(module.codes_storage, IntCodes)
     assert any(isinstance(module, IntCodes) for module in quantized_model.modules())
 
@@ -263,9 +263,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
 
     if args.preprocessing_chunk_length is not None:
         dataset = dataset.map(
-            partial(
-                split_long_texts, text_column_name=text_column_name, split_max_length=args.preprocessing_chunk_length
-            ),
+            lambda examples: {text_column_name: split_long_texts(examples[text_column_name])},
             batched=True,
             num_proc=args.preprocessing_num_workers if args.preprocessing_num_workers is not None else args.num_workers,
             remove_columns=list(dataset.column_names),
