@@ -288,13 +288,16 @@ def compute_loss_on_batch(batch: dict, base_model: nn.Module, quantized_model: n
 
 
 def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.PreTrainedTokenizer) -> datasets.Dataset:
-    dataset = datasets.load_dataset(
-        args.dataset_name,
-        split=args.split,
-        cache_dir=args.cache_dir,
-        trust_remote_code=args.trust_remote_code,
-        streaming=False,
-    )
+    if os.path.exists(args.dataset_name):
+        dataset = datasets.load_from_disk(args.dataset_name)
+    else:
+        dataset = datasets.load_dataset(
+            args.dataset_name,
+            split=args.split,
+            cache_dir=args.cache_dir,
+            trust_remote_code=args.trust_remote_code,
+            streaming=False,
+        )
 
     def is_tokenized(dataset):
         return 'input_ids' in dataset.column_names
