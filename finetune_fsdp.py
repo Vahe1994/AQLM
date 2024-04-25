@@ -356,7 +356,8 @@ def compute_validation_perplexities(args: argparse.Namespace, model: nn.Module):
         if rank == 0:
             print(f"Dataset {dataset_name} loaded, evaluating...")
         device = next(model.parameters()).device
-        ppl = evaluate_perplexity(model, eval_dataset, args.model_seqlen, device=device, amp_dtype=args.amp_dtype)
+        amp_dtype = args.amp_dtype if args.amp_dtype is not None else (args.dtype if args.dtype != 'auto' else None)
+        ppl = evaluate_perplexity(model, eval_dataset, args.model_seqlen, device=device, amp_dtype=amp_dtype)
         if rank == 0:
             print(f"{dataset_name} perplexity: {ppl:.9f}")
         perplexities[dataset_name] = ppl
@@ -524,7 +525,8 @@ if __name__ == "__main__":
                     perplexity_scores = compute_validation_perplexities(args, quantized_model)
                     metric_name = metadata['early_stop_on']
                     if perplexity_scores[metric_name] < metadata['best_eval_perplexity']:
-                        print(f"New best perplexity ({metric_name}) = {perplexity_scores[metric_name]:.9f}")
+                        if rank == 0:
+                            print(f"New best perplexity ({metric_name}) = {perplexity_scores[metric_name]:.9f}")
                         metadata['best_eval_perplexity'] = perplexity_scores[args.eval_datasets[0]]
                         metadata['best_step'] = metadata['total_optimizer_steps']
                         if args.keep_best_model:
