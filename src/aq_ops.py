@@ -147,11 +147,13 @@ def one_rank_at_a_time(local: bool):
     distributed = torch.distributed.is_initialized()
     rank = int(os.environ.get("LOCAL_RANK" if local else "RANK", 0)) if distributed else 0
     world_size = int(os.environ.get("LOCAL_WORLD_SIZE" if local else "WORLD_SIZE", 0)) if distributed else 1
+    if distributed:
+        torch.distributed.barrier()
     for current_rank in range(world_size):
-        if distributed:
-            torch.distributed.barrier()
         if current_rank == rank:
             yield
+        if distributed:
+            torch.distributed.barrier()
 
 
 @contextlib.contextmanager
