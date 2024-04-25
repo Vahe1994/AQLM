@@ -461,9 +461,9 @@ if __name__ == "__main__":
                 metadata['grad_steps_accumulated'] = 0
 
                 metadata['total_optimizer_steps'] += 1
-                if metadata['total_optimizer_steps'] % args.eval_every == 0:
+                if metadata['total_optimizer_steps'] % args.eval_every_steps == 0:
                     evaluate(quantized_model, args.eval_datasets)
-                if metadata['total_optimizer_steps'] % args.save_every == 0:
+                if metadata['total_optimizer_steps'] % args.save_every_steps == 0:
                     _save_state()
 
         metadata['microbatches_since_epoch_start'] = 0
