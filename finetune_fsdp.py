@@ -104,9 +104,11 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         help="Whether to apply gradient checkpointing",
     )
     parser.add_argument(
-        "--amp",
-        action="store_true",
-        help="Whether to use amp to bfloat16",
+        "--amp_dtype",
+        type=str,
+        default=None,
+        choices=[None, "float16", "bfloat16"],
+        help="if specified, runs automated mixed precision with this dtype",
     )
     parser.add_argument(
         "--seed",
@@ -273,7 +275,7 @@ def load_quantized_model(args: argparse.Namespace, device: torch.device) -> Full
 def compute_loss_on_batch(batch: dict, base_model: nn.Module, quantized_model: nn.Module):
     with torch.no_grad():
         teacher_logprobs = F.log_softmax(base_model(**batch).logits, dim=-1)
-    with torch.cuda.amp.autocast(enabled=args.amp, dtype=torch.bfloat16):
+    with torch.cuda.amp.autocast(enabled=args.amp_dtype is not None, dtype=args.amp_dtype):
         student_logprobs = F.log_softmax(quantized_model(**batch).logits, dim=-1)
         loss = F.kl_div(
             input=student_logprobs.flatten(0, -2),
@@ -344,7 +346,8 @@ def evaluate(args: argparse.Namespace, model: transformers.PreTrainedModel):
         )
         if rank == 0:
             print(f"Dataset {dataset_name} loaded, evaluating...")
-        ppl = evaluate_perplexity(model, eval_dataset, args.model_seqlen, device=next(model.parameters()).device)
+        device = next(model.parameters()).device
+        ppl = evaluate_perplexity(model, eval_dataset, args.model_seqlen, device=device, amp_dtype=args.amp_dtype)
         if rank == 0:
             print(f"{dataset_name} perplexity: {ppl:.9f}")
         perplexities[dataset_name] = ppl
@@ -373,6 +376,8 @@ if __name__ == "__main__":
     grad_accumulation_steps = args.batch_size // (world_size * args.microbatch_size)
     if args.dtype != 'auto':
         args.dtype = getattr(torch, args.dtype)
+    if args.amp_dtype is not None:
+        args.amp_dtype = getattr(torch, args.amp_dtype)
 
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
@@ -384,19 +389,21 @@ if __name__ == "__main__":
 
     with master_rank_first(local=True):
         dataset = prepare_training_dataset(args, tokenizer)
-        sampler = torch.utils.data.DistributedSampler(
-            dataset, rank=rank, num_replicas=world_size, shuffle=True, seed=args.seed)
-        collate_fn = transformers.data.data_collator.DataCollatorForLanguageModeling(
-            tokenizer, mlm=False, return_tensors='pt')
-        train_dataloader = torch.utils.data.DataLoader(
-            dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
-        )
+    if args.save_dataset_and_exit is not None:
+        if rank == 0:
+            dataset.save_to_disk(args.save_dataset_and_exit)
+        exit()
+    sampler = torch.utils.data.DistributedSampler(
+        dataset, rank=rank, num_replicas=world_size, shuffle=True, seed=args.seed)
+    collate_fn = transformers.data.data_collator.DataCollatorForLanguageModeling(
+        tokenizer, mlm=False, return_tensors='pt')
+    train_dataloader = torch.utils.data.DataLoader(
+        dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
+    )
 
     with one_rank_at_a_time(local=True):
         base_model = load_base_model(args, device)
-    with one_rank_at_a_time(local=True):
         quantized_model = load_quantized_model(args, device)
-
     if rank == 0:
         print("Wrapped model:")
         print(quantized_model)
