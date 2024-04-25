@@ -244,7 +244,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
         lambda examples: tokenizer(examples[text_column_name]),
         batched=True,
         num_proc=args.num_workers,
-        remove_columns=dataset.column_names,
+        remove_columns=list(dataset.column_names),
         load_from_cache_file=not args.overwrite_cache,
         desc="Running tokenizer on dataset",
     )
