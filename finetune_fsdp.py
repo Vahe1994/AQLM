@@ -20,7 +20,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel, StateDictType, Full
 
 from src.aq import QuantizedWeight
 from src.aq_ops import IntCodes
-from src.datautils import group_texts, split_long_texts
+from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
 from src.modelutils import get_model
 
 try:
@@ -251,6 +251,20 @@ def load_quantized_model(args: argparse.Namespace, device: torch.device) -> Full
     )
 
 
+def compute_loss_on_batch(batch: dict, base_model: nn.Module, quantized_model: nn.Module):
+    with torch.no_grad():
+        teacher_logprobs = F.log_softmax(base_model(**batch).logits, dim=-1)
+    with torch.cuda.amp.autocast(enabled=args.amp, dtype=torch.bfloat16):
+        student_logprobs = F.log_softmax(quantized_model(**batch).logits, dim=-1)
+        loss = F.kl_div(
+            input=student_logprobs.flatten(0, -2),
+            target=teacher_logprobs.flatten(0, -2),
+            log_target=True,
+            reduction="batchmean",
+        ).mean()
+    return loss
+
+
 def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.PreTrainedTokenizer) -> datasets.Dataset:
     dataset = datasets.load_dataset(
         args.dataset_name,
@@ -287,6 +301,19 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
         desc=f"Grouping texts in chunks of {args.model_seqlen}",
     )
     return lm_dataset
+
+
+def evaluate(args: argparse.Namespace, model: transformers.PreTrainedModel):
+    eval_data = get_loaders(
+        'wikitext2',
+        seed=args.seed,
+        model_path=args.base_model,
+        seqlen=args.model_seqlen,
+        eval_mode=True,
+    )
+    return evaluate_perplexity(model, eval_data, args.model_seqlen, device=next(model.parameters()).device)
+
+
 
 
 if __name__ == "__main__":
@@ -343,7 +370,7 @@ if __name__ == "__main__":
             print(name, param.shape, param.dtype)
 
     optimizer = torch.optim.Adam(quantized_model.parameters(), lr=args.lr, betas=(args.adam_beta1, args.adam_beta2))
-    training_metadata = dict(current_epoch=0, microbatches_since_epoch_start=0)
+    training_metadata = dict(current_epoch=0, microbatches_since_epoch_start=0, total_optimizer_steps=0)
 
     def _save_state():
         os.makedirs(args.save, exist_ok=True)
@@ -362,6 +389,7 @@ if __name__ == "__main__":
     def _load_state():
         if not os.path.exists(args.save):
             print(f"No checkpoint found at {args.save}")
+            return
         #TODO
 
         optimizer.load_state_dict(torch.load(os.path.join(args.save, 'optimizer_state_dict.pt', map_location='cpu')))
@@ -369,27 +397,25 @@ if __name__ == "__main__":
         training_metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
         print(f"Loaded training state: {training_metadata}")
 
+
+    evaluate(args, quantized_model)
+    raise 123
     loss_numerator = loss_denominator = 0
     grad_steps_accumulated = 0
 
-    for current_epoch in range(training_metadata['current_epoch'], args.max_epochs):
+    for current_epoch in range(args.max_epochs):
+        if current_epoch < training_metadata['current_epoch']:
+            continue  # skip finished epochs
         sampler.set_epoch(current_epoch)
+
         for batch_index, batch in enumerate(train_dataloader):
             batch.pop('labels', None)
             if batch_index <= training_metadata['microbatches_since_epoch_start']:
                 continue  # skip batches processed before checkpoint
-            batch = {k: v.to(device) for k, v in batch.items()}
+            training_metadata['microbatches_since_epoch_start'] += 1
 
-            with torch.no_grad():
-                teacher_logprobs = F.log_softmax(base_model(**batch).logits, dim=-1)
-            with torch.cuda.amp.autocast(enabled=args.amp, dtype=torch.bfloat16):
-                student_logprobs = F.log_softmax(quantized_model(**batch).logits, dim=-1)
-                loss = F.kl_div(
-                    input=student_logprobs.flatten(0, -2),
-                    target=teacher_logprobs.flatten(0, -2),
-                    log_target=True,
-                    reduction="batchmean",
-                ).mean()
+            batch = {k: v.to(device) for k, v in batch.items()}
+            loss = compute_loss_on_batch(batch, base_model, quantized_model)
 
             loss_numerator += loss.item()
             loss_denominator += 1
@@ -403,22 +429,11 @@ if __name__ == "__main__":
                 optimizer.zero_grad()
                 grad_steps_accumulated = 0
 
-            training_metadata['microbatches_since_epoch_start'] = batch_index
+                training_metadata['total_optimizer_steps'] += 1
+                if training_metadata['total_optimizer_steps'] % args.eval_every == 0:
+                    evaluate(quantized_model, eval_datasets)
+                if training_metadata['total_optimizer_steps'] % args.save_every == 0:
+                    _save_state()
 
-    #TODO DEBUG ZONE
-    base_model.train(True)
-    for param in base_model.parameters():
-        if param.dtype == torch.bfloat16:
-            param.requires_grad = True
-    if args.gradient_checkpointing:
-        base_model.gradient_checkpointing_enable()
-        base_model.enable_input_require_grads()
-
-
-    input_ids = torch.arange(8 * 2048).reshape(-1, 2048).to(device) % 16_000
-    for i in tqdm(range(1)):
-        with torch.cuda.amp.autocast(enabled=args.amp, dtype=torch.bfloat16):
-            y = quantized_model(input_ids).logits
-        y.norm().backward()
-    optimizer.step()
-
+        training_metadata['microbatches_since_epoch_start'] = 0
+        training_metadata['current_epoch'] += 1
