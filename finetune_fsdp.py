@@ -508,7 +508,7 @@ if __name__ == "__main__":
                 metadata['total_optimizer_steps'] += 1
                 if args.print_every_steps and metadata['total_optimizer_steps'] % args.print_every_steps == 0:
                     loss_numerator = torch.tensor([metadata['loss_numerator']], device=device)
-                    loss_denominator = torch.tensor([metadata['loss_numerator']], device=device)
+                    loss_denominator = torch.tensor([metadata['loss_denominator']], device=device)
                     torch.distributed.all_reduce_coalesced(
                         [loss_numerator, loss_denominator], op=torch.distributed.ReduceOp.SUM)
                     if rank == 0:
