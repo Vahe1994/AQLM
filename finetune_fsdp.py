@@ -449,6 +449,11 @@ if __name__ == "__main__":
                 os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'),
                 map_location='cpu'))
         metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
+        if args.eval_datasets is not None and metadata['early_stop_on'] not in args.eval_datasets:
+            print(f"Stopping criterion {metadata['early_stop_on']} is not in args.eval_datasets; resetting best loss.")
+            metadata['early_stop_on'] = next(iter(args.eval_datasets))
+            metadata['best_eval_perplexity'] = float('inf')
+            metadata['best_step'] = 0
         print(f"Loaded training state from {args.save}: {metadata}")
 
     def _save_state():
