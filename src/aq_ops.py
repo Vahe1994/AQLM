@@ -159,7 +159,9 @@ def master_rank_first(local: bool, master_rank: int = 0):
     distributed = torch.distributed.is_initialized()
     rank = os.environ.get("LOCAL_RANK" if local else "RANK", 0) if distributed else 0
     if distributed and rank != master_rank:
+        print("WAITING FOR MASTER")
         torch.distributed.barrier()
     yield
     if distributed and rank == master_rank:
+        print("WAITING FOR NON-MASTER")
         torch.distributed.barrier()
