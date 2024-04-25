@@ -394,6 +394,7 @@ if __name__ == "__main__":
     )
 
     print(dataset)
+    print(dataset[0])
     print(next(iter(train_dataloader)))
     raise 123
 
