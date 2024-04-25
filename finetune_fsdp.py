@@ -406,6 +406,7 @@ if __name__ == "__main__":
                     grad_steps_accumulated = 0
 
                 training_metadata['microbatches_since_epoch_start'] = batch_index
+                #TODO check +-1 error
 
     #TODO DEBUG ZONE
     base_model.train(True)
@@ -422,8 +423,16 @@ if __name__ == "__main__":
         with torch.cuda.amp.autocast(enabled=args.amp, dtype=torch.bfloat16):
             y = quantized_model(input_ids).logits
         y.norm().backward()
-    for k, v in optimizer.state_dict()['state'].items():
-        v = v['exp_avg']
-        print(k, v.shape, v.dtype)
+    optimizer.step()
+
+    if rank == 0:
+        for k, v in optimizer.state_dict()['state'].items():
+            v = v['exp_avg']
+            print(k, v.shape, v.dtype)
+    torch.distributed.barrier()
+    if rank != 0:
+        for k, v in optimizer.state_dict()['state'].items():
+            v = v['exp_avg']
+            print(k, v.shape, v.dtype)
 
 
