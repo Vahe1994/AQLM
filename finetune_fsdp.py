@@ -275,6 +275,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     tokenized_dataset = dataset.map(
         lambda examples: tokenizer(examples[text_column_name]),
         batched=True,
+        batch_size=16,
         num_proc=args.preprocessing_num_workers if args.preprocessing_num_workers is not None else args.num_workers,
         remove_columns=list(dataset.column_names),
         load_from_cache_file=not args.overwrite_cache,
