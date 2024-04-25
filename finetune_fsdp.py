@@ -144,6 +144,14 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         help="save state once in this many optimizer steps (this many updates to model parameters)",
     )
     parser.add_argument("--keep_best_model", action="store_true", help="Save best model state separately")
+    parser.add_argument(
+        "--on_save",
+        type=str,
+        default=None,
+        help="Optional callback (python code string) to call after each saved layer. Example: when "
+        "training on preemptible compute, upload partially finetuned model and resume later",
+    )
+
 
 
 def add_data_args(parser: argparse.ArgumentParser):
@@ -393,6 +401,9 @@ def _load_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Mo
             metadata['best_step'] = 0
         print(f"Loaded training state from {args.save}: {metadata}")
 
+    if args.on_save:
+        exec(args.on_save)
+
 
 def _save_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Module, optimizer: torch.optim.Optimizer):
     if args.save is None:
@@ -499,7 +510,7 @@ if __name__ == "__main__":
         best_step=0,
     )
 
-    _load_state()
+    _load_state(args, metadata, quantized_model, optimizer)
     torch.distributed.barrier()
     for current_epoch in range(args.max_epochs):
         if current_epoch < metadata['current_epoch']:
