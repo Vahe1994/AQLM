@@ -478,6 +478,7 @@ if __name__ == "__main__":
                 print(f"Saved {os.path.join(args.save, f'best_combined_model_state_dict.pt')}")
 
 
+    torch.distributed.barrier()
     for current_epoch in range(args.max_epochs):
         if current_epoch < metadata['current_epoch']:
             continue  # skip finished epochs
