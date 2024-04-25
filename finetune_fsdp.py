@@ -135,7 +135,7 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         default=1000,
         help="save state once in this many optimizer steps (this many updates to model parameters)",
     )
-    parser.add_argument("--save_keep_best", action="store_true", help="Save best model state separately")
+    parser.add_argument("--keep_best_model", action="store_true", help="Save best model state separately")
 
 
 def add_data_args(parser: argparse.ArgumentParser):
@@ -196,6 +196,13 @@ def add_data_args(parser: argparse.ArgumentParser):
         "--trust_remote_code",
         action="store_true",
         help="Whether to trust remote code.",
+    )
+
+    parser.add_argument(
+        "--save_dataset_and_exit",
+        type=str,
+        default=None,
+        help="If not None, save tokenized dataset to this path and exit training immediately",
     )
 
 
