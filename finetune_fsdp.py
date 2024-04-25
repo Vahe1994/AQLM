@@ -390,10 +390,10 @@ if __name__ == "__main__":
 
     with master_rank_first(local=True):
         dataset = prepare_training_dataset(args, tokenizer)
-    if args.save_dataset_and_exit is not None:
-        if rank == 0:
-            dataset.save_to_disk(args.save_dataset_and_exit)
-        exit()
+        if args.save_dataset_and_exit is not None:
+            if rank == 0:
+                dataset.save_to_disk(args.save_dataset_and_exit)
+            exit()
 
     sampler = torch.utils.data.DistributedSampler(
         dataset, rank=rank, num_replicas=world_size, shuffle=True, seed=args.seed)
