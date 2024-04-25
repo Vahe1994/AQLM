@@ -497,10 +497,16 @@ if __name__ == "__main__":
 
                 metadata['total_optimizer_steps'] += 1
                 if args.print_every_steps and metadata['total_optimizer_steps'] % args.eval_every_steps == 0:
+                    loss_numerator = torch.tensor([metadata['loss_numerator']], device=device)
+                    loss_denominator = torch.tensor([metadata['loss_numerator']], device=device)
+                    torch.distributed.all_reduce_coalesced(
+                        [loss_numerator, loss_denominator], op=torch.distributed.ReduceOp.SUM)
                     if rank == 0:
                         print(f"epoch: {metadata['current_epoch']}",
-                              f"\tloss: {metadata['loss_numerator'] / metadata['loss_denominator']:.9f}",
+                              f"\tloss: {loss_numerator.item() / loss_denominator.item():.9f}",
                               f"\ttotal updates: {metadata['total_optimizer_steps']}")
+                    metadata['loss_numerator'] = metadata['loss_denominator'] = 0
+
                 if args.eval_every_steps and metadata['total_optimizer_steps'] % args.eval_every_steps == 0:
                     evaluate(args, quantized_model)
                 if args.save_every_steps and metadata['total_optimizer_steps'] % args.save_every_steps == 0:
