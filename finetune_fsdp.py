@@ -348,15 +348,23 @@ if __name__ == "__main__":
 
     def _save_state():
         os.makedirs(args.save, exist_ok=True)
-        #TODO global state dict
-        torch.save(training_metadata, os.path.join(args.save, 'metadata.pt'))
-        torch.save(quantized_model.state_dict(), os.path.join(args.save, 'quantized_model_state_dict.pt'))
-        torch.save(optimizer.state_dict(), os.path.join(args.save, 'optimizer_state_dict.pt'))
+        if rank == 0:
+            torch.save(training_metadata, os.path.join(args.save, 'metadata.pt'))
+        with FullyShardedDataParallel.state_dict_type(
+                quantized_model,
+                StateDictType.FULL_STATE_DICT,
+                state_dict_config=FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+        ):
+            model_state_dict = quantized_model.state_dict()
+            if rank == 0:
+                torch.save(model_state_dict, os.path.join(args.save, 'quantized_model_state_dict.pt'))
+        torch.save(optimizer.state_dict(), os.path.join(args.save, f'optimizer_state_dict_{rank}.pt'))
 
     def _load_state():
         if not os.path.exists(args.save):
             print(f"No checkpoint found at {args.save}")
-        #TODO global state dict
+        #TODO
+
         optimizer.load_state_dict(torch.load(os.path.join(args.save, 'optimizer_state_dict.pt', map_location='cpu')))
         quantized_model.load_state_dict(torch.load(os.path.join(args.save, 'quantized_model_state_dict.pt', map_location='cpu')))
         training_metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
@@ -414,13 +422,7 @@ if __name__ == "__main__":
         with torch.cuda.amp.autocast(enabled=args.amp, dtype=torch.bfloat16):
             y = quantized_model(input_ids).logits
         y.norm().backward()
-
-    with FullyShardedDataParallel.state_dict_type(
-            quantized_model,
-            StateDictType.FULL_STATE_DICT,
-            state_dict_config=FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-    ):
-        for name, tensor in quantized_model.state_dict().items():
-            print(name, tensor.shape, tensor.dtype)
+    for k, v in optimizer.state_dict():
+        print(k, v.shape, v.dtype)
 
 
