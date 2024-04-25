@@ -340,10 +340,10 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     return lm_dataset
 
 
-def compute_validation_perplexities(args: argparse.Namespace, model: nn.Module):
+def compute_validation_perplexities(args: argparse.Namespace, model: nn.Module, eval_datasets: dict):
     rank = torch.distributed.get_rank()
     perplexities = {}
-    for dataset_name in args.eval_datasets:
+    for dataset_name, eval_dataset in eval_datasets:
         if rank == 0:
             print(f"Loading {dataset_name} ...")
         eval_dataset = get_loaders(
@@ -414,6 +414,10 @@ if __name__ == "__main__":
         dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler,
         collate_fn=transformers.default_data_collator
     )
+    eval_datasets = {dataset_name: get_loaders(
+        dataset_name, seed=args.seed, model_path=args.base_model, seqlen=args.model_seqlen, eval_mode=True,
+        ) for dataset_name in args.eval_datasets
+    }
 
     with one_rank_at_a_time(local=True):
         base_model = load_base_model(args, device)
@@ -523,7 +527,7 @@ if __name__ == "__main__":
                     metadata['loss_numerator'] = metadata['loss_denominator'] = 0
 
                 if args.eval_every_steps and metadata['total_optimizer_steps'] % args.eval_every_steps == 0:
-                    perplexity_scores = compute_validation_perplexities(args, quantized_model)
+                    perplexity_scores = compute_validation_perplexities(args, quantized_model, eval_datasets)
                     metric_name = metadata['early_stop_on']
                     if perplexity_scores[metric_name] < metadata['best_eval_perplexity']:
                         if rank == 0:
