@@ -392,6 +392,10 @@ if __name__ == "__main__":
     def collate_fn(batch_dict):
         num_rows = len(next(iter(batch_dict.values())))
         batch_rows = [{key: batch_dict[key][i] for key in batch_dict} for i in range(num_rows)]
+        if rank == 0:
+            print('batch_rows', batch_rows)
+            print('collated', transformers.default_data_collator(batch_rows))
+        raise 123
         return transformers.default_data_collator(batch_rows)
     train_dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
