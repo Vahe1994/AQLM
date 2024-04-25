@@ -371,6 +371,17 @@ if __name__ == "__main__":
     device = torch.device(f"cuda:{rank}")
     torch.cuda.set_device(device)
 
+    assert args.batch_size is not None, "please specify batch size"
+    if args.microbatch_size is None:
+        args.microbatch_size = args.batch_size // world_size
+    assert args.batch_size % world_size == 0
+    assert args.batch_size % (world_size * args.microbatch_size) == 0
+    grad_accumulation_steps = args.batch_size // (world_size * args.microbatch_size)
+    if args.dtype != 'auto':
+        args.dtype = getattr(torch, args.dtype)
+    if args.amp_dtype is not None:
+        args.amp_dtype = getattr(torch, args.amp_dtype)
+
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
         wandb.init(config=args)
@@ -389,28 +400,10 @@ if __name__ == "__main__":
     sampler = torch.utils.data.DistributedSampler(
         dataset, rank=rank, num_replicas=world_size, shuffle=True, seed=args.seed)
 
-    def collate_fn(batch_dict):
-        if rank == 0:
-            print('batch_dict', batch_dict)
-        # num_rows = len(next(iter(batch_dict.values())))
-        # batch_rows = [{key: batch_dict[key][i] for key in batch_dict} for i in range(num_rows)]
-        raise 123
-        return transformers.default_data_collator(batch_rows)
-    print("MICROBATCH", args.microbatch_size)
     train_dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
+        dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler,
+        collate_fn=transformers.default_data_collator
     )
-
-    assert args.batch_size is not None, "please specify batch size"
-    if args.microbatch_size is None:
-        args.microbatch_size = args.batch_size // world_size
-    assert args.batch_size % world_size == 0
-    assert args.batch_size % (world_size * args.microbatch_size) == 0
-    grad_accumulation_steps = args.batch_size // (world_size * args.microbatch_size)
-    if args.dtype != 'auto':
-        args.dtype = getattr(torch, args.dtype)
-    if args.amp_dtype is not None:
-        args.amp_dtype = getattr(torch, args.amp_dtype)
 
     with one_rank_at_a_time(local=True):
         base_model = load_base_model(args, device)
