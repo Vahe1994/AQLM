@@ -30,7 +30,6 @@ except ModuleNotFoundError:
     has_wandb = False
 
 
-
 def add_model_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--base_model",
@@ -373,7 +372,6 @@ if __name__ == "__main__":
 
     assert torch.cuda.is_available() and torch.distributed.is_available()
     torch.distributed.init_process_group()
-
     rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
     device = torch.device(f"cuda:{rank}")
@@ -443,7 +441,6 @@ if __name__ == "__main__":
         if args.save is not None and rank == 0:
             print(f"No checkpoint found at {args.save}")
     else:
-
         with one_rank_at_a_time(local=True):
             quantized_model.load_state_dict(torch.load(
                 os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'),
@@ -467,6 +464,7 @@ if __name__ == "__main__":
         torch.distributed.barrier()
 
     def _save_best_model():
+        os.makedirs(args.save, exist_ok=True)
         with FullyShardedDataParallel.state_dict_type(
                 quantized_model,
                 StateDictType.FULL_STATE_DICT,
@@ -519,8 +517,9 @@ if __name__ == "__main__":
 
                 if args.eval_every_steps and metadata['total_optimizer_steps'] % args.eval_every_steps == 0:
                     perplexity_scores = compute_validation_perplexities(args, quantized_model)
-                    if perplexity_scores[args.eval_datasets[0]] < metadata['best_eval_perplexity']:
-                        print(f"New best perplexity = {perplexity_scores[args.eval_datasets[0]]:.5f}")
+                    metric_name = metadata['early_stop_on']
+                    if perplexity_scores[metric_name] < metadata['best_eval_perplexity']:
+                        print(f"New best perplexity ({metric_name}) = {perplexity_scores[metric_name]:.9f}")
                         metadata['best_eval_perplexity'] = perplexity_scores[args.eval_datasets[0]]
                         _save_best_model()
                 if args.save_every_steps and metadata['total_optimizer_steps'] % args.save_every_steps == 0:
