@@ -425,17 +425,11 @@ if __name__ == "__main__":
         y.norm().backward()
     optimizer.step()
 
-    if rank == 0:
-        for k, v in optimizer.state_dict()['state'].items():
-            v = v['exp_avg']
-            print(k, v.shape, v.dtype)
-    torch.distributed.barrier()
-    if rank != 0:
-        numel=0
-        for k, v in optimizer.state_dict()['state'].items():
-            v = v['exp_avg']
-            print(k, v.shape, v.dtype)
-            numel += v.numel()
-        print('numel', numel)
+    numel=0
+    for k, v in optimizer.state_dict()['state'].items():
+        v = v['exp_avg']
+        print(k, v.shape, v.dtype)
+        numel += v.numel()
+    print('numel', numel)
 
 
