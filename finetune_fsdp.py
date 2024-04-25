@@ -460,10 +460,9 @@ if __name__ == "__main__":
         if args.save is None:
             return
         torch.distributed.barrier()
-        if rank == 0:
-            print(f"Saving snapshot to {args.save}")
         os.makedirs(args.save, exist_ok=True)
         if rank == 0:
+            print(f"Saving snapshot to {args.save}")
             torch.save(metadata, os.path.join(args.save, 'metadata.pt'))
         torch.save(quantized_model.state_dict(), os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'))
         torch.save(optimizer.state_dict(), os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'))
