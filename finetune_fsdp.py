@@ -5,7 +5,7 @@ based on https://github.com/huggingface/transformers/blob/main/examples/pytorch/
 import argparse
 import os
 from functools import partial
-from typing import Tuple
+from typing import Tuple, Optional
 
 import transformers
 import datasets
@@ -277,10 +277,12 @@ def load_quantized_model(args: argparse.Namespace, device: torch.device) -> Full
     )
 
 
-def compute_loss_on_batch(batch: dict, base_model: nn.Module, quantized_model: nn.Module):
+def compute_loss_on_batch(
+        batch: dict, base_model: nn.Module, quantized_model: nn.Module, amp_dtype: Optional[torch.dtype]
+) -> torch.Tensor:
     with torch.no_grad():
         teacher_logprobs = F.log_softmax(base_model(**batch).logits, dim=-1)
-    with torch.cuda.amp.autocast(enabled=args.amp_dtype is not None, dtype=args.amp_dtype):
+    with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
         student_logprobs = F.log_softmax(quantized_model(**batch).logits, dim=-1)
         loss = F.kl_div(
             input=student_logprobs.flatten(0, -2),
@@ -365,6 +367,61 @@ def compute_validation_perplexities(args: argparse.Namespace, model: nn.Module, 
     return perplexities
 
 
+def _load_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Module, optimizer: torch.optim.Optimizer):
+    rank = torch.distributed.get_rank()
+    if args.save is None or not os.path.exists(args.save):
+        if args.save is not None and rank == 0:
+            print(f"No checkpoint found at {args.save}")
+    else:
+        with FullyShardedDataParallel.state_dict_type(quantized_model, StateDictType.LOCAL_STATE_DICT):
+            state_dict_ptr = quantized_model.state_dict()
+            loaded_state_dict = torch.load(os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'))
+            with torch.no_grad():
+                for key in state_dict_ptr:
+                    state_dict_ptr[key].copy_(loaded_state_dict.pop(key))
+                    assert len(loaded_state_dict) == 0, f"Unused keys:, {tuple(loaded_state_dict.keys())}"
+            del state_dict_ptr, loaded_state_dict
+
+        optimizer.load_state_dict(torch.load(
+            os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'),
+            map_location='cpu'))
+        metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
+        if args.eval_datasets is not None and metadata['early_stop_on'] not in args.eval_datasets:
+            print(f"Stopping criterion {metadata['early_stop_on']} is not in args.eval_datasets; resetting best loss.")
+            metadata['early_stop_on'] = next(iter(args.eval_datasets))
+            metadata['best_eval_perplexity'] = float('inf')
+            metadata['best_step'] = 0
+        print(f"Loaded training state from {args.save}: {metadata}")
+
+
+def _save_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Module, optimizer: torch.optim.Optimizer):
+    if args.save is None:
+        return
+    rank = torch.distributed.get_rank()
+    os.makedirs(args.save, exist_ok=True)
+    if rank == 0:
+        print(f"Saving snapshot to {args.save}")
+        torch.save(metadata, os.path.join(args.save, 'metadata.pt'))
+    with FullyShardedDataParallel.state_dict_type(quantized_model, StateDictType.LOCAL_STATE_DICT):
+        torch.save(quantized_model.state_dict(), os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'))
+    torch.save(optimizer.state_dict(), os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'))
+
+
+def _save_model(args: argparse.Namespace, quantized_model: nn.Module):
+    """Save consolidated model state dict"""
+    os.makedirs(args.save, exist_ok=True)
+    rank = torch.distributed.get_rank()
+    with FullyShardedDataParallel.state_dict_type(
+            quantized_model,
+            StateDictType.FULL_STATE_DICT,
+            state_dict_config=FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+    ):
+        model_state_dict = quantized_model.state_dict()
+        if rank == 0:
+            torch.save(model_state_dict, os.path.join(args.save, f'best_model_state_dict.pt'))
+            print(f"Saved {os.path.join(args.save, f'best_model_state_dict.pt')}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(add_help=True)
     add_model_args(parser)
@@ -442,57 +499,7 @@ if __name__ == "__main__":
         best_step=0,
     )
 
-    # load state
-    if args.save is None or not os.path.exists(args.save):
-        if args.save is not None and rank == 0:
-            print(f"No checkpoint found at {args.save}")
-    else:
-        with FullyShardedDataParallel.state_dict_type(quantized_model, StateDictType.LOCAL_STATE_DICT):
-            state_dict_ptr = quantized_model.state_dict()
-            loaded_state_dict = torch.load(os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'))
-            with torch.no_grad():
-                for key in state_dict_ptr:
-                    state_dict_ptr[key].copy_(loaded_state_dict.pop(key))
-                    assert len(loaded_state_dict) == 0, f"Unused keys:, {tuple(loaded_state_dict.keys())}"
-            del state_dict_ptr, loaded_state_dict
-
-        optimizer.load_state_dict(torch.load(
-            os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'),
-            map_location='cpu'))
-        metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
-        if args.eval_datasets is not None and metadata['early_stop_on'] not in args.eval_datasets:
-            print(f"Stopping criterion {metadata['early_stop_on']} is not in args.eval_datasets; resetting best loss.")
-            metadata['early_stop_on'] = next(iter(args.eval_datasets))
-            metadata['best_eval_perplexity'] = float('inf')
-            metadata['best_step'] = 0
-        print(f"Loaded training state from {args.save}: {metadata}")
-
-    def _save_state():
-        if args.save is None:
-            return
-        torch.distributed.barrier()
-        os.makedirs(args.save, exist_ok=True)
-        if rank == 0:
-            print(f"Saving snapshot to {args.save}")
-            torch.save(metadata, os.path.join(args.save, 'metadata.pt'))
-        with FullyShardedDataParallel.state_dict_type(quantized_model, StateDictType.LOCAL_STATE_DICT):
-            torch.save(quantized_model.state_dict(), os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'))
-        torch.save(optimizer.state_dict(), os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'))
-        torch.distributed.barrier()
-
-    def _save_best_model():
-        os.makedirs(args.save, exist_ok=True)
-        with FullyShardedDataParallel.state_dict_type(
-                quantized_model,
-                StateDictType.FULL_STATE_DICT,
-                state_dict_config=FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-        ):
-            model_state_dict = quantized_model.state_dict()
-            if rank == 0:
-                torch.save(model_state_dict, os.path.join(args.save, f'best_combined_model_state_dict.pt'))
-                print(f"Saved {os.path.join(args.save, f'best_combined_model_state_dict.pt')}")
-
-
+    _load_state()
     torch.distributed.barrier()
     for current_epoch in range(args.max_epochs):
         if current_epoch < metadata['current_epoch']:
@@ -541,11 +548,11 @@ if __name__ == "__main__":
                         metadata['best_eval_perplexity'] = perplexity_scores[args.eval_datasets[0]]
                         metadata['best_step'] = metadata['total_optimizer_steps']
                         if args.keep_best_model:
-                            _save_best_model()
+                            _save_model(args, quantized_model)
                 if args.save_every_steps and metadata['total_optimizer_steps'] % args.save_every_steps == 0:
-                    _save_state()
+                    _save_state(args, metadata, quantized_model, optimizer)
 
         metadata['microbatches_since_epoch_start'] = 0
         metadata['current_epoch'] += 1
 
-    _save_state()
+    _save_state(args, metadata, quantized_model, optimizer)
