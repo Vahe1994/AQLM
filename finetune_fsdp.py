@@ -70,6 +70,12 @@ def add_model_args(parser: argparse.ArgumentParser):
 
 def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
+        "--max_epochs",
+        type=int,
+        default=1000,
+        help="Total number of training epochs (passes over calibration data) after which the training will conclude",
+    )
+    parser.add_argument(
         "--lr",
         type=float,
         default=1e-5,
@@ -109,8 +115,6 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         action="store_true",
         help="Whether to use amp",
     )
-    parser.add_argument("--wandb", action="store_true", help="Whether to use wandb or store locally.")
-    parser.add_argument("--save", type=str, default=None, help="Path to save training snapshot.")
     parser.add_argument(
         "--seed",
         type=int,
@@ -118,6 +122,8 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         help="Seed for calibration data and initialization. "
         "Note that the main training is not strictly deterministic.",
     )
+    parser.add_argument("--wandb", action="store_true", help="Whether to use wandb or store locally.")
+    parser.add_argument("--save", type=str, default=None, help="Path to save training snapshot.")
 
 
 def add_data_args(parser: argparse.ArgumentParser):
@@ -321,6 +327,7 @@ if __name__ == "__main__":
 
     def _save_state():
         os.makedirs(args.save, exist_ok=True)
+        #TODO
         torch.save(training_metadata, os.path.join(args.save, 'metadata.pt'))
         torch.save(quantized_model.state_dict(), os.path.join(args.save, 'quantized_model_state_dict.pt'))
         torch.save(optimizer.state_dict(), os.path.join(args.save, 'optimizer_state_dict.pt'))
@@ -328,6 +335,7 @@ if __name__ == "__main__":
     def _load_state():
         if not os.path.exists(args.save):
             print(f"No checkpoint found at {args.save}")
+        #TODO
         training_metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
         print(f"Loaded training state: {training_metadata}")
         quantized_model.load_state_dict(torch.load(os.path.join(args.save, 'quantized_model_state_dict.pt', map_location='cpu')))
@@ -335,7 +343,9 @@ if __name__ == "__main__":
 
 
 
-    #TODO this is DEBUG AREA
+    for current_epoch in range(training_metadata['current_epoch'], args.max_epochs):
+
+        sampler.set_epoch(current_epoch)
     base_model.train(True)
     for param in base_model.parameters():
         if param.dtype == torch.bfloat16:
