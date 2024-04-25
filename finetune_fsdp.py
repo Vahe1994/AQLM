@@ -442,13 +442,12 @@ if __name__ == "__main__":
         if args.save is not None and rank == 0:
             print(f"No checkpoint found at {args.save}")
     else:
-        with one_rank_at_a_time(local=True):
-            quantized_model.load_state_dict(torch.load(
-                os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'),
-                map_location='cpu'))
-            optimizer.load_state_dict(torch.load(
-                os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'),
-                map_location='cpu'))
+        quantized_model.load_state_dict(torch.load(
+            os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'),
+            map_location='cpu'))
+        optimizer.load_state_dict(torch.load(
+            os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'),
+            map_location='cpu'))
         metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
         if args.eval_datasets is not None and metadata['early_stop_on'] not in args.eval_datasets:
             print(f"Stopping criterion {metadata['early_stop_on']} is not in args.eval_datasets; resetting best loss.")
