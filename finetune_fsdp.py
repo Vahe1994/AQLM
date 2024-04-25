@@ -379,6 +379,8 @@ if __name__ == "__main__":
     grad_accumulation_steps = args.batch_size // (world_size * args.microbatch_size)
     args.dtype = getattr(torch, args.dtype) if args.dtype != 'auto' else 'auto'
     args.amp_dtype = getattr(torch, args.amp_dtype) if args.amp_dtype is not None else None
+    if args.save_every_steps is not None:
+        assert args.save is not None, f"save_every_steps={args.save_every_steps}, but --save path not specified"
 
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
