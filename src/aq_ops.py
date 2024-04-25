@@ -163,6 +163,8 @@ def master_rank_first(local: bool, master_rank: int = 0):
         torch.distributed.barrier()
     print("STARTED ON", rank)
     yield
+    print("DONE ON", rank)
     if distributed and rank == master_rank:
         torch.distributed.barrier()
     print("FINISHED ON", rank)
+
