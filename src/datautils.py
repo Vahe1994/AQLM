@@ -3,14 +3,14 @@ import random
 from itertools import chain
 from typing import Optional, Sequence
 
-import datasets
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch import nn
+import torch.distributed
 from datasets import load_dataset
-from packaging import version
 from tqdm import trange
-from transformers import AutoTokenizer, LlamaTokenizer
+from tqdm.auto import tqdm
+from transformers import AutoTokenizer
 
 
 def set_seed(seed: Optional[int]):
@@ -284,3 +284,44 @@ def group_texts(examples: Sequence[Sequence[int]], block_size: int, add_labels: 
         result["labels"] = result["input_ids"].copy()
     return result
 
+
+@torch.inference_mode()
+def evaluate_perplexity(model: nn.Module, data: torch.Tensor, seqlen: int, device: torch.device) -> float:
+    """Perplexity evaluation as per https://github.com/IST-DASLab/gptq (standard among quantization research)"""
+    rank = torch.distributed.get_rank() if torch.disributed.is_initialized() else 0
+    world_size = torch.distributed.get_world_size() if torch.disributed.is_initialized() else 1
+
+    inps = [data[:, start: start + seqlen] for start in range(0, data.shape[1], seqlen)]
+    num_sequences_without_padding = len(inps)
+
+    # pad sequences to be divisible by world_size for DDP/FSDP compatibility
+    num_padding_sequences = -len(inps) % world_size
+    inps.extend([inps[-1]] * num_padding_sequences)
+
+    total_nll = torch.tensor(0.0, dtype=torch.float64, device=device)
+    total_tokens = torch.tensor(0.0, dtype=torch.float64, device=device)
+
+    for sequence_index, input_ids in enumerate(tqdm(inps, desc="Evaluating perplexity")):
+        if sequence_index % world_size != rank:
+            continue
+        input_ids = input_ids.to(device)
+        lm_logits = model(input_ids).logits
+
+        shift_logits = lm_logits[:, :-1, :].contiguous()
+        shift_labels = input_ids[:, 1:]
+        loss_fct = nn.CrossEntropyLoss()
+        loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+        neg_log_likelihood = loss.float() * seqlen
+        if sequence_index < num_sequences_without_padding:
+            total_nll += neg_log_likelihood
+            total_tokens += shift_labels.numel()
+
+
+    if world_size > 0:
+        if rank == 0:
+            print("BEFORE", total_nll, total_tokens)
+        torch.distributed.all_reduce_coalesced([total_nll, total_tokens], op=torch.distributed.ReduceOp.SUM)
+        if rank == 0:
+            print("AFTER", total_nll, total_tokens)
+    ppl = torch.exp(total_nll / total_tokens)
+    return ppl.item()
