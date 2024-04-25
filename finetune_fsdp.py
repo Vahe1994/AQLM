@@ -297,7 +297,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     )
 
     def is_tokenized(dataset):
-        return 'input_ids' in dataset.column_names and all(isinstance(x, int) for x in dataset['input_ids'][0])
+        return 'input_ids' in dataset.column_names
     if is_tokenized(dataset):
         return dataset
 
@@ -395,7 +395,6 @@ if __name__ == "__main__":
     train_dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
     )
-
 
     assert args.batch_size is not None, "please specify batch size"
     if args.microbatch_size is None:
