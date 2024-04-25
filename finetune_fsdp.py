@@ -306,7 +306,8 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     def is_tokenized(dataset):
         return 'input_ids' in dataset.column_names
     if is_tokenized(dataset):
-        print("Dataset already tokenized")
+        if torch.distributed.get_rank() == 0:
+            print("Dataset already tokenized")
         return dataset
 
     text_column_name = 'text' if 'text' in dataset.column_names else next(iter(dataset.column_names))
