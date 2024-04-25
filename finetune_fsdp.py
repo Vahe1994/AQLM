@@ -90,7 +90,7 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--batch_size",
         type=int,
-        required=True,
+        default=32,
         help="training batch size - how many samples are processed per optimizer step, between all GPUs in total",
     )
     parser.add_argument(
@@ -394,6 +394,7 @@ if __name__ == "__main__":
         if rank == 0:
             dataset.save_to_disk(args.save_dataset_and_exit)
         exit()
+
     sampler = torch.utils.data.DistributedSampler(
         dataset, rank=rank, num_replicas=world_size, shuffle=True, seed=args.seed)
     collate_fn = transformers.data.data_collator.DataCollatorForLanguageModeling(
