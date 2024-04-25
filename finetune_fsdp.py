@@ -285,6 +285,12 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
         trust_remote_code=args.trust_remote_code,
         streaming=False,
     )
+
+    def is_tokenized(dataset):
+        return 'input_ids' in dataset.column_names and all(isinstance(x, int) for x in dataset['input_ids'][0])
+    if is_tokenized(dataset):
+        return dataset
+
     text_column_name = 'text' if 'text' in dataset.column_names else next(iter(dataset.column_names))
 
     if args.preprocessing_chunk_length is not None:
@@ -312,6 +318,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
         load_from_cache_file=not args.overwrite_cache,
         desc=f"Grouping texts in chunks of {args.model_seqlen}",
     )
+    assert is_tokenized(lm_dataset)
     return lm_dataset
 
 
@@ -365,8 +372,8 @@ if __name__ == "__main__":
         wandb.init(config=args)
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(args.base_model)
-    tokenizer.bos_token_id = 1
-    tokenizer.eos_token_id = 2
+    assert tokenizer.eos_token_id is not None
+    tokenizer.pad_token = tokenizer.eos_token
 
     with master_rank_first(local=True):
         dataset = prepare_training_dataset(args, tokenizer)
