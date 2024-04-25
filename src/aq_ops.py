@@ -158,6 +158,7 @@ def one_rank_at_a_time(local: bool):
 def master_rank_first(local: bool, master_rank: int = 0):
     distributed = torch.distributed.is_initialized()
     rank = os.environ.get("LOCAL_RANK" if local else "RANK", 0) if distributed else 0
+    print('MY RANK', rank)
     if distributed and rank != master_rank:
         print("WAITING FOR MASTER")
         torch.distributed.barrier()
