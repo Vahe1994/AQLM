@@ -438,13 +438,13 @@ if __name__ == "__main__":
         if args.save is not None and rank == 0:
             print(f"No checkpoint found at {args.save}")
     else:
+
         with one_rank_at_a_time(local=True):
             quantized_model.load_state_dict(torch.load(
-                os.path.join(args.save, 'quantized_model_state_dict.pt'),
+                os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'),
                 map_location='cpu'))
-        with one_rank_at_a_time(local=True):
             optimizer.load_state_dict(torch.load(
-                os.path.join(args.save, f'optimizer_state_dict_{rank}.pt'),
+                os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'),
                 map_location='cpu'))
         metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
         print(f"Loaded training state from {args.save}: {metadata}")
@@ -457,6 +457,11 @@ if __name__ == "__main__":
         os.makedirs(args.save, exist_ok=True)
         if rank == 0:
             torch.save(metadata, os.path.join(args.save, 'metadata.pt'))
+        torch.save(quantized_model.state_dict(), os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'))
+        torch.save(optimizer.state_dict(), os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'))
+        torch.distributed.barrier()
+
+    def _save_best_model():
         with FullyShardedDataParallel.state_dict_type(
                 quantized_model,
                 StateDictType.FULL_STATE_DICT,
@@ -464,9 +469,7 @@ if __name__ == "__main__":
         ):
             model_state_dict = quantized_model.state_dict()
             if rank == 0:
-                torch.save(model_state_dict, os.path.join(args.save, 'quantized_model_state_dict.pt'))
-        torch.save(optimizer.state_dict(), os.path.join(args.save, f'optimizer_state_dict_{rank}.pt'))
-        torch.distributed.barrier()
+                torch.save(model_state_dict, os.path.join(args.save, f'best_combined_model_state_dict.pt'))
 
 
     for current_epoch in range(args.max_epochs):
