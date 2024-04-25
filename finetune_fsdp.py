@@ -506,7 +506,7 @@ if __name__ == "__main__":
                 metadata['grad_steps_accumulated'] = 0
 
                 metadata['total_optimizer_steps'] += 1
-                if args.print_every_steps and metadata['total_optimizer_steps'] % args.eval_every_steps == 0:
+                if args.print_every_steps and metadata['total_optimizer_steps'] % args.print_every_steps == 0:
                     loss_numerator = torch.tensor([metadata['loss_numerator']], device=device)
                     loss_denominator = torch.tensor([metadata['loss_numerator']], device=device)
                     torch.distributed.all_reduce_coalesced(
