@@ -113,7 +113,7 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--amp",
         action="store_true",
-        help="Whether to use amp",
+        help="Whether to use amp to bfloat16",
     )
     parser.add_argument(
         "--seed",
@@ -413,7 +413,7 @@ if __name__ == "__main__":
     for i in tqdm(range(1)):
         with torch.cuda.amp.autocast(enabled=args.amp, dtype=torch.bfloat16):
             y = quantized_model(input_ids).logits
-        y.logits.norm().backward()
+        y.norm().backward()
 
     with FullyShardedDataParallel.state_dict_type(
             quantized_model,
