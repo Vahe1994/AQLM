@@ -451,7 +451,7 @@ if __name__ == "__main__":
             state_dict_ptr = quantized_model.state_dict()
             loaded_state_dict = torch.load(os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'))
 
-            with master_rank_first(local=True):
+            with torch.no_grad(), master_rank_first(local=True):#TODO
                 for key in state_dict_ptr:
                     assert state_dict_ptr[key].shape == loaded_state_dict[key].shape
                     print(state_dict_ptr[key], loaded_state_dict[key])
