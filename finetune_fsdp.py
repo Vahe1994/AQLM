@@ -353,7 +353,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
 def compute_validation_perplexities(args: argparse.Namespace, model: nn.Module, eval_datasets: dict):
     rank = torch.distributed.get_rank()
     perplexities = {}
-    for dataset_name, eval_dataset in eval_datasets:
+    for dataset_name, eval_dataset in eval_datasets.items():
         if rank == 0:
             print(f"Loading {dataset_name} ...")
         eval_dataset = get_loaders(
