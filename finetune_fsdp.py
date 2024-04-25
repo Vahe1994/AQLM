@@ -263,7 +263,8 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
 
     if args.preprocessing_chunk_length is not None:
         dataset = dataset.map(
-            lambda examples: {text_column_name: split_long_texts(examples[text_column_name])},
+            lambda examples: {text_column_name: split_long_texts(
+                examples[text_column_name], args.preprocessing_chunk_length)},
             batched=True,
             num_proc=args.preprocessing_num_workers if args.preprocessing_num_workers is not None else args.num_workers,
             remove_columns=list(dataset.column_names),
