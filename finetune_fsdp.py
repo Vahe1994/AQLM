@@ -394,6 +394,7 @@ if __name__ == "__main__":
         dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
     )
 
+    print(dataset)
     print(next(iter(train_dataloader)))
     raise 123
 
