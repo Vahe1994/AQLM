@@ -16,7 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data
 import torch.distributed
-from torch.distributed.fsdp import FullyShardedDataParallel
+from torch.distributed.fsdp import FullyShardedDataParallel, StateDictType, FullStateDictConfig
 
 from src.aq import QuantizedWeight
 from src.aq_ops import IntCodes
@@ -344,6 +344,11 @@ if __name__ == "__main__":
             y = quantized_model(input_ids)
         y.logits.norm().backward()
 
-    print(quantized_model.state_dict())
+    with FullyShardedDataParallel.state_dict_type(
+            quantized_model,
+            StateDictType.FULL_STATE_DICT,
+            state_dict_config=FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+    ):
+        print(quantized_model.state_dict())
 
 
