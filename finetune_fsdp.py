@@ -332,7 +332,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     return lm_dataset
 
 
-def evaluate(args: argparse.Namespace, model: nn.Modile):
+def evaluate(args: argparse.Namespace, model: nn.Module):
     rank = torch.distributed.get_rank()
     perplexities = {}
     for dataset_name in args.eval_datasets:
