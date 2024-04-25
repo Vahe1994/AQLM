@@ -7,7 +7,6 @@ import os
 from functools import partial
 from typing import Tuple
 
-from tqdm.auto import tqdm
 import transformers
 import datasets
 
@@ -304,16 +303,25 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
 
 
 def evaluate(args: argparse.Namespace, model: transformers.PreTrainedModel):
-    eval_data = get_loaders(
-        'wikitext2',
-        seed=args.seed,
-        model_path=args.base_model,
-        seqlen=args.model_seqlen,
-        eval_mode=True,
-    )
-    return evaluate_perplexity(model, eval_data, args.model_seqlen, device=next(model.parameters()).device)
-
-
+    rank = torch.distributed.get_rank()
+    perplexities = {}
+    for dataset_name in args.eval_datasets:
+        if rank == 0:
+            print(f"Loading {dataset_name} ...")
+        eval_dataset = get_loaders(
+            dataset_name,
+            seed=args.seed,
+            model_path=args.base_model,
+            seqlen=args.model_seqlen,
+            eval_mode=True,
+        )
+        if rank == 0:
+            print(f"Dataset {dataset_name} loaded, evaluating...")
+        ppl = evaluate_perplexity(model, eval_dataset, args.model_seqlen, device=next(model.parameters()).device)
+        if rank == 0:
+            print(f"{dataset_name} perplexity: {ppl:.9f}")
+        perplexities[dataset_name] = ppl
+    return perplexities
 
 
 if __name__ == "__main__":
@@ -373,6 +381,7 @@ if __name__ == "__main__":
     training_metadata = dict(current_epoch=0, microbatches_since_epoch_start=0, total_optimizer_steps=0)
 
     def _save_state():
+        torch.distributed.barrier()
         os.makedirs(args.save, exist_ok=True)
         if rank == 0:
             torch.save(training_metadata, os.path.join(args.save, 'metadata.pt'))
@@ -385,17 +394,20 @@ if __name__ == "__main__":
             if rank == 0:
                 torch.save(model_state_dict, os.path.join(args.save, 'quantized_model_state_dict.pt'))
         torch.save(optimizer.state_dict(), os.path.join(args.save, f'optimizer_state_dict_{rank}.pt'))
+        torch.distributed.barrier()
 
     def _load_state():
+        torch.distributed.barrier()
         if not os.path.exists(args.save):
             print(f"No checkpoint found at {args.save}")
             return
-        #TODO
 
-        optimizer.load_state_dict(torch.load(os.path.join(args.save, 'optimizer_state_dict.pt', map_location='cpu')))
+
+        optimizer.load_state_dict(torch.load(os.path.join(args.save, f'optimizer_state_dict_{rank}.pt', map_location='cpu')))
         quantized_model.load_state_dict(torch.load(os.path.join(args.save, 'quantized_model_state_dict.pt', map_location='cpu')))
         training_metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
-        print(f"Loaded training state: {training_metadata}")
+        print(f"Loaded training state from {args.save}: {training_metadata}")
+        torch.distributed.barrier()
 
 
     evaluate(args, quantized_model)

@@ -9,6 +9,7 @@ from typing import Optional, Callable, Sequence, Iterator, Union, Any, List, Ite
 
 import torch
 from torch import nn
+import torch.distributed
 from torch.nn import functional as F
 
 
@@ -139,3 +140,15 @@ class IntCodes(nn.Module):
             self.data.untyped_storage()[byte_offset: byte_offset + self.data.nbytes],
             device=self.data.device, dtype=self.dtype
         )[:self.numel].view(*self.shape)
+
+
+@contextlib.contextmanager
+def one_rank_at_a_time(local: bool):
+    distributed = torch.distributed.is_initialized()
+    rank = os.environ.get("LOCAL_RANK" if local else "RANK", 0) if distributed else 0
+    world_size = os.environ.get("LOCAL_WORLD_SIZE" if local else "WORLD_SIZE", 0) if distributed else 1
+    for current_rank in range(world_size):
+        if distributed:
+            torch.distributed.barrier()
+        if current_rank == rank:
+            yield

@@ -301,7 +301,7 @@ def evaluate_perplexity(model: nn.Module, data: torch.Tensor, seqlen: int, devic
     total_nll = torch.tensor(0.0, dtype=torch.float64, device=device)
     total_tokens = torch.tensor(0.0, dtype=torch.float64, device=device)
 
-    for sequence_index, input_ids in enumerate(tqdm(inps, desc="Evaluating perplexity")):
+    for sequence_index, input_ids in enumerate(tqdm(inps, desc="Evaluating perplexity") if rank == 0 else inps):
         if sequence_index % world_size != rank:
             continue
         input_ids = input_ids.to(device)
