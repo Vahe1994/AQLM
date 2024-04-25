@@ -512,7 +512,7 @@ if __name__ == "__main__":
                     torch.distributed.all_reduce_coalesced(
                         [loss_numerator, loss_denominator], op=torch.distributed.ReduceOp.SUM)
                     if rank == 0:
-                        print(f"epoch: {metadata['current_epoch']}",
+                        print(f"epoch: {metadata['current_epoch']}\tbatch{metadata['microbatches_since_epoch_start']}",
                               f"\ttotal updates: {metadata['total_optimizer_steps']}",
                               f"\tloss: {loss_numerator.item() / loss_denominator.item():.9f}")
                     metadata['loss_numerator'] = metadata['loss_denominator'] = 0
