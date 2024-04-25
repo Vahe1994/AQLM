@@ -90,7 +90,7 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=32,
+        default=None,
         help="training batch size - how many samples are processed per optimizer step, between all GPUs in total",
     )
     parser.add_argument(
@@ -370,16 +370,6 @@ if __name__ == "__main__":
     device = torch.device(f"cuda:{rank}")
     torch.cuda.set_device(device)
 
-    if args.microbatch_size is None:
-        args.microbatch_size = args.batch_size // world_size
-    assert args.batch_size % world_size == 0
-    assert args.batch_size % (world_size * args.microbatch_size) == 0
-    grad_accumulation_steps = args.batch_size // (world_size * args.microbatch_size)
-    if args.dtype != 'auto':
-        args.dtype = getattr(torch, args.dtype)
-    if args.amp_dtype is not None:
-        args.amp_dtype = getattr(torch, args.amp_dtype)
-
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
         wandb.init(config=args)
@@ -405,6 +395,19 @@ if __name__ == "__main__":
     train_dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
     )
+
+
+    assert args.batch_size is not None, "please specify batch size"
+    if args.microbatch_size is None:
+        args.microbatch_size = args.batch_size // world_size
+    assert args.batch_size % world_size == 0
+    assert args.batch_size % (world_size * args.microbatch_size) == 0
+    grad_accumulation_steps = args.batch_size // (world_size * args.microbatch_size)
+    if args.dtype != 'auto':
+        args.dtype = getattr(torch, args.dtype)
+    if args.amp_dtype is not None:
+        args.amp_dtype = getattr(torch, args.amp_dtype)
+
 
     with one_rank_at_a_time(local=True):
         base_model = load_base_model(args, device)
