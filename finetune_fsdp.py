@@ -422,7 +422,7 @@ if __name__ == "__main__":
         with torch.cuda.amp.autocast(enabled=args.amp, dtype=torch.bfloat16):
             y = quantized_model(input_ids).logits
         y.norm().backward()
-    for k, v in optimizer.state_dict():
+    for k, v in optimizer.state_dict().items():
         print(k, v.shape, v.dtype)
 
 
