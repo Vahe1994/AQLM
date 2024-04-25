@@ -377,10 +377,8 @@ if __name__ == "__main__":
     assert args.batch_size % world_size == 0
     assert args.batch_size % (world_size * args.microbatch_size) == 0
     grad_accumulation_steps = args.batch_size // (world_size * args.microbatch_size)
-    if args.dtype != 'auto':
-        args.dtype = getattr(torch, args.dtype)
-    if args.amp_dtype is not None:
-        args.amp_dtype = getattr(torch, args.amp_dtype)
+    args.dtype = getattr(torch, args.dtype) if args.dtype != 'auto' else 'auto'
+    args.amp_dtype = getattr(torch, args.amp_dtype) if args.amp_dtype is not None else None
 
     if args.wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
