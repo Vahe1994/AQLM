@@ -396,6 +396,7 @@ if __name__ == "__main__":
         # batch_rows = [{key: batch_dict[key][i] for key in batch_dict} for i in range(num_rows)]
         raise 123
         return transformers.default_data_collator(batch_rows)
+    print("MICROBATCH", args.microbatch_size)
     train_dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
     )
