@@ -127,6 +127,12 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         help="Total number of training epochs (passes over calibration data) after which the training will conclude",
     )
     parser.add_argument(
+        "--print_every_steps",
+        type=int,
+        default=None,
+        help="print training metrics once in this many optimizer steps (this many updates to model parameters)",
+    )
+    parser.add_argument(
         "--eval_every_steps",
         type=int,
         default=None,
@@ -490,6 +496,11 @@ if __name__ == "__main__":
                 metadata['grad_steps_accumulated'] = 0
 
                 metadata['total_optimizer_steps'] += 1
+                if args.print_every_steps and metadata['total_optimizer_steps'] % args.eval_every_steps == 0:
+                    if rank == 0:
+                        print(f"epoch: {metadata['current_epoch']}",
+                              f"\tloss: {metadata['loss_numerator'] / metadata['loss_denominator']:.9f}",
+                              f"\ttotal updates: {metadata['total_optimizer_steps']}")
                 if args.eval_every_steps and metadata['total_optimizer_steps'] % args.eval_every_steps == 0:
                     evaluate(args, quantized_model)
                 if args.save_every_steps and metadata['total_optimizer_steps'] % args.save_every_steps == 0:
