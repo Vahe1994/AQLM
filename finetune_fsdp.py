@@ -410,11 +410,13 @@ def _load_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Mo
             map_location='cpu'))
         metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
         if args.eval_datasets is not None and metadata['early_stop_on'] not in args.eval_datasets:
-            print(f"Stopping criterion {metadata['early_stop_on']} is not in args.eval_datasets; resetting best loss.")
+            if rank == 0:
+                print(f"Stopping criterion {metadata['early_stop_on']} is not in eval_datasets; resetting best loss.")
             metadata['early_stop_on'] = next(iter(args.eval_datasets))
             metadata['best_eval_perplexity'] = float('inf')
             metadata['best_step'] = 0
-        print(f"Loaded training state from {args.save}: {metadata}")
+        if rank == 0:
+            print(f"Loaded training state from {args.save}: {metadata}")
 
     if args.on_save:
         exec(args.on_save)
