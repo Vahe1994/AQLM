@@ -448,10 +448,8 @@ if __name__ == "__main__":
             print(f"No checkpoint found at {args.save}")
     else:
         with FullyShardedDataParallel.state_dict_type(quantized_model, StateDictType.LOCAL_STATE_DICT):
-            quantized_model.load_state_dict(
-                torch.load(os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'))
-            )
-
+            state_dict_ptr = quantized_model.state_dict()
+            loaded_state_dict = torch.load(os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'))
 
             with master_rank_first(local=True):
                 for key in state_dict_ptr:
