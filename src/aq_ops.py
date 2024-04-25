@@ -152,3 +152,14 @@ def one_rank_at_a_time(local: bool):
             torch.distributed.barrier()
         if current_rank == rank:
             yield
+
+
+@contextlib.contextmanager
+def master_rank_first(local: bool, master_rank: int = 0):
+    distributed = torch.distributed.is_initialized()
+    rank = os.environ.get("LOCAL_RANK" if local else "RANK", 0) if distributed else 0
+    if distributed and rank != master_rank:
+        torch.distributed.barrier()
+    yield
+    if distributed and rank == master_rank:
+        torch.distributed.barrier()
