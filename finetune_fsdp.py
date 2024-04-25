@@ -446,6 +446,7 @@ if __name__ == "__main__":
     def _save_state():
         if args.save is None:
             return
+        print(f"Saving snapshot to {args.save}")
         torch.distributed.barrier()
         os.makedirs(args.save, exist_ok=True)
         if rank == 0:
