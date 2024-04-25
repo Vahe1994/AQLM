@@ -388,13 +388,16 @@ if __name__ == "__main__":
 
     sampler = torch.utils.data.DistributedSampler(
         dataset, rank=rank, num_replicas=world_size, shuffle=True, seed=args.seed)
+
+    def collate_fn(a):
+        print(a)
+        return transformers.default_data_collator(a)
     train_dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler,
-        collate_fn=transformers.default_data_collator,
+        collate_fn=collate_fn,
     )
 
     print(dataset)
-    print(dataset[0])
     print(next(iter(train_dataloader)))
     raise 123
 
