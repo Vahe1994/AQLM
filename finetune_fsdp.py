@@ -389,12 +389,12 @@ if __name__ == "__main__":
     sampler = torch.utils.data.DistributedSampler(
         dataset, rank=rank, num_replicas=world_size, shuffle=True, seed=args.seed)
 
-    def collate_fn(a):
-        print(a)
-        return transformers.default_data_collator(a)
+    def collate_fn(batch_dict):
+        num_rows = len(next(iter(batch_dict.values())))
+        batch_rows = [{key: batch_dict[key][i] for key in batch_dict} for i in range(num_rows)]
+        return transformers.default_data_collator(batch_rows)
     train_dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler,
-        collate_fn=collate_fn,
+        dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
     )
 
     print(dataset)
