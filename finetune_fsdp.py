@@ -388,10 +388,9 @@ if __name__ == "__main__":
 
     sampler = torch.utils.data.DistributedSampler(
         dataset, rank=rank, num_replicas=world_size, shuffle=True, seed=args.seed)
-    collate_fn = transformers.data.data_collator.DataCollatorForLanguageModeling(
-        tokenizer, mlm=False, return_tensors='pt')
     train_dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
+        dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler,
+        collate_fn=transformers.default_data_collator,
     )
 
     print(dataset)
@@ -471,7 +470,6 @@ if __name__ == "__main__":
 
         batch_iter = tqdm(train_dataloader, desc=f"Training epoch #{current_epoch}") if rank == 0 else train_dataloader
         for batch_index, batch in enumerate(batch_iter):
-            batch.pop('labels', None)
             if batch_index <= metadata['microbatches_since_epoch_start']:
                 continue  # skip batches processed before checkpoint
             metadata['microbatches_since_epoch_start'] += 1
