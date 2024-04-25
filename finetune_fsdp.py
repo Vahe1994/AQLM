@@ -96,7 +96,7 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=1,
+        required=False,
         help="training batch size - how many samples are processed per optimizer step, between all GPUs in total",
     )
     parser.add_argument(
