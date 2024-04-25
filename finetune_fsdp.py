@@ -447,9 +447,15 @@ if __name__ == "__main__":
             print(f"No checkpoint found at {args.save}")
     else:
         with FullyShardedDataParallel.state_dict_type(quantized_model, StateDictType.LOCAL_STATE_DICT):
-            quantized_model.load_state_dict(torch.load(
+            state_dict_ptr = quantized_model.state_dict()
+            loaded_state_dict = torch.load(
                 os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'),
-                map_location='cpu'))
+                map_location='cpu')
+            for key in state_dict_ptr:
+                assert state_dict_ptr[key].shape == loaded_state_dict[key].shape
+                state_dict_ptr[key].copy_(loaded_state_dict.pop(key).to(dtype=state_dict_ptr[key].dtype))
+            assert len(loaded_state_dict) == 0, f"Unused keys:, {tuple(loaded_state_dict.keys())}"
+
         optimizer.load_state_dict(torch.load(
             os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'),
             map_location='cpu'))
