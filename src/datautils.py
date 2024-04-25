@@ -288,8 +288,8 @@ def group_texts(examples: Sequence[Sequence[int]], block_size: int, add_labels: 
 @torch.inference_mode()
 def evaluate_perplexity(model: nn.Module, data: torch.Tensor, seqlen: int, device: torch.device) -> float:
     """Perplexity evaluation as per https://github.com/IST-DASLab/gptq (standard among quantization research)"""
-    rank = torch.distributed.get_rank() if torch.disributed.is_initialized() else 0
-    world_size = torch.distributed.get_world_size() if torch.disributed.is_initialized() else 1
+    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
 
     inps = [data[:, start: start + seqlen] for start in range(0, data.shape[1], seqlen)]
     num_sequences_without_padding = len(inps)
