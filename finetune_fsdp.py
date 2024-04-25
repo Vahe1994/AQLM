@@ -516,9 +516,11 @@ if __name__ == "__main__":
     metadata = dict(
         current_epoch=0,
         microbatches_since_epoch_start=0,
+        total_microbatches=0,
         total_optimizer_steps=0,
         loss_numerator=0,
         loss_denominator=0,
+        aggregated_loss=float('nan'),
         grad_steps_accumulated=0,
         early_stop_on=next(iter(args.eval_datasets)) if args.eval_datasets else None,
         best_eval_perplexity=float('inf'),
@@ -537,6 +539,7 @@ if __name__ == "__main__":
             if batch_index <= metadata['microbatches_since_epoch_start']:
                 continue  # skip batches processed before checkpoint
             metadata['microbatches_since_epoch_start'] += 1
+            metadata['total_microbatches'] += 1
 
             batch = {k: v.to(device) for k, v in batch.items()}
             loss = compute_loss_on_batch(batch, base_model, quantized_model, amp_dtype=args.amp_dtype)
@@ -552,21 +555,24 @@ if __name__ == "__main__":
                 optimizer.step()
                 optimizer.zero_grad()
                 metadata['grad_steps_accumulated'] = 0
-
                 metadata['total_optimizer_steps'] += 1
+
                 if args.print_every_steps and metadata['total_optimizer_steps'] % args.print_every_steps == 0:
                     loss_numerator = torch.tensor([metadata['loss_numerator']], dtype=torch.float64, device=device)
                     loss_denominator = torch.tensor([metadata['loss_denominator']], dtype=torch.float64, device=device)
                     torch.distributed.all_reduce_coalesced(
                         [loss_numerator, loss_denominator], op=torch.distributed.ReduceOp.SUM)
+                    metadata['aggregated_loss'] = loss_numerator.item() / loss_denominator.item()
+                    metadata['loss_numerator'] = metadata['loss_denominator'] = 0
                     if rank == 0:
                         print(f"epoch {metadata['current_epoch']}\tbatch {batch_index}",
                               f"\t| total updates = {metadata['total_optimizer_steps']}",
-                              f"\tloss = {loss_numerator.item() / loss_denominator.item():.9f}")
-                    metadata['loss_numerator'] = metadata['loss_denominator'] = 0
+                              f"\tloss = {metadata['aggregated_loss']:.9f}")
 
                 if args.eval_every_steps and metadata['total_optimizer_steps'] % args.eval_every_steps == 0:
                     perplexity_scores = compute_validation_perplexities(args, quantized_model, eval_datasets)
+                    for dataset_name, perplexity in perplexity_scores.items():
+                        metadata[f'perplexity_{dataset_name}'] = perplexity
                     metric_name = metadata['early_stop_on']
                     if perplexity_scores[metric_name] < metadata['best_eval_perplexity']:
                         if rank == 0:
@@ -575,6 +581,8 @@ if __name__ == "__main__":
                         metadata['best_step'] = metadata['total_optimizer_steps']
                         if args.keep_best_model:
                             _save_model(args, quantized_model)
+                if args.wandb and rank == 0:
+                    wandb.log(metadata, step=metadata['total_microbatches'])
                 if args.save_every_steps and metadata['total_optimizer_steps'] % args.save_every_steps == 0:
                     _save_state(args, metadata, quantized_model, optimizer)
 
