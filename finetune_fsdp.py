@@ -306,6 +306,7 @@ if __name__ == "__main__":
 
     if args.microbatch_size is None:
         args.microbatch_size = args.batch_size // world_size
+    assert args.batch_size % world_size == 0
     assert args.batch_size % (world_size * args.microbatch_size) == 0
     grad_accumulation_steps = args.batch_size // (world_size * args.microbatch_size)
     if args.dtype != 'auto':
@@ -359,8 +360,6 @@ if __name__ == "__main__":
         quantized_model.load_state_dict(torch.load(os.path.join(args.save, 'quantized_model_state_dict.pt', map_location='cpu')))
         training_metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
         print(f"Loaded training state: {training_metadata}")
-
-    raise 123 #DEBUG
 
     loss_numerator = loss_denominator = 0
     grad_steps_accumulated = 0
