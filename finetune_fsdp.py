@@ -153,7 +153,6 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     )
 
 
-
 def add_data_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--dataset_name",
@@ -524,7 +523,7 @@ if __name__ == "__main__":
             metadata['microbatches_since_epoch_start'] += 1
 
             batch = {k: v.to(device) for k, v in batch.items()}
-            loss = compute_loss_on_batch(batch, base_model, quantized_model)
+            loss = compute_loss_on_batch(batch, base_model, quantized_model, amp_dtype=args.amp_dtype)
 
             metadata['loss_numerator'] += loss.item()
             metadata['loss_denominator'] += 1
