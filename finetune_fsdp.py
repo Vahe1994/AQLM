@@ -341,7 +341,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     return lm_dataset
 
 
-def evaluate_perplexity(args: argparse.Namespace, model: nn.Module):
+def compute_validation_perplexities(args: argparse.Namespace, model: nn.Module):
     rank = torch.distributed.get_rank()
     perplexities = {}
     for dataset_name in args.eval_datasets:
@@ -518,7 +518,7 @@ if __name__ == "__main__":
                     metadata['loss_numerator'] = metadata['loss_denominator'] = 0
 
                 if args.eval_every_steps and metadata['total_optimizer_steps'] % args.eval_every_steps == 0:
-                    perplexity_scores = evaluate_perplexity(args, quantized_model)
+                    perplexity_scores = compute_validation_perplexities(args, quantized_model)
                     if perplexity_scores[args.eval_datasets[0]] < metadata['best_eval_perplexity']:
                         print(f"New best perplexity = {perplexity_scores[args.eval_datasets[0]]:.5f}")
                         metadata['best_eval_perplexity'] = perplexity_scores[args.eval_datasets[0]]
