@@ -453,6 +453,7 @@ if __name__ == "__main__":
                 map_location='cpu')
             for key in state_dict_ptr:
                 assert state_dict_ptr[key].shape == loaded_state_dict[key].shape
+                print(state_dict_ptr[key], loaded_state_dict[key])
                 state_dict_ptr[key].copy_(loaded_state_dict.pop(key).to(dtype=state_dict_ptr[key].dtype))
             assert len(loaded_state_dict) == 0, f"Unused keys:, {tuple(loaded_state_dict.keys())}"
 
