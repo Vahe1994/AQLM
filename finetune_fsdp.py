@@ -266,7 +266,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     lm_dataset = tokenized_dataset.map(
         partial(group_texts, block_size=args.model_seqlen, add_labels=False),
         batched=True,
-        batch_size=args.preprocessing_batch_size
+        batch_size=args.preprocessing_batch_size,
         num_proc=args.preprocessing_num_workers if args.preprocessing_num_workers is not None else args.num_workers,
         load_from_cache_file=not args.overwrite_cache,
         desc=f"Grouping texts in chunks of {args.model_seqlen}",
