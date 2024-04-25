@@ -371,16 +371,7 @@ def compute_validation_perplexities(args: argparse.Namespace, model: nn.Module, 
     perplexities = {}
     for dataset_name, eval_dataset in eval_datasets.items():
         if rank == 0:
-            print(f"Loading {dataset_name} ...")
-        eval_dataset = get_loaders(
-            dataset_name,
-            seed=args.seed,
-            model_path=args.base_model,
-            seqlen=args.model_seqlen,
-            eval_mode=True,
-        )
-        if rank == 0:
-            print(f"Dataset {dataset_name} loaded, evaluating...")
+            print(f"Evaluating perplexity on {dataset_name} ...")
         device = next(model.parameters()).device
         amp_dtype = args.amp_dtype if args.amp_dtype is not None else (args.dtype if args.dtype != 'auto' else None)
         ppl = evaluate_perplexity(model, eval_dataset, args.model_seqlen, device=device, amp_dtype=amp_dtype)
