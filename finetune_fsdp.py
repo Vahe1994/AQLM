@@ -3,6 +3,7 @@ Fine-tune an LLM that was previously quantized with AQLM;
 based on https://github.com/huggingface/transformers/blob/main/examples/pytorch/language-modeling/run_clm.py
 """
 import argparse
+import os
 from functools import partial
 from typing import Tuple
 
@@ -13,6 +14,7 @@ import datasets
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.data
 import torch.distributed
 from torch.distributed.fsdp import FullyShardedDataParallel
 
@@ -287,7 +289,14 @@ if __name__ == "__main__":
 
     if rank != 0:
         torch.distributed.barrier()
-    prepare_training_dataset(args, tokenizer)
+    dataset = prepare_training_dataset(args, tokenizer)
+    sampler = torch.utils.data.DistributedSampler(
+        dataset, rank=rank, num_replicas=world_size, shuffle=True, seed=args.seed)
+    collate_fn = transformers.data.data_collator.DataCollatorForLanguageModeling(
+        tokenizer, mlm=False, return_tensors='pt')
+    train_dataloader = torch.utils.data.DataLoader(
+        dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
+    )
     if rank == 0:
         torch.distributed.barrier()
 
@@ -295,9 +304,29 @@ if __name__ == "__main__":
     quantized_model = load_quantized_model(args, device)
 
     if rank == 0:
+        print("Wrapped model:")
         print(quantized_model)
         for name, param in quantized_model.named_parameters():
             print(name, param.shape, param.dtype)
+
+    optimizer = torch.optim.Adam(quantized_model.parameters(), lr=args.lr, betas=(args.adam_beta1, args.adam_beta2))
+    training_metadata = dict(current_epoch=0, batches_since_epoch_start=0)
+
+    def _save_state():
+        os.makedirs(args.save, exist_ok=True)
+        torch.save(training_metadata, os.path.join(args.save, 'metadata.pt'))
+        torch.save(quantized_model.state_dict(), os.path.join(args.save, 'quantized_model_state_dict.pt'))
+        torch.save(optimizer.state_dict(), os.path.join(args.save, 'optimizer_state_dict.pt'))
+
+    def _load_state():
+        if not os.path.exists(args.save):
+            print(f"No checkpoint found at {args.save}")
+        training_metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
+        print(f"Loaded training state: {training_metadata}")
+        quantized_model.load_state_dict(torch.load(os.path.join(args.save, 'quantized_model_state_dict.pt', map_location='cpu')))
+
+
+
 
     #TODO this is DEBUG AREA
     base_model.train(True)
@@ -310,9 +339,11 @@ if __name__ == "__main__":
 
 
     input_ids = torch.arange(8 * 2048).reshape(-1, 2048).to(device) % 16_000
-    for i in tqdm(range(100)):
+    for i in tqdm(range(1)):
         with torch.cuda.amp.autocast(enabled=args.amp, dtype=torch.bfloat16):
-            y = base_model(input_ids)
+            y = quantized_model(input_ids)
         y.logits.norm().backward()
+
+    print(quantized_model.state_dict())
 
 
