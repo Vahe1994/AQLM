@@ -386,7 +386,7 @@ def _load_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Mo
             with torch.no_grad():
                 for key in state_dict_ptr:
                     state_dict_ptr[key].copy_(loaded_state_dict.pop(key))
-                    assert len(loaded_state_dict) == 0, f"Unused keys:, {tuple(loaded_state_dict.keys())}"
+                assert len(loaded_state_dict) == 0, f"Unused keys:, {tuple(loaded_state_dict.keys())}"
             del state_dict_ptr, loaded_state_dict
 
         optimizer.load_state_dict(torch.load(
