@@ -316,7 +316,6 @@ def evaluate_perplexity(model: nn.Module, data: torch.Tensor, seqlen: int, devic
             total_nll += neg_log_likelihood
             total_tokens += shift_labels.numel()
 
-
     if world_size > 0:
         if rank == 0:
             print("BEFORE", total_nll, total_tokens)

@@ -18,7 +18,7 @@ import torch.distributed
 from torch.distributed.fsdp import FullyShardedDataParallel, StateDictType, FullStateDictConfig
 
 from src.aq import QuantizedWeight
-from src.aq_ops import IntCodes
+from src.aq_ops import IntCodes, master_rank_first, one_rank_at_a_time
 from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
 from src.modelutils import get_model
 
@@ -69,12 +69,6 @@ def add_model_args(parser: argparse.ArgumentParser):
 
 def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
-        "--max_epochs",
-        type=int,
-        default=1000,
-        help="Total number of training epochs (passes over calibration data) after which the training will conclude",
-    )
-    parser.add_argument(
         "--lr",
         type=float,
         default=1e-5,
@@ -123,6 +117,25 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     )
     parser.add_argument("--wandb", action="store_true", help="Whether to use wandb or store locally.")
     parser.add_argument("--save", type=str, default=None, help="Path to save training snapshot.")
+    parser.add_argument(
+        "--max_epochs",
+        type=int,
+        default=1000,
+        help="Total number of training epochs (passes over calibration data) after which the training will conclude",
+    )
+    parser.add_argument(
+        "--eval_every_steps",
+        type=int,
+        default=1000,
+        help="evaluate once in this many optimizer steps (this many updates to model parameters)",
+    )
+    parser.add_argument(
+        "--save_every_steps",
+        type=int,
+        default=1000,
+        help="save state once in this many optimizer steps (this many updates to model parameters)",
+    )
+    parser.add_argument("--save_keep_best", action="store_true", help="Save best model state separately")
 
 
 def add_data_args(parser: argparse.ArgumentParser):
@@ -272,7 +285,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
         trust_remote_code=args.trust_remote_code,
         streaming=False,
     )
-    text_column_name = 'text' if 'text' in dataset.column_names else dataset.column_names[0]
+    text_column_name = 'text' if 'text' in dataset.column_names else next(iter(dataset.column_names))
 
     if args.preprocessing_chunk_length is not None:
         dataset = dataset.map(
@@ -355,21 +368,20 @@ if __name__ == "__main__":
     tokenizer.bos_token_id = 1
     tokenizer.eos_token_id = 2
 
-    if rank != 0:
-        torch.distributed.barrier()
-    dataset = prepare_training_dataset(args, tokenizer)
-    sampler = torch.utils.data.DistributedSampler(
-        dataset, rank=rank, num_replicas=world_size, shuffle=True, seed=args.seed)
-    collate_fn = transformers.data.data_collator.DataCollatorForLanguageModeling(
-        tokenizer, mlm=False, return_tensors='pt')
-    train_dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
-    )
-    if rank == 0:
-        torch.distributed.barrier()
+    with master_rank_first(local=True):
+        dataset = prepare_training_dataset(args, tokenizer)
+        sampler = torch.utils.data.DistributedSampler(
+            dataset, rank=rank, num_replicas=world_size, shuffle=True, seed=args.seed)
+        collate_fn = transformers.data.data_collator.DataCollatorForLanguageModeling(
+            tokenizer, mlm=False, return_tensors='pt')
+        train_dataloader = torch.utils.data.DataLoader(
+            dataset, batch_size=args.microbatch_size, num_workers=args.num_workers, sampler=sampler, collate_fn=collate_fn
+        )
 
-    base_model = load_base_model(args, device)
-    quantized_model = load_quantized_model(args, device)
+    with one_rank_at_a_time(local=True):
+        base_model = load_base_model(args, device)
+    with one_rank_at_a_time(local=True):
+        quantized_model = load_quantized_model(args, device)
 
     if rank == 0:
         print("Wrapped model:")
@@ -378,13 +390,19 @@ if __name__ == "__main__":
             print(name, param.shape, param.dtype)
 
     optimizer = torch.optim.Adam(quantized_model.parameters(), lr=args.lr, betas=(args.adam_beta1, args.adam_beta2))
-    training_metadata = dict(current_epoch=0, microbatches_since_epoch_start=0, total_optimizer_steps=0)
+    metadata = dict(
+        current_epoch=0, microbatches_since_epoch_start=0, total_optimizer_steps=0,
+        loss_numerator=0, loss_denominator=0,
+        grad_steps_accumulated=0,
+    )
 
     def _save_state():
+        if args.save is None:
+            return
         torch.distributed.barrier()
         os.makedirs(args.save, exist_ok=True)
         if rank == 0:
-            torch.save(training_metadata, os.path.join(args.save, 'metadata.pt'))
+            torch.save(metadata, os.path.join(args.save, 'metadata.pt'))
         with FullyShardedDataParallel.state_dict_type(
                 quantized_model,
                 StateDictType.FULL_STATE_DICT,
@@ -397,55 +415,56 @@ if __name__ == "__main__":
         torch.distributed.barrier()
 
     def _load_state():
-        torch.distributed.barrier()
-        if not os.path.exists(args.save):
-            print(f"No checkpoint found at {args.save}")
+        if args.save is None or not os.path.exists(args.save):
+            if args.save is not None and rank == 0:
+                print(f"No checkpoint found at {args.save}")
             return
-
-
-        optimizer.load_state_dict(torch.load(os.path.join(args.save, f'optimizer_state_dict_{rank}.pt', map_location='cpu')))
-        quantized_model.load_state_dict(torch.load(os.path.join(args.save, 'quantized_model_state_dict.pt', map_location='cpu')))
-        training_metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
-        print(f"Loaded training state from {args.save}: {training_metadata}")
+        torch.distributed.barrier()
+        with one_rank_at_a_time(local=True):
+            quantized_model.load_state_dict(torch.load(
+                os.path.join(args.save, 'quantized_model_state_dict.pt'),
+                map_location='cpu'))
+        with one_rank_at_a_time(local=True):
+            optimizer.load_state_dict(torch.load(
+                os.path.join(args.save, f'optimizer_state_dict_{rank}.pt'),
+                map_location='cpu'))
+        metadata.update(torch.load(os.path.join(args.save, 'metadata.pt')))
+        print(f"Loaded training state from {args.save}: {metadata}")
         torch.distributed.barrier()
 
-
-    evaluate(args, quantized_model)
-    raise 123
-    loss_numerator = loss_denominator = 0
-    grad_steps_accumulated = 0
+    _load_state()
 
     for current_epoch in range(args.max_epochs):
-        if current_epoch < training_metadata['current_epoch']:
+        if current_epoch < metadata['current_epoch']:
             continue  # skip finished epochs
         sampler.set_epoch(current_epoch)
 
         for batch_index, batch in enumerate(train_dataloader):
             batch.pop('labels', None)
-            if batch_index <= training_metadata['microbatches_since_epoch_start']:
+            if batch_index <= metadata['microbatches_since_epoch_start']:
                 continue  # skip batches processed before checkpoint
-            training_metadata['microbatches_since_epoch_start'] += 1
+            metadata['microbatches_since_epoch_start'] += 1
 
             batch = {k: v.to(device) for k, v in batch.items()}
             loss = compute_loss_on_batch(batch, base_model, quantized_model)
 
-            loss_numerator += loss.item()
-            loss_denominator += 1
-            grad_steps_accumulated += 1
-            if grad_steps_accumulated < grad_accumulation_steps:
+            metadata['loss_numerator'] += loss.item()
+            metadata['loss_denominator'] += 1
+            metadata['grad_steps_accumulated'] += 1
+            if metadata['grad_steps_accumulated'] < grad_accumulation_steps:
                 with quantized_model.no_sync():
                     (loss / grad_accumulation_steps).backward()
             else:
                 (loss / grad_accumulation_steps).backward()
                 optimizer.step()
                 optimizer.zero_grad()
-                grad_steps_accumulated = 0
+                metadata['grad_steps_accumulated'] = 0
 
-                training_metadata['total_optimizer_steps'] += 1
-                if training_metadata['total_optimizer_steps'] % args.eval_every == 0:
-                    evaluate(quantized_model, eval_datasets)
-                if training_metadata['total_optimizer_steps'] % args.save_every == 0:
+                metadata['total_optimizer_steps'] += 1
+                if metadata['total_optimizer_steps'] % args.eval_every == 0:
+                    evaluate(quantized_model, args.eval_datasets)
+                if metadata['total_optimizer_steps'] % args.save_every == 0:
                     _save_state()
 
-        training_metadata['microbatches_since_epoch_start'] = 0
-        training_metadata['current_epoch'] += 1
+        metadata['microbatches_since_epoch_start'] = 0
+        metadata['current_epoch'] += 1
