@@ -520,14 +520,7 @@ if __name__ == "__main__":
         best_step=0,
     )
 
-    if os.path.exists(args.save):
-        _load_state(args, metadata, quantized_model, optimizer)
-    else:
-        perplexity_scores = compute_validation_perplexities(args, quantized_model, eval_datasets)
-        for dataset_name, perplexity in perplexity_scores.items():
-            metadata[f'perplexity_{dataset_name}'] = perplexity
-        if args.wandb and rank == 0:
-            wandb.log(metadata, step=metadata['total_microbatches'])
+    _load_state(args, metadata, quantized_model, optimizer)
     torch.distributed.barrier()
 
     for current_epoch in range(args.max_epochs):
