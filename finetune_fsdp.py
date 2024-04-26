@@ -19,7 +19,7 @@ import torch.distributed
 from torch.distributed.fsdp import FullyShardedDataParallel, StateDictType, FullStateDictConfig
 from tqdm.auto import tqdm
 
-from src.aq import QuantizedWeight
+from src.aq import QuantizedWeight, QuantizedLinear
 from src.aq_ops import IntCodes, master_rank_first, one_rank_at_a_time
 from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
 from src.modelutils import get_model
@@ -29,21 +29,6 @@ try:
     has_wandb = True
 except ModuleNotFoundError:
     has_wandb = False
-
-
-def _monkeypatch_pickle_compatibility():
-    """Compatibility between old *pickled* layers and new transformers"""
-    # because patching it for the fourth time is better than writing a proper saver once >.<
-    import transformers.activations
-    if not hasattr(transformers.activations, 'SiLUActivation'):
-        transformers.activations.SiLUActivation = deepcopy(torch.nn.SiLU)
-        transformers.activations.SiLUActivation.inplace = False
-        # https://github.com/huggingface/transformers/issues/28496
-    if not hasattr(transformers.models.llama.modeling_llama.LlamaAttention, 'attention_dropout'):
-        transformers.models.llama.modeling_llama.LlamaAttention.attention_dropout = 0
-
-
-_monkeypatch_pickle_compatibility()
 
 
 def add_model_args(parser: argparse.ArgumentParser):
@@ -59,7 +44,12 @@ def add_model_args(parser: argparse.ArgumentParser):
         required=True,
         help="path to quantized model",
     )
-    # Data params
+    parser.add_argument(
+        '--monkeypatch_old_pickle',
+        action="store_true",
+        help="If set, load quantized_model in a hacky way that allows pickled models with older transformers/torch.",
+    )
+
     parser.add_argument(
         "--model_seqlen",
         type=int,
@@ -317,10 +307,13 @@ def load_base_model(args: argparse.Namespace, device: torch.device) -> FullyShar
 
 
 def load_quantized_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
-    quantized_model = get_model(
-        args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
-        attn_implementation=args.attn_implementation
-    ).to(torch.float32)  # master parameters
+    if not args.monkeypatch_old_pickle:
+        quantized_model = get_model(
+            args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
+            attn_implementation=args.attn_implementation
+        ).to(torch.float32)  # master parameters
+    else:
+        quantized_model = _scary_load_quantized_model(args).to(torch.float32)
 
     quantized_model.train(True)  # note: HF gradient checkpoints do not work for some models without train(True); see
     # https://github.com/huggingface/transformers/blob/2d92db8/src/transformers/models/llama/modeling_llama.py#L1006
@@ -348,6 +341,41 @@ def load_quantized_model(args: argparse.Namespace, device: torch.device) -> Full
         use_orig_params=True,
         device_id=device,
     )
+
+
+def _scary_load_quantized_model(args: argparse.Namespace):
+    """Hacky way to allow compatibility between old *pickled* layers and new transformers"""
+    # because patching it for the fourth time is better than writing a proper saver once >.<
+    import transformers.activations
+    if not hasattr(transformers.activations, 'SiLUActivation'):
+        transformers.activations.SiLUActivation = deepcopy(torch.nn.SiLU)
+        transformers.activations.SiLUActivation.inplace = False
+        # https://github.com/huggingface/transformers/issues/28496
+    if not hasattr(transformers.models.llama.modeling_llama.LlamaAttention, 'attention_dropout'):
+        transformers.models.llama.modeling_llama.LlamaAttention.attention_dropout = 0
+    quantized_model = get_model(args.base_model, None, dtype=args.dtype, trust_remote_code=args.trust_remote_code, attn_implementation=args.attn_implementation).to(torch.float32)
+    quantized_model_src = get_model(
+        args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
+        attn_implementation=args.attn_implementation
+    )
+    lut = {}
+    for name, module in quantized_model_src.named_modules():
+        for child_name, child_module in module.named_children():
+            if isinstance(child_module, QuantizedWeight):
+                lut[name + '.' + child_name] = child_module
+    print(f"found {len(lut)} quantized weight matrices")
+    for name, module in quantized_model.named_modules():
+        for child_name, child_module in module.named_children():
+            if name + '.' + child_name + '.quantized_weight' in lut:
+                quantized_weight = lut.pop(name + '.' + child_name + '.quantized_weight')
+                assert isinstance(child_module, nn.Linear)
+                setattr(module, child_name, QuantizedLinear(quantized_weight, bias=child_module.bias))
+    assert not lut, list(lut.keys())
+    quantized_model.to(torch.float32)
+    quantized_model.load_state_dict(quantized_model_src.state_dict())
+    import warnings;
+    warnings.warn("You should be ashamed of yourself.")
+    return quantized_model
 
 
 def compute_loss_on_batch(
