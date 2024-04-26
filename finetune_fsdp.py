@@ -409,9 +409,6 @@ def _load_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Mo
         if rank == 0:
             print(f"Loaded training state from {args.save}: {metadata}")
 
-    if args.on_save:
-        exec(args.on_save)
-
 
 def _save_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Module, optimizer: torch.optim.Optimizer):
     if args.save is None:
@@ -424,6 +421,9 @@ def _save_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Mo
     with FullyShardedDataParallel.state_dict_type(quantized_model, StateDictType.LOCAL_STATE_DICT):
         torch.save(quantized_model.state_dict(), os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'))
     torch.save(optimizer.state_dict(), os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'))
+    if args.on_save:
+        exec(args.on_save)
+
 
 
 def _save_model(args: argparse.Namespace, quantized_model: nn.Module):
@@ -520,8 +520,16 @@ if __name__ == "__main__":
         best_step=0,
     )
 
-    _load_state(args, metadata, quantized_model, optimizer)
+    if os.path.exists(args.save):
+        _load_state(args, metadata, quantized_model, optimizer)
+    else:
+        perplexity_scores = compute_validation_perplexities(args, quantized_model, eval_datasets)
+        for dataset_name, perplexity in perplexity_scores.items():
+            metadata[f'perplexity_{dataset_name}'] = perplexity
+        if args.wandb and rank == 0:
+            wandb.log(metadata, step=metadata['total_microbatches'])
     torch.distributed.barrier()
+
     for current_epoch in range(args.max_epochs):
         if current_epoch < metadata['current_epoch']:
             continue  # skip finished epochs
