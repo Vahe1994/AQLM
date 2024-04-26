@@ -90,7 +90,7 @@ def finetune_groupwise(
         num_samples_per_device,
         local_batch_size,
     )
-    train_steps_per_epoch = num_samples_per_device * len(args.devices) // args.finetune_batch_size
+    train_batches_per_epoch = num_samples_per_device // local_batch_size
     train_batch_iterators = [
         iterate_minibatches(train_inps[i], train_outs[i], batch_size=local_batch_size, device=args.devices[i])
         for i in range(len(args.devices))
@@ -100,7 +100,7 @@ def finetune_groupwise(
     if valid_inps and valid_outs:
         run_validation = True
         num_valid_samples_per_device = len(valid_inps[0])
-        valid_steps_per_epoch = num_valid_samples_per_device * len(args.devices) // args.finetune_batch_size
+        valid_batches_per_epoch = num_valid_samples_per_device // local_batch_size
         valid_batch_iterators = [
             iterate_minibatches(valid_inps[i], valid_outs[i], batch_size=local_batch_size, device=args.devices[i])
             for i in range(len(args.devices))
@@ -111,7 +111,7 @@ def finetune_groupwise(
         layer.eval()
         loss_numerator = loss_denominator = 0
         with torch.no_grad():
-            for _ in range(valid_steps_per_epoch):
+            for _ in range(valid_batches_per_epoch):
                 if len(args.devices) == 1:
                     loss = _compute_mse_on_batch(layer, valid_batch_iterators[0], **kwargs)
                 else:
@@ -137,7 +137,7 @@ def finetune_groupwise(
         layer.train()
         # train epoch
         loss_numerator = loss_denominator = 0
-        for _ in range(train_steps_per_epoch):
+        for _ in range(train_batches_per_epoch):
             if len(args.devices) == 1:
                 loss = _compute_mse_on_batch(layer, train_batch_iterators[0], **kwargs)
             else:
@@ -169,7 +169,7 @@ def finetune_groupwise(
             # val epoch
             loss_numerator = loss_denominator = 0
             with torch.no_grad():
-                for _ in range(valid_steps_per_epoch):
+                for _ in range(valid_batches_per_epoch):
                     if len(args.devices) == 1:
                         loss = _compute_mse_on_batch(layer, valid_batch_iterators[0], **kwargs)
                     else:
