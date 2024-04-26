@@ -49,7 +49,6 @@ def add_model_args(parser: argparse.ArgumentParser):
         action="store_true",
         help="If set, load quantized_model in a hacky way that allows pickled models with older transformers/torch.",
     )
-
     parser.add_argument(
         "--model_seqlen",
         type=int,
@@ -353,7 +352,9 @@ def _scary_load_quantized_model(args: argparse.Namespace):
         # https://github.com/huggingface/transformers/issues/28496
     if not hasattr(transformers.models.llama.modeling_llama.LlamaAttention, 'attention_dropout'):
         transformers.models.llama.modeling_llama.LlamaAttention.attention_dropout = 0
-    quantized_model = get_model(args.base_model, None, dtype=args.dtype, trust_remote_code=args.trust_remote_code, attn_implementation=args.attn_implementation).to(torch.float32)
+    quantized_model = get_model(
+        args.base_model, None, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
+        attn_implementation=args.attn_implementation).to(torch.float32)
     quantized_model_src = get_model(
         args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
         attn_implementation=args.attn_implementation
@@ -373,7 +374,7 @@ def _scary_load_quantized_model(args: argparse.Namespace):
     assert not lut, list(lut.keys())
     quantized_model.to(torch.float32)
     quantized_model.load_state_dict(quantized_model_src.state_dict())
-    import warnings;
+    import warnings
     warnings.warn("You should be ashamed of yourself.")
     return quantized_model
 
