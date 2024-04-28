@@ -16,7 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data
 import torch.distributed
-from torch.distributed.fsdp import FullyShardedDataParallel, StateDictType, FullStateDictConfig
+from torch.distributed.fsdp import FullyShardedDataParallel, StateDictType, FullStateDictConfig, MixedPrecision
 from tqdm.auto import tqdm
 
 from src.aq import QuantizedWeight, QuantizedLinear
@@ -345,10 +345,14 @@ def load_quantized_model(args: argparse.Namespace, device: torch.device) -> Full
     assert any(isinstance(module, IntCodes) for module in quantized_model.modules())
 
     blocks_to_wrap = (IntCodes,) + transformer_block_types
+    mixed_precision = None
+    if args.amp_dtype is not None:
+        mixed_precision = MixedPrecision(param_dtype=args.amp_dtype, reduce_dtype=args.amp_dtype)
     return FullyShardedDataParallel(
         quantized_model,
         auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, blocks_to_wrap),
         use_orig_params=True,
+        mixed_precision=mixed_precision,
         device_id=device,
     )
 
