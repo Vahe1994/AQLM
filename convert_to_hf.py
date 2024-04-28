@@ -2,6 +2,7 @@ import json
 import os
 import re
 import shutil
+from typing import Optional
 
 import torch
 from tqdm.auto import trange
@@ -47,15 +48,28 @@ def get_layers_prefix(config) -> str:
             raise NotImplementedError(f"Can't get layers prefix for {unknown_type}")
 
 
-def get_converted_state_dict(config, nbits: int, in_path: os.PathLike) -> [dict, list[str]]:
+def get_converted_state_dict(config, nbits: int, in_path: os.PathLike, finetuned_path: Optional[os.PathLike] = None) -> [dict, list[str]]:
     state_dict = {}
     linear_weights_not_to_quantize = []
 
     num_layers = get_num_layers(config)
     layers_prefix = get_layers_prefix(config)
 
+    if finetuned_path:
+        # load finetuned state
+        assert config.model_type in ("llama", "mistral", "mixtral", "gemma")
+        finetuned_state_dict = torch.load(finetuned_path)
+
     for i in trange(num_layers):
         layer = torch.load(os.path.join(in_path, f"{i}.pth"))
+        # override codes and scales
+        if finetuned_path:
+            finetuned_layer_state_dict = {
+                ".".join(k.split(".")[3:]): v for k, v in finetuned_state_dict.items() 
+                if k.startswith(f"{layers_prefix}.{i}")
+            }
+            layer.load_state_dict(finetuned_layer_state_dict, strict=False)
+
         for name, p in layer.named_parameters():
             if torch.is_floating_point(p.data):
                 p.data = p.data.half()
@@ -68,6 +82,9 @@ def get_converted_state_dict(config, nbits: int, in_path: os.PathLike) -> [dict,
             state_dict[f"{layers_prefix}.{i}.{name}"] = p.data
 
     for key, value in torch.load(os.path.join(in_path, "not_quantized_weights.pt")).items():
+        # override value from finetuned state dict
+        if finetuned_state_dict and key in finetuned_state_dict:
+            value = finetuned_state_dict[key]
         state_dict[key] = value.half()
         linear_weights_not_to_quantize.append(key)
 
@@ -128,6 +145,12 @@ if __name__ == "__main__":
         help="Path to save HF compatible checkpoint to",
     )
     parser.add_argument(
+        "--finetuned_path",
+        type=str,
+        default=None,
+        help="Path to FSDP finetuned checkpoint (overrides some keys)",
+    )
+    parser.add_argument(
         "--save_safetensors",
         action="store_true",
         help="Whether to save in safetensors format",
@@ -138,7 +161,7 @@ if __name__ == "__main__":
     metadata = get_metadata(args.in_path)
 
     state_dict, linear_weights_not_to_quantize = get_converted_state_dict(
-        old_config, metadata["nbits_per_codebook"], args.in_path
+        old_config, metadata["nbits_per_codebook"], args.in_path, args.finetuned_path
     )
     torch.save(state_dict, os.path.join(args.out_path, "pytorch_model.bin"))
 

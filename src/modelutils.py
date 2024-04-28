@@ -219,15 +219,33 @@ def load_linear_layers(layer, quant_layer, model):
     return layer
 
 
-def load_dequantized_model(model, load_path):
+def load_dequantized_model(model, load_path, finetuned_path=None):
     """Load quantized model by dequantizing it"""
+    if finetuned_path:
+        # load finetuned state
+        assert model.config.model_type in LLAMA_LIKE
+        finetuned_state_dict = torch.load(finetuned_path)
+ 
     layers = get_layers(model)
     for layer_index in range(len(layers)):
         print("layer", layer_index)
         layer = layers[layer_index]
         quant_layer = torch.load(os.path.join(load_path, str(layer_index) + ".pth"), map_location="cpu")
+        # override codes and scales
+        if finetuned_path:
+            finetuned_layer_state_dict = {
+                ".".join(k.split(".")[3:]): v for k, v in finetuned_state_dict.items() 
+                if k.startswith(f"model.layers.{layer_index}")
+            }
+            quant_layer.load_state_dict(finetuned_layer_state_dict, strict=False)
         layers[layer_index] = load_linear_layers(layer, quant_layer, model)
     model.load_state_dict(torch.load(os.path.join(load_path, "not_quantized_weights.pt")), strict=False)
+    if finetuned_path:
+        # load params outside of the transformer blocks
+        finetuned_other_state_dict = {
+            k: v for k, v in finetuned_state_dict.items() if not k.startswith(f"model.layers")
+        }
+        model.load_state_dict(finetuned_other_state_dict, strict=False)
     return model
 
 
@@ -235,7 +253,6 @@ def load_quantized_model(model, load_path):
     """Load quantized model"""
 
     for layer_index in range(len(model.model.layers)):
-        print(model.model.layers[layer_index].input_layernorm.weight.device)
         model.model.layers[layer_index] = torch.load(
             os.path.join(load_path, str(layer_index) + ".pth"),
             map_location=model.model.layers[layer_index].input_layernorm.weight.device,
