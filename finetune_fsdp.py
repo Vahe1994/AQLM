@@ -345,9 +345,15 @@ def load_quantized_model(args: argparse.Namespace, device: torch.device) -> Full
     assert any(isinstance(module, IntCodes) for module in quantized_model.modules())
 
     blocks_to_wrap = (IntCodes,) + transformer_block_types
+    mixed_precision = None
+    if args.amp_dtype is not None:
+        ignored_classes = (IntCodes,) + tuple(transformers.pytorch_utils.ALL_LAYERNORM_LAYERS)
+        mixed_precision = MixedPrecision(
+            param_dtype=args.amp_dtype, reduce_dtype=args.amp_dtype, _module_classes_to_ignore=ignored_classes)
     return FullyShardedDataParallel(
         quantized_model,
         auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, blocks_to_wrap),
+        mixed_precision=mixed_precision,
         use_orig_params=True,
         device_id=device,
     )
