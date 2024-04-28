@@ -351,8 +351,8 @@ def load_quantized_model(args: argparse.Namespace, device: torch.device) -> Full
     return FullyShardedDataParallel(
         quantized_model,
         auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, blocks_to_wrap),
-        use_orig_params=True,
         mixed_precision=mixed_precision,
+        use_orig_params=True,
         device_id=device,
     )
 
