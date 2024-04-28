@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 from tqdm.auto import trange
 
-from src.aq_ops import _dequantize_weight, ellipsis, IntCodes
+from src.aq_ops import _dequantize_weight, ellipsis, IntCodes, is_signed
 from src.beam_search_xtx import beam_search_optimal_codes as beam_search_minimize_activation_mse
 from src.beam_search_l2 import beam_search_optimal_codes as beam_search_minimize_weight_mse
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
@@ -54,7 +54,7 @@ class QuantizedWeight(nn.Module):
         self.out_features, self.in_features = reference_weight.shape
         assert self.in_features % in_group_size == 0
         assert self.out_features % out_group_size == 0
-        if nbits_per_codebook > torch.iinfo(code_dtype).bits - code_dtype.is_signed:
+        if nbits_per_codebook > torch.iinfo(code_dtype).bits - is_signed(code_dtype):
             raise ValueError(f"Code dtype cannot store {nbits_per_codebook} bits; please specify code_dtype manually")
 
         self.out_group_size, self.in_group_size = out_group_size, in_group_size

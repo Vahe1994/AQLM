@@ -20,7 +20,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel, StateDictType, Full
 from tqdm.auto import tqdm
 
 from src.aq import QuantizedWeight, QuantizedLinear
-from src.aq_ops import IntCodes, master_rank_first, one_rank_at_a_time
+from src.aq_ops import IntCodes, master_rank_first, one_rank_at_a_time, is_signed
 from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
 from src.modelutils import get_model
 
@@ -61,6 +61,19 @@ def add_model_args(parser: argparse.ArgumentParser):
         default="auto",
         choices=["auto", "float16", "float32", "bfloat16"],
         help="dtype to load the model in",
+    )
+    parser.add_argument(
+        "--amp_dtype",
+        type=str,
+        default=None,
+        choices=[None, "float16", "bfloat16"],
+        help="if specified, runs automated mixed precision with this dtype",
+    )
+    parser.add_argument(
+        "--code_dtype",
+        type=str,
+        default=None,
+        help="if specified, cast quantized layers' codes to this dtype; default = keep loaded dtype",
     )
     parser.add_argument(
         "--block_type", type=str, required=True,
@@ -107,13 +120,6 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         "--gradient_checkpointing",
         action="store_true",
         help="Whether to apply gradient checkpointing",
-    )
-    parser.add_argument(
-        "--amp_dtype",
-        type=str,
-        default=None,
-        choices=[None, "float16", "bfloat16"],
-        help="if specified, runs automated mixed precision with this dtype",
     )
     parser.add_argument(
         "--seed",
@@ -326,9 +332,9 @@ def load_quantized_model(args: argparse.Namespace, device: torch.device) -> Full
     for name, module in quantized_model.named_modules():
         if isinstance(module, QuantizedWeight):
             assert module.codes is not None
-            if not hasattr(module, 'codes_storage'):
-                module.codes_storage = None  # backwards compatibility with older snapshots
-            module.codes = nn.Parameter(module.codes.to(torch.int32), requires_grad=module.codes.requires_grad)
+            if args.code_dtype is not None:
+                assert module.nbits_per_codebook <= torch.iinfo(args.code_dtype).bits - is_signed(args.code_dtype)
+                module.codes = nn.Parameter(module.codes.to(args.code_dtype), requires_grad=module.codes.requires_grad)
             module.wrap_codes_for_fsdp_()
             assert module.codes is None and isinstance(module.codes_storage, IntCodes)
     assert any(isinstance(module, IntCodes) for module in quantized_model.modules())
@@ -359,6 +365,10 @@ def _scary_load_quantized_model(args: argparse.Namespace):
         args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
         attn_implementation=args.attn_implementation
     )
+    for module in quantized_model_src.modules():
+        if isinstance(module, QuantizedWeight) and not hasattr(module, 'codes_storage'):
+            module.codes_storage = None  # backwards compatibility with older pickled snapshots
+
     lut = {}
     for name, module in quantized_model_src.named_modules():
         for child_name, child_module in module.named_children():
@@ -492,6 +502,7 @@ if __name__ == "__main__":
     grad_accumulation_steps = args.batch_size // (world_size * args.microbatch_size)
     args.dtype = getattr(torch, args.dtype) if args.dtype != 'auto' else 'auto'
     args.amp_dtype = getattr(torch, args.amp_dtype) if args.amp_dtype is not None else None
+    args.code_dtype = getattr(torch, args.code_dtype) if args.code_dtype is not None else None
     if args.save_every_steps is not None:
         assert args.save is not None, f"save_every_steps={args.save_every_steps}, but --save path not specified"
     if args.keep_best_model:

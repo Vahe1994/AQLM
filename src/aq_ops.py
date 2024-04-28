@@ -166,3 +166,13 @@ def master_rank_first(local: bool, master_rank: int = 0):
     if distributed and rank == master_rank:
         torch.distributed.barrier()
 
+
+def is_signed(dtype: torch.dtype) -> bool:
+    """Return True iff an integer dtype is signed"""
+    try:
+        return dtype.is_signed
+    except RuntimeError:  # see https://github.com/pytorch/pytorch/issues/125124
+        if dtype.is_floating_point:
+            return torch.finfo(dtype).min < 0
+        else:
+            return torch.iinfo(dtype).min < 0 and torch.iinfo(dtype).max > 0
