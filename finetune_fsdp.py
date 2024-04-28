@@ -66,8 +66,13 @@ def add_model_args(parser: argparse.ArgumentParser):
         "--amp_dtype",
         type=str,
         default=None,
-        choices=[None, "float16", "bfloat16"],
         help="if specified, runs automated mixed precision with this dtype",
+    )
+    parser.add_argument(
+        "--master_dtype",
+        type=str,
+        default="float32",
+        help="data type for storing master parameters and computing optimizer updates",
     )
     parser.add_argument(
         "--code_dtype",
@@ -316,9 +321,9 @@ def load_quantized_model(args: argparse.Namespace, device: torch.device) -> Full
         quantized_model = get_model(
             args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
             attn_implementation=args.attn_implementation
-        ).to(torch.float32)  # master parameters
+        ).to(args.master_dtype)  # master parameters
     else:
-        quantized_model = _scary_load_quantized_model(args).to(torch.float32)
+        quantized_model = _scary_load_quantized_model(args).to(args.master_dtype)
 
     quantized_model.train(True)  # note: HF gradient checkpoints do not work for some models without train(True); see
     # https://github.com/huggingface/transformers/blob/2d92db8/src/transformers/models/llama/modeling_llama.py#L1006
@@ -360,7 +365,7 @@ def _scary_load_quantized_model(args: argparse.Namespace):
         transformers.models.llama.modeling_llama.LlamaAttention.attention_dropout = 0
     quantized_model = get_model(
         args.base_model, None, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
-        attn_implementation=args.attn_implementation).to(torch.float32)
+        attn_implementation=args.attn_implementation).to(args.master_dtype)
     quantized_model_src = get_model(
         args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
         attn_implementation=args.attn_implementation
@@ -382,7 +387,7 @@ def _scary_load_quantized_model(args: argparse.Namespace):
                 assert isinstance(child_module, nn.Linear)
                 setattr(module, child_name, QuantizedLinear(quantized_weight, bias=child_module.bias))
     assert not lut, list(lut.keys())
-    quantized_model.to(torch.float32)
+    quantized_model.to(args.master_dtype)
     quantized_model.load_state_dict(quantized_model_src.state_dict())
     import warnings
     warnings.warn("You should be ashamed of yourself.")
@@ -503,6 +508,7 @@ if __name__ == "__main__":
     args.dtype = getattr(torch, args.dtype) if args.dtype != 'auto' else 'auto'
     args.amp_dtype = getattr(torch, args.amp_dtype) if args.amp_dtype is not None else None
     args.code_dtype = getattr(torch, args.code_dtype) if args.code_dtype is not None else None
+    args.master_dtype = getattr(torch, args.master_dtype)
     if args.save_every_steps is not None:
         assert args.save is not None, f"save_every_steps={args.save_every_steps}, but --save path not specified"
     if args.keep_best_model:
