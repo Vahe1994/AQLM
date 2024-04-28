@@ -308,6 +308,7 @@ def load_base_model(args: argparse.Namespace, device: torch.device) -> FullyShar
     for param in base_model.parameters():
         param.requires_grad = False
 
+    base_model.config.use_cache = False
     transformer_block_types = infer_block_classes(base_model, args.block_type)
     return FullyShardedDataParallel(
         base_model,
@@ -325,6 +326,7 @@ def load_quantized_model(args: argparse.Namespace, device: torch.device) -> Full
     else:
         quantized_model = _scary_load_quantized_model(args).to(args.master_dtype)
 
+    quantized_model.config.use_cache = False
     quantized_model.train(True)  # note: HF gradient checkpoints do not work for some models without train(True); see
     # https://github.com/huggingface/transformers/blob/2d92db8/src/transformers/models/llama/modeling_llama.py#L1006
     if args.gradient_checkpointing:
