@@ -171,6 +171,9 @@ def _beam_search_update_codes_groupwise(
     :param codebooks: [num_codebooks, codebook_size, group_size]
     :returns: [num_groups, num_codebooks]
     """
+    if stochastic_rounding_tau > 0:
+        assert beam_size >= 2, "with stochastic rounding, we need at least 2 hypotheses to choose from"
+
     device = reference.device
     num_groups, group_size = reference.shape
     num_codebooks, codebook_size, group_size = codebooks.shape
@@ -186,23 +189,17 @@ def _beam_search_update_codes_groupwise(
         beam_codes.flatten(0, 1) + codebook_offsets, codebooks.flatten(0, 1), mode='sum'
     ).view(num_groups, 1, group_size)  # shape: [num_groups, current_beam_size, group_size]
 
-    # reusable buffers for scores and indices
-    flat_best_indices = torch.empty(num_groups, beam_size, device=device, dtype=codes.dtype)
-    flat_best_scores = torch.empty(num_groups, beam_size, device=device, dtype=residue.dtype)
-
     for i, codebook_index in enumerate(dim_order):
         current_beam_size = residue.shape[1]
         is_last_step = i == len(dim_order) - 1
-        if is_last_step:
-            beam_size = 2 if stochastic_rounding_tau > 0 else 1
-            # with stochastic rounding, we need at least 2 hypotheses to choose from
-
         residue = residue + F.embedding(beam_codes[..., codebook_index], codebooks[codebook_index, ...])
         if beam_size > 1:
             residue_norms_sq = residue.square().sum(-1).unsqueeze(-1)  # [num_groups, current beam size, 1]
         else:
             residue_norms_sq = torch.zeros(0, device=device)  # when doing greedy search, these are const
 
+        flat_best_indices = torch.empty(num_groups, beam_size, device=device, dtype=codes.dtype)
+        flat_best_scores = torch.empty(num_groups, beam_size, device=device, dtype=residue.dtype)
         chunk_size_rows = chunk_size_values // (codebook_size * current_beam_size)
         for chunk_start in range(0, num_groups, chunk_size_rows):
             chunk_end = min(chunk_start + chunk_size_rows, num_groups)
@@ -223,18 +220,24 @@ def _beam_search_update_codes_groupwise(
         beam_codes = beam_codes[arange_num_groups[:, None], best_hypo_source_ids, :]
         beam_codes[:, :, codebook_index] = best_hypo_codes.to(beam_codes.dtype)
         # ^-- [num_groups, beam_size, num_codebooks]
-        residue = residue - F.embedding(beam_codes[..., codebook_index], codebooks[codebook_index, ...])
 
-    if stochastic_rounding_tau > 0:
-        assert beam_size == 2
-        errors = flat_best_scores.relu().sqrt()  # non-squared errors
-        scores = torch.pow(errors / errors.sum(-1, keepdim=True), -1 / stochastic_rounding_tau)
-        # ^-- [num_groups, beam_size]
-        keep_prob = scores[:, :-1] / (scores[:, :-1] + scores[:, 1:])  # [num_groups, beam_size - 1]
-        keep_prob = torch.where(torch.isinf(scores[:, :-1]), 1.0, keep_prob)  # [num_groups, beam_size - 1]
-        keep_best = torch.less_equal(torch.rand_like(keep_prob), keep_prob)
-        beam_codes = torch.where(
-            keep_best, beam_codes[:, :-1, :], beam_codes[:, 1:, :])
+        if not is_last_step:
+            residue = residue - F.embedding(beam_codes[..., codebook_index], codebooks[codebook_index, ...])
+
+        if is_last_step and stochastic_rounding_tau > 0:
+            assert flat_best_scores.shape[-1] >= 2
+            # note: you can also compute erros as torch.norm(residue, dim=-1) after you subtract code embeddings
+            errors = flat_best_scores.relu().sqrt()  # non-squared errors
+            scores = torch.pow(errors / errors.sum(-1, keepdim=True), -1 / stochastic_rounding_tau)
+            # ^-- [num_groups, beam_size]
+            keep_prob = scores[:, :-1] / (scores[:, :-1] + scores[:, 1:])  # [num_groups, beam_size - 1]
+            keep_prob = torch.where(torch.isinf(scores[:, :-1]), 1.0, keep_prob)  # [num_groups, beam_size - 1]
+            best_code_changed = (beam_codes[:, 0, :] != codes).all(dim=-1, keepdim=True)
+            keep_best = torch.logical_or(
+                best_code_changed, torch.less_equal(torch.rand_like(keep_prob), keep_prob)
+            )
+            beam_codes = torch.where(
+                keep_best[:, :, None], beam_codes[:, :-1, :], beam_codes[:, 1:, :])
 
     return beam_codes[:, 0, :]
 
