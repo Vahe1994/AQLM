@@ -320,7 +320,7 @@ def evaluate_perplexity(
         neg_log_likelihood = loss.float() * seqlen
         if sequence_index < num_sequences_without_padding:
             total_nll += neg_log_likelihood
-        total_tokens += shift_labels.numel()
+            total_tokens += shift_labels.numel()
 
     if world_size > 0:
         torch.distributed.all_reduce_coalesced([total_nll, total_tokens], op=torch.distributed.ReduceOp.SUM)
