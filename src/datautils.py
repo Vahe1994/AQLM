@@ -296,7 +296,9 @@ def evaluate_perplexity(
     rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
     world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
 
-    inps = [data[:, start: start + seqlen] for start in range(0, data.shape[1], seqlen)]
+    inps = [data[:, start: start + seqlen]
+            for start in range(0, data.shape[1], seqlen)
+            if start + seqlen < data.shape[1]]  # ignore last incomplete sequence as in the GPTQ paper
     num_sequences_without_padding = len(inps)
 
     # pad sequences to be divisible by world_size for DDP/FSDP compatibility
