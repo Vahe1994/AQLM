@@ -324,7 +324,7 @@ def evaluate_perplexity(
             total_nll += neg_log_likelihood
             total_tokens += shift_labels.numel()
 
-    if world_size > 0:
+    if world_size > 1:
         torch.distributed.all_reduce_coalesced([total_nll, total_tokens], op=torch.distributed.ReduceOp.SUM)
     ppl = torch.exp(total_nll / total_tokens)
     return ppl.item()
