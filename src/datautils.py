@@ -315,13 +315,12 @@ def evaluate_perplexity(
         with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype or torch.float32):
             lm_logits = model(input_ids).logits
 
-        shift_logits = lm_logits[:, :-1, :].contiguous()
-        shift_labels = input_ids[:, 1:]
-        loss_fct = nn.CrossEntropyLoss()
-        loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-        neg_log_likelihood = loss.float() * seqlen
         if sequence_index < num_sequences_without_padding:
-            total_nll += neg_log_likelihood
+            shift_logits = lm_logits[:, :-1, :].contiguous()
+            shift_labels = input_ids[:, 1:]
+            loss_fct = nn.CrossEntropyLoss()
+            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            total_nll += loss.float() * shift_labels.numel()
             total_tokens += shift_labels.numel()
 
     if world_size > 1:
