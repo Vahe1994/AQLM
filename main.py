@@ -623,6 +623,7 @@ if __name__ == "__main__":
         help="Compress .self_attn in 4 bits, .block_sparse_moe.experts to 2.3 for mixtral.",
     )
     parser.add_argument("--load", type=str, default=None, help="Path to load quantized statistics.")
+    parser.add_argument("--load_finetuned", type=str, default=None, help="Path to load quantized statistics.")
     parser.add_argument("--save", type=str, default=None, help="Path to save quantized statistics.")
     parser.add_argument(
         "--resume",
@@ -885,6 +886,7 @@ if __name__ == "__main__":
         args.dtype,
         attn_implementation=args.attn_implementation,
         trust_remote_code=args.trust_remote_code,
+        load_finetuned_quantized=args.load_finetuned,
     ).train(False)
 
     if not args.load and not args.no_quant:

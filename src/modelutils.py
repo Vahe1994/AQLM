@@ -42,7 +42,13 @@ def dispatch_quantized_model(model):
 
 
 def get_model(
-    model_path, load_quantized=None, dtype="auto", device_map=None, attn_implementation=None, trust_remote_code=False
+    model_path,
+    load_quantized=None,
+    dtype="auto",
+    device_map=None,
+    attn_implementation=None,
+    trust_remote_code=False,
+    load_finetuned_quantized=None,
 ):
     if dtype == "auto":
         dtype = (
@@ -71,6 +77,9 @@ def get_model(
             print("Initializing model with random weights...")
             print("Loading quantized model ...")
             model = load_quantized_model(model, load_quantized)
+            if load_finetuned_quantized:
+                model.load_state_dict(torch.load(load_finetuned_quantized), strict=False)
+
             if device_map == "auto":
                 assert model.config.model_type in LLAMA_LIKE, "Dispatching is implemented only for Llama-like models."
                 model = dispatch_quantized_model(model)
@@ -225,7 +234,7 @@ def load_dequantized_model(model, load_path, finetuned_path=None):
         # load finetuned state
         assert model.config.model_type in LLAMA_LIKE
         finetuned_state_dict = torch.load(finetuned_path)
- 
+
     layers = get_layers(model)
     for layer_index in range(len(layers)):
         print("layer", layer_index)
@@ -234,7 +243,8 @@ def load_dequantized_model(model, load_path, finetuned_path=None):
         # override codes and scales
         if finetuned_path:
             finetuned_layer_state_dict = {
-                ".".join(k.split(".")[3:]): v for k, v in finetuned_state_dict.items() 
+                ".".join(k.split(".")[3:]): v
+                for k, v in finetuned_state_dict.items()
                 if k.startswith(f"model.layers.{layer_index}")
             }
             quant_layer.load_state_dict(finetuned_layer_state_dict, strict=False)

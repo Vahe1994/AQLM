@@ -48,27 +48,17 @@ def get_layers_prefix(config) -> str:
             raise NotImplementedError(f"Can't get layers prefix for {unknown_type}")
 
 
-def get_converted_state_dict(config, nbits: int, in_path: os.PathLike, finetuned_path: Optional[os.PathLike] = None) -> [dict, list[str]]:
+def get_converted_state_dict(
+    config, nbits: int, in_path: os.PathLike, finetuned_path: Optional[os.PathLike] = None
+) -> [dict, list[str]]:
     state_dict = {}
     linear_weights_not_to_quantize = []
 
     num_layers = get_num_layers(config)
     layers_prefix = get_layers_prefix(config)
 
-    if finetuned_path:
-        # load finetuned state
-        assert config.model_type in ("llama", "mistral", "mixtral", "gemma")
-        finetuned_state_dict = torch.load(finetuned_path)
-
     for i in trange(num_layers):
         layer = torch.load(os.path.join(in_path, f"{i}.pth"))
-        # override codes and scales
-        if finetuned_path:
-            finetuned_layer_state_dict = {
-                ".".join(k.split(".")[3:]): v for k, v in finetuned_state_dict.items() 
-                if k.startswith(f"{layers_prefix}.{i}")
-            }
-            layer.load_state_dict(finetuned_layer_state_dict, strict=False)
 
         for name, p in layer.named_parameters():
             if torch.is_floating_point(p.data):
@@ -82,11 +72,17 @@ def get_converted_state_dict(config, nbits: int, in_path: os.PathLike, finetuned
             state_dict[f"{layers_prefix}.{i}.{name}"] = p.data
 
     for key, value in torch.load(os.path.join(in_path, "not_quantized_weights.pt")).items():
-        # override value from finetuned state dict
-        if finetuned_state_dict and key in finetuned_state_dict:
-            value = finetuned_state_dict[key]
         state_dict[key] = value.half()
         linear_weights_not_to_quantize.append(key)
+
+    if finetuned_path:
+        # load finetuned state
+        assert config.model_type in ("llama", "mistral", "mixtral", "gemma")
+        finetuned_state_dict = torch.load(finetuned_path)
+        finetuned_state_dict = {k: v for k, v in state_dict.items() if not k.endswith(".codes_storage.data")}
+        for key, value in finetuned_state_dict.items():
+            if isinstance(value, torch.Tensor) and value.dtype in (torch.bfloat16, torch.float32, torch.float64):
+                state_dict[key] = value.half()
 
     if "lm_head.weight" not in linear_weights_not_to_quantize:
         linear_weights_not_to_quantize.append("lm_head.weight")
