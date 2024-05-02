@@ -6,7 +6,7 @@ from typing import Optional
 
 import torch
 from tqdm.auto import trange
-from transformers import AutoConfig, AutoModelForCausalLM
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 try:
     import safetensors
@@ -57,8 +57,22 @@ def get_converted_state_dict(
     num_layers = get_num_layers(config)
     layers_prefix = get_layers_prefix(config)
 
+    if finetuned_path:
+        # load finetuned state
+        assert config.model_type in ("llama", "mistral", "mixtral", "gemma")
+        finetuned_state_dict = torch.load(finetuned_path, map_location="cpu")
+        finetuned_state_dict = {k: v for k, v in finetuned_state_dict.items() if not k.endswith(".codes_storage.data")}
+
     for i in trange(num_layers):
-        layer = torch.load(os.path.join(in_path, f"{i}.pth"))
+        layer = torch.load(os.path.join(in_path, f"{i}.pth"), map_location="cpu")
+        # get weights corresponding to a given layer
+        if finetuned_path:
+            finetuned_layer_state_dict = {
+                ".".join(k.split(".")[3:]): v 
+                for k, v in finetuned_state_dict.items()
+                if k.startswith(f"{layers_prefix}.{i}.")
+            }
+            layer.load_state_dict(finetuned_layer_state_dict, strict=False)
 
         for name, p in layer.named_parameters():
             if torch.is_floating_point(p.data):
@@ -72,17 +86,11 @@ def get_converted_state_dict(
             state_dict[f"{layers_prefix}.{i}.{name}"] = p.data
 
     for key, value in torch.load(os.path.join(in_path, "not_quantized_weights.pt")).items():
-        state_dict[key] = value.half()
+        if finetuned_path:
+            state_dict[key] = finetuned_state_dict[key].half()
+        else:
+            state_dict[key] = value.half()
         linear_weights_not_to_quantize.append(key)
-
-    if finetuned_path:
-        # load finetuned state
-        assert config.model_type in ("llama", "mistral", "mixtral", "gemma")
-        finetuned_state_dict = torch.load(finetuned_path)
-        finetuned_state_dict = {k: v for k, v in state_dict.items() if not k.endswith(".codes_storage.data")}
-        for key, value in finetuned_state_dict.items():
-            if isinstance(value, torch.Tensor) and value.dtype in (torch.bfloat16, torch.float32, torch.float64):
-                state_dict[key] = value.half()
 
     if "lm_head.weight" not in linear_weights_not_to_quantize:
         linear_weights_not_to_quantize.append("lm_head.weight")
@@ -151,6 +159,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to save in safetensors format",
     )
+    parser.add_argument(
+        "--save_tokenizer",
+        action="store_true",
+        help="Whether to save tokenizer together with the model",
+    )
     args = parser.parse_args()
 
     old_config = AutoConfig.from_pretrained(args.model)
@@ -171,3 +184,6 @@ if __name__ == "__main__":
         model = AutoModelForCausalLM.from_pretrained(args.out_path, trust_remote_code=True, torch_dtype=torch.float16)
         shutil.rmtree(args.out_path)
         model.save_pretrained(args.out_path)
+    if args.save_tokenizer:
+        tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
+        tokenizer.save_pretrained(args.out_path)
