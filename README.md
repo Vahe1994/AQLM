@@ -33,6 +33,9 @@ We provide a number of prequantized models:
 | Mixtral-8x7b-Instruct| 1x16       | -           | 12.6            | [Link](https://huggingface.co/ISTA-DASLab/Mixtral-8x7B-Instruct-v0_1-AQLM-2Bit-1x16-hf)|
 | gemma-2b | 1x16      | -           | 1.7            | [Link](https://huggingface.co/ISTA-DASLab/gemma-2b-AQLM-2Bit-1x16-hf)|
 | gemma-2b | 2x8      | -           | 1.6            | [Link](https://huggingface.co/ISTA-DASLab/gemma-2b-AQLM-2Bit-2x8-hf)|
+| Command-R | 1x16      | -           | 12.7            | [Link](https://huggingface.co/ISTA-DASLab/c4ai-command-r-v01-AQLM-2Bit-1x16)|
+| Command-R+ | 1x16      | -           |  	31.9            | [Link](https://huggingface.co/ISTA-DASLab/c4ai-command-r-plus-AQLM-2Bit-1x16)|
+
 
 Above perplexity is evaluated on **4k** context length for Llama-2 models and **8k** for Mistral/Mixtral. 
 
