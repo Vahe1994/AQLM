@@ -83,7 +83,7 @@ def verify_dequantized_model(dequantized_model: nn.Module, master_parameters: di
     """Test that the dequantized model parameters still match the dequantized_to_master dictionary"""
     unmatched_master_parameters = set(master_parameters.keys())
     for name, param_or_buffer in chain(dequantized_model.named_parameters(), dequantized_model.named_buffers()):
-        if param_or_buffer not in master_parameters:
+        if name not in master_parameters:
             continue  # non-quantized weight
         master_param_or_buffer = master_parameters[name]
         assert param_or_buffer.shape == master_param_or_buffer
