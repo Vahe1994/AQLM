@@ -86,7 +86,7 @@ def verify_dequantized_model(dequantized_model: nn.Module, master_parameters: di
         if name not in master_parameters:
             continue  # non-quantized weight
         master_param_or_buffer = master_parameters[name]
-        assert param_or_buffer.shape == master_param_or_buffer
+        assert param_or_buffer.shape == master_param_or_buffer.shape
         unmatched_master_parameters.remove(name)
     assert len(unmatched_master_parameters) == 0, f"Found unmatched tensors: {unmatched_master_parameters}"
 
