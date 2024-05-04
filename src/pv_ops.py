@@ -21,7 +21,7 @@ def create_dequantized_model(
     :param model: model to be dequantzied (out-of-place)
     :param reuse_non_quantized: if True, any non-quantized parameters and buffers are reused for de-quantized model;
         otherwise (default) they are copied and linked in the returned dictionary
-    :returns: a model (converted out-of-place) and a mapping (dict) from de-quantized to original parameters
+    :returns: a model (converted out-of-place) and a mapping (dict) from de-quantized to master parameters
     """
     memo = dict()  # for deepcopy with replacement
     master_parameters = dict()
@@ -119,7 +119,6 @@ class StraightThroughAdamW(torch.optim.AdamW):
                  stochastic_rounding_tau: float = 0,
                  delta_dtype: Optional[torch.dtype] = None,
                  **kwargs):
-
         non_quantized_params, quantized_params, quantized_representation_params = self._select_optimized_parameters(
             named_dequantized_params, named_master_params, delta_dtype)
         param_groups = []
@@ -131,6 +130,8 @@ class StraightThroughAdamW(torch.optim.AdamW):
             param_groups.append(dict(params=list(quantized_representation_params.values()), **update_codebooks_and_scales))
         if update_codes is not None:
             param_groups.append(dict(params=list(quantized_params.values()), **update_codes))
+        assert len(param_groups) > 0, ("Please set at least one of update_codes, update_codebooks_and_scales "
+                                       "or update_non_quantized_parameters")
 
         super().__init__(param_groups, **kwargs)
         self._link_parameters_in_optimizer_state(all_optimized_params, named_dequantized_params, named_master_params)
@@ -150,16 +151,14 @@ class StraightThroughAdamW(torch.optim.AdamW):
             elif name in named_master_params and isinstance(named_master_params[name], nn.Parameter):
                 non_quantized_params[name] = named_master_params[name]
             elif name in named_master_params and isinstance(named_master_params[name], QuantizedWeight):
-                if self.should_update_codes or self.should_update_codebooks_and_scales:
-                    delta = torch.zeros_like(param, dtype=delta_dtype, requires_grad=True)
-                    quantized_params[name] = delta  # accumulator for optimizer updates; sharded alongside FSDP
-                    # note: we track delta (difference) instead of raw weight to better handle half precision
-                    if self.should_update_codebooks_and_scales:
-                        quantized_weight = named_master_params[name]
-                        for subparam_name, subparam in quantized_weight.named_parameters():
-                            full_name = f'{name}.{subparam_name}'
-                            assert full_name not in quantized_representation_params, full_name
-                            quantized_representation_params[full_name] = full_name
+                delta = torch.zeros_like(param, dtype=delta_dtype, requires_grad=True)
+                quantized_params[name] = delta  # accumulator for optimizer updates; sharded alongside FSDP
+                # note: we track delta (difference) instead of raw weight to better handle half precision
+                quantized_weight = named_master_params[name]
+                for subparam_name, subparam in quantized_weight.named_parameters():
+                    full_name = f'{name}.{subparam_name}'
+                    assert full_name not in quantized_representation_params, full_name
+                    quantized_representation_params[full_name] = full_name
         total_params = len(set(non_quantized_params) | set(quantized_params) | set(quantized_representation_params))
         assert total_params == len(non_quantized_params) + len(quantized_params) + len(quantized_representation_params)
         return non_quantized_params, quantized_params, quantized_representation_params
