@@ -236,6 +236,9 @@ class QuantizedWeight(nn.Module):
         codebooks = self.get_codebooks()
         prev_codes = self.get_codes()[selection]
         scales = self.get_scales()[selection]
+        dequantized_weight = None
+        if max_change_fraction is not None:
+            dequantized_weight = self()
         if XTX is not None:
              new_codes = beam_search_minimize_activation_mse(
                 XTX=XTX,
@@ -257,9 +260,7 @@ class QuantizedWeight(nn.Module):
         if max_change_fraction is not None:
             num_output_groups = self.out_features // self.out_group_size
             num_input_groups = self.in_features // self.in_group_size
-            groupwise_update_norms = (
-                _dequantize_weight(new_codes, codebooks, scales) - _dequantize_weight(prev_codes, codebooks, scales)
-            ).view(
+            groupwise_update_norms = (reference_weight - dequantized_weight).view(
                 num_output_groups, self.out_group_size, num_input_groups, self.in_group_size
             ).square().sum(dim=(1, 3))
             max_updates = max(int(max_change_fraction * self.codes.shape[0] * self.codes.shape[1]), 1)
