@@ -232,7 +232,6 @@ def load_dequantized_model(model, load_path):
             if isinstance(module, QuantizedWeight):
                 if not hasattr(module, 'codes_storage'):
                     module.codes_storage = None  # backwards compatibility
-
         layers[layer_index] = load_linear_layers(layer, quant_layer, model)
     model.load_state_dict(torch.load(os.path.join(load_path, "not_quantized_weights.pt")), strict=False)
     return model
