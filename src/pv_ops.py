@@ -7,11 +7,8 @@ from typing import Optional, Iterable, Dict, Union
 import torch
 import torch.nn as nn
 import transformers
-from torch.optim.optimizer import StateDict
 
 from src.aq import QuantizedLinear, QuantizedWeight
-from src.aq_ops import _dequantize_weight
-from src.beam_search_l2 import beam_search_optimal_codes
 
 
 def create_dequantized_model(
@@ -151,11 +148,11 @@ class StraightThroughAdamW(torch.optim.AdamW):
             elif name in named_master_params and isinstance(named_master_params[name], nn.Parameter):
                 non_quantized_params[name] = named_master_params[name]
             elif name in named_master_params and isinstance(named_master_params[name], QuantizedWeight):
-                if self.update_codes or self.update_codebooks_and_scales:
+                if self.should_update_codes or self.should_update_codebooks_and_scales:
                     delta = torch.zeros_like(param, dtype=delta_dtype, requires_grad=True)
                     quantized_params[name] = delta  # accumulator for optimizer updates; sharded alongside FSDP
                     # note: we track delta (difference) instead of raw weight to better handle half precision
-                    if self.update_codebooks_and_scales:
+                    if self.should_update_codebooks_and_scales:
                         quantized_weight = named_master_params[name]
                         for subparam_name, subparam in quantized_weight.named_parameters():
                             full_name = f'{name}.{subparam_name}'
