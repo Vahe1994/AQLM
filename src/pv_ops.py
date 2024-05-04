@@ -204,7 +204,8 @@ class StraightThroughAdamW(torch.optim.AdamW):
         for param_group in self.param_groups:
             for param in param_group['params']:
                 if self.state[param]['param_version_that_accumulates_grad'] is not param:
-                    param.grad = self.state[param]['param_version_that_accumulates_grad'].grad
+                    accumulated_grad = self.state[param]['param_version_that_accumulates_grad'].grad
+                    param.grad = accumulated_grad.to(dtype=param.dtype, device=param.device)
                     # pass gradients to straight-through update buffer or (possibly offloaded) master parameter
         if self.should_update_codebooks_and_scales:
             # propagate accumulated gradients from dequantized weights to quantization parameters so they can be updated
