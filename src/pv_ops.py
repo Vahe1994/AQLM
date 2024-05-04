@@ -25,6 +25,7 @@ def create_dequantized_model(
     """
     memo = dict()  # for deepcopy with replacement
     master_parameters = dict()
+    quantized_weight_parameters = set()
 
     for name, module in model.named_modules():
         if isinstance(module, QuantizedLinear):
@@ -50,11 +51,12 @@ def create_dequantized_model(
             master_parameters[f"{name}.weight"] = quantized_weight
             if dequantized_module.bias is not module.bias:
                 master_parameters[f"{name}.weight"] = module.bias
+            quantized_weight_parameters |= set(quantized_weight.parameters())
             assert all(param in {dequantized_module.weight, dequantized_module.bias}
                        for param in dequantized_module.parameters())
 
     for name, param_or_buffer in chain(model.named_parameters(), model.named_buffers()):
-        if name in master_parameters:
+        if name in master_parameters or name in quantized_weight_parameters:
             continue  # parameter already accounted for in the previous loop
         assert name not in master_parameters, name
         assert id(param_or_buffer) not in memo, name
