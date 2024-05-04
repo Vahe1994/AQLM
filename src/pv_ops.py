@@ -196,17 +196,7 @@ class StraightThroughAdamW(torch.optim.AdamW):
         self._propagate_grads_to_optimized_parameters()
         original_output = super().step(*args, **kwargs)
         self._update_quantized_weights()
-
-        for param_group in self.param_groups:
-            for param in param_group['params']:
-                if self.state[param]['param_version_that_accumulates_grad'] is not param:
-                    param.grad = None  # deference so that previous grads can be deleted on zero_grad(set_to_none=True)
-                    if self.state[param]['is_quantized']:
-                        self.state[param]['param_version_that_accumulates_grad'].data[...] = (
-                            self.state[param]['quantized_weight']()  # de-quantize the (possibly) updated weight
-                        )
-                    else:
-                        self.state[param]['param_version_that_accumulates_grad'].data[...] = param.data
+        self._update_dequantized_weights()
         return original_output
 
     @torch.no_grad()
@@ -251,3 +241,24 @@ class StraightThroughAdamW(torch.optim.AdamW):
                     print(f"{self.state[param]['name']} change rate:", change_rate)
                     delta_weight[...] = reference_weight - quantized_weight()
 
+        def _update_dequantized_weights(self):
+            """Apply any updates to master parameters onto dequantized parameters"""
+            for param_group in self.param_groups:
+                for param in param_group['params']:
+                    if self.state[param]['param_version_that_accumulates_grad'] is not param:
+                        param.grad = None  # deference so that previous grads can be deleted on zero_grad(set_to_none=True)
+                        if self.state[param]['is_quantized']:
+                            self.state[param]['param_version_that_accumulates_grad'].data[...] = (
+                                self.state[param]['quantized_weight']()  # de-quantize the (possibly) updated weight
+                            )
+                        else:
+                            self.state[param]['param_version_that_accumulates_grad'].data[...] = param.data
+
+        def zero_grad(self, set_to_none: bool = True, *args, **kwargs) -> None:
+            super().zero_grad(set_to_none=set_to_none, *args, **kwargs)
+            for param_group in self.param_groups:
+                for param in param_group['params']:
+                    if set_to_none:
+                        self.state[param]['param_version_that_accumulates_grad'].grad = None
+                    elif self.state[param]['param_version_that_accumulates_grad'].grad is not None:
+                        self.state[param]['param_version_that_accumulates_grad'].grad.zero_()
