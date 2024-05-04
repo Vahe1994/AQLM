@@ -245,6 +245,11 @@ def load_quantized_model(model, load_path):
             os.path.join(load_path, str(layer_index) + ".pth"),
             map_location=model.model.layers[layer_index].input_layernorm.weight.device,
         )
+        for module in model.model.layers[layer_index].modules():
+            if isinstance(module, QuantizedWeight):
+                if not hasattr(module, 'codes_storage'):
+                    module.codes_storage = None  # backwards compatibility
+
     model.load_state_dict(torch.load(os.path.join(load_path, "not_quantized_weights.pt")), strict=False)
     return model
 
