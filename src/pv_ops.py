@@ -56,8 +56,8 @@ def create_dequantized_model(
     for name, param_or_buffer in chain(model.named_parameters(), model.named_modules()):
         if name in master_parameters:
             continue  # parameter already accounted for in the previous loop
-        assert name not in master_parameters
-        assert id(param_or_buffer) not in memo
+        assert name not in master_parameters, name
+        assert id(param_or_buffer) not in memo, name
         if reuse_non_quantized:
             new_param_or_buffer = param_or_buffer
         elif isinstance(param_or_buffer, nn.Parameter):
