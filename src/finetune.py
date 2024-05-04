@@ -1,3 +1,4 @@
+"""Utilities for internal **block-wise** finetuning used during initial AQLM calibration"""
 from __future__ import annotations
 
 import warnings
