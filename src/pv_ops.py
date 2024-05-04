@@ -1,7 +1,8 @@
 """Module containing utilities for straight-through fine-tuning of language models"""
+import random
 from copy import deepcopy
 from itertools import chain
-from typing import Optional, Iterable, Dict
+from typing import Optional, Iterable, Dict, Union
 
 import torch
 import torch.nn as nn
@@ -9,6 +10,8 @@ import transformers
 from torch.optim.optimizer import StateDict
 
 from src.aq import QuantizedLinear, QuantizedWeight
+from src.aq_ops import _dequantize_weight
+from src.beam_search_l2 import beam_search_optimal_codes
 
 
 def create_dequantized_model(
@@ -92,42 +95,93 @@ def verify_dequantized_model(dequantized_model: nn.Module, master_parameters: di
 
 
 class StraightThroughAdamW(torch.optim.AdamW):
-    """A wrapper for any PyTorch optimizer that enables updates on quantized parameters"""
-    def __init__(self, named_params: Dict[str, nn.Parameter], *args,
-                 named_quantized_weights: Dict[str, QuantizedWeight],
-                 max_code_change_fraction: float,
+    """
+    A wrapper for any PyTorch optimizer that enables updates on quantized parameters
+
+    """
+    def __init__(self,
+                 named_dequantized_params: Dict[str, nn.Parameter],
+                 named_master_params: Dict[str, Union[QuantizedWeight, nn.Parameter]],
+                 *,
+                 max_code_change_per_step: float,
+                 beam_size: int,
+                 stochastic_rounding_tau: float = 0,
                  delta_dtype: Optional[torch.dtype] = None,
                  **kwargs):
+        optimized_params = self._select_optimized_parameters(named_dequantized_params, named_master_params, delta_dtype)
+        super().__init__(list(optimized_params.values()), **kwargs)
+        self._link_parameters_in_optimizer_state(optimized_params, named_dequantized_params, named_master_params)
+        self.max_code_change_per_step = max_code_change_per_step
+        self.stochastic_rounding_tau = stochastic_rounding_tau
+        self.beam_size = beam_size
+
+    def _select_optimized_parameters(self, named_dequantized_params, named_master_params, delta_dtype):
+        """Choose which version of parameter to optimize: the parameter itself or a straight-through buffer"""
         optimized_params = dict()
-        for name, param in named_params.items():
-            if name in named_quantized_weights:
-                param_delta = torch.zeros_like(param, dtype=delta_dtype, requires_grad=True)  # sharded alongside FSDP
-                optimized_params[name] = param_delta  # accumulator for optimizer updates to dequantized weight
-                # note: we store deltas (updated - quantized) instead of raw parameters to better handle half precision
-            else:
+        for name, param in named_dequantized_params.items():
+            if name not in named_master_params:
                 optimized_params[name] = param
+            elif name in named_master_params and isinstance(named_master_params[name], nn.Parameter):
+                optimized_params[name] = named_master_params[name]
+            elif name in named_master_params and isinstance(named_master_params[name], QuantizedWeight):
+                delta = torch.zeros_like(param, dtype=delta_dtype, requires_grad=True)
+                optimized_params[name] = delta  # accumulator for optimizer updates; sharded alongside FSDP
+                # note: we track delta (difference) instead of raw weight to better handle half precision
+        return optimized_params
 
-        super().__init__(list(optimized_params.values()), *args, **kwargs)
-
-        unmatched_quantized_params = dict(named_quantized_weights)
-        for name, param in named_params.items():
+    def _link_parameters_in_optimizer_state(self, optimized_params, named_dequantized_params, named_master_params):
+        """For each optimizer parameter in state, add its name, corresponding quantized and/or offloaded parameter"""
+        for name, param in optimized_params.items():
             self.state[param]['name'] = name
-            self.state[param]['is_quantized'] = name in named_quantized_weights
+            self.state[param]['param_version_that_accumulates_grad'] = named_dequantized_params[name]
+            self.state[param]['is_quantized'] = isinstance(named_master_params.get(name), QuantizedWeight)
             if self.state[param]['is_quantized']:
-                quantized_weight = unmatched_quantized_params.pop(name)
+                quantized_weight = named_master_params[name]
                 assert isinstance(quantized_weight, QuantizedWeight)
                 self.state[param]['quantized_weight'] = quantized_weight
-                unmatched_quantized_params.pop(name)
-        assert len(unmatched_quantized_params) == 0, f"Unmatched quantized_params: {unmatched_quantized_params.keys()}"
-        self.max_code_change_fraction = max_code_change_fraction
 
     def step(self, *args, **kwargs):
+        for param_group in self.param_groups:
+            for param in param_group['params']:
+                if self.state[param]['param_version_that_accumulates_grad'] is not param:
+                    param.grad = self.state[param]['param_version_that_accumulates_grad'].grad
+
         original_output = super().step(*args, **kwargs)
+        self._update_quantized_weights()
+
+        for param_group in self.param_groups:
+            for param in param_group['params']:
+                if self.state[param]['param_version_that_accumulates_grad'] is not param:
+                    param.grad = None  # deference so that previous grads can be deleted on zero_grad(set_to_none=True)
+                    if self.state[param]['is_quantized']:
+                        self.state[param]['param_version_that_accumulates_grad'].data[...] = param['quantized_weight']()
+                    else:
+                        self.state[param]['param_version_that_accumulates_grad'].data[...] = param.data
+        return original_output
+
+    @torch.no_grad()
+    def _update_quantized_weights(self):
+        if torch.distributed.is_initialized():
+            raise NotImplementedError("TODO FSDP SUPPORT")
+
         for param_group in self.param_groups:
             for param in param_group['params']:
                 if self.state[param]['is_quantized']:
-                    raise NotImplementedError()
+                    delta_weight = param    # a tensor that receives optimizer updates
+                    quantized_weight = self.state[param]['quantized_weight']
+                    dequantized_weight = quantized_weight()
+                    reference_weight = dequantized_weight + delta_weight
+                    assert isinstance(quantized_weight, QuantizedWeight)
 
+                    prev_codes = quantized_weight.get_codes().clone()  # [num_output_groups, num_input_groups]
+                    new_codes = quantized_weight.beam_search_update_codes_(
+                        reference_weight=reference_weight,
+                        beam_size=self.beam_size,
+                        stochastic_rounding_tau=self.stochastic_rounding_tau,
+                        max_change_fraction=self.max_code_change_per_step,
+                        dim_rng=random.Random(None),
+                    )  # note: this updates quantized_weight.get_codes()[...] in-place
+                    change_rate = torch.not_equal(prev_codes, new_codes).float().mean().item()
+                    print(f"{self.state[param]['name']} change rate:", change_rate)
+                    delta_weight[...] = reference_weight - quantized_weight()
 
-
-        return original_output

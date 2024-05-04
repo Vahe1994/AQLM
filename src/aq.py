@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 from tqdm.auto import trange
 
-from src.aq_ops import _dequantize_weight, ellipsis, IntCodes, is_signed
+from src.aq_ops import _dequantize_weight, ellipsis, IntCodes, is_signed, _select_updates_with_highest_priority
 from src.beam_search_xtx import beam_search_optimal_codes as beam_search_minimize_activation_mse
 from src.beam_search_l2 import beam_search_optimal_codes as beam_search_minimize_weight_mse
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
@@ -209,6 +209,7 @@ class QuantizedWeight(nn.Module):
         XTX: Optional[torch.Tensor] = None,
         reference_weight: torch.Tensor,
         selection: Union[slice, ellipsis, torch.LongTensor] = ...,
+        max_change_fraction: Optional[float] = None,
         **kwargs,
     ) -> torch:
         """
@@ -224,27 +225,48 @@ class QuantizedWeight(nn.Module):
             The indices / slices must correspond to output channels (if out_group_size==1) or groups (if > 1).
             Formally, the indices must be in range [ 0 , self.out_features // self.out_group_size )
         :param beam_size: consider up to this many best encoding combinations (this param is passed through via kwargs)
+        :param max_change_fraction: if specified, limits the number of weights that can be updated after beam search;
+            for each quantized weight codes, only this fraction of code groups are allowed to change.
+            if more than this portion of codes can be changed, changes with the lowest update norm are dropped
+            Note: if there are multiple codebooks, this is the maximum fraction of groups where *any* code changed
+
         :param kwargs: any additional keyword arguments are forwarded to beam_search_optimal_codes function
         :returns: the updated codes
         """
+        codebooks = self.get_codebooks()
+        prev_codes = self.get_codes()[selection]
+        scales = self.get_scales()[selection]
         if XTX is not None:
-            self.get_codes()[selection] = beam_search_minimize_activation_mse(
+             new_codes = beam_search_minimize_activation_mse(
                 XTX=XTX,
-                reference_weight=reference_weight,
-                codebooks=self.get_codebooks(),
-                prev_codes=self.get_codes()[selection],
-                scales=self.get_scales()[selection],
+                 reference_weight=reference_weight,
+                codebooks=codebooks,
+                prev_codes=prev_codes,
+                scales=scales,
                 **kwargs,
             )
         else:
-            self.get_codes()[selection] = beam_search_minimize_weight_mse(
+            new_codes = beam_search_minimize_weight_mse(
                 reference_weight=reference_weight,
-                codebooks=self.get_codebooks(),
-                prev_codes=self.get_codes()[selection],
-                scales=self.get_scales(),
+                codebooks=codebooks,
+                prev_codes=prev_codes,
+                scales=scales,
                 **kwargs
             )
-        return self.get_codes()[selection]
+
+        if max_change_fraction is not None:
+            num_output_groups = self.out_features // self.out_group_size
+            num_input_groups = self.in_features // self.in_group_size
+            groupwise_update_norms = (
+                _dequantize_weight(new_codes, codebooks, scales) - _dequantize_weight(prev_codes, codebooks, scales)
+            ).view(
+                num_output_groups, self.out_group_size, num_input_groups, self.in_group_size
+            ).square().sum(dim=(1, 3))
+            max_updates = max(int(max_change_fraction * self.codes.shape[0] * self.codes.shape[1]), 1)
+            new_codes = _select_updates_with_highest_priority(
+                prev_codes, new_codes, priorities=groupwise_update_norms, max_updates=max_updates)
+        self.get_codes()[selection] = new_codes
+        return new_codes
 
     def estimate_nbits_per_parameter(self) -> float:
         """Calculate the effective number of bits per original matrix parameters"""

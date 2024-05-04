@@ -55,6 +55,33 @@ def _dequantize_weight(
     return reconstructed_weight_groupwise.swapaxes(-3, -2).reshape(list(codes.shape[:-3]) + [out_features, in_features])
 
 
+def _select_updates_with_highest_priority(
+        prev_codes: torch.Tensor, updated_codes: torch.Tensor, priorities: torch.Tensor, max_updates: int
+) -> torch.Tensor:
+    """
+    Check if updated_codes differ from prev_codes in more than *max_updates* groups and limits the number of updates.
+        If too many updated_codes are different from prev_codes, reset some of them to prev_codes.
+        The algorithm resets codes with the lowest priority (i.e. accepts updated codes with the highest priority)
+
+    :param prev_codes: integer tensor [num_output_groups, num_input_groups, num_codebooks]
+    :param updated_codes: integer tensor [num_output_groups, num_input_groups, num_codebooks]
+    :param priorities: tensor [num_output_groups, num_input_groups]
+    :max_updates: integer, the number of groups of codes that can differ from prev_codes
+    :returns: a tensor of the same shape as prev/updated codes that chooses prev or new code, depending on priority
+    """
+    code_group_changed = torch.not_equal(prev_codes, updated_codes).any(dim=-1)
+    assert priorities.shape == code_group_changed.shape  # [num_output_groups, num_input_groups]
+
+    change_priority = priorities * code_group_changed.to(priorities.dtype)
+    updated_flat_indices = change_priority.flatten().topk(k=max_updates, largest=True, sorted=False).indices
+    updated_row_indices = updated_flat_indices // change_priority.shape[1]
+    updated_column_indices = updated_flat_indices % change_priority.shape[1]
+    mask = torch.zeros_like(updated_codes, dtype=torch.bool)
+    mask[updated_row_indices, updated_column_indices, :] = 1
+    updated_codes = torch.where(mask, updated_codes, prev_codes)
+    return updated_codes
+
+
 @contextlib.contextmanager
 def using_tf32(enabled: bool):
     was_cudnn = torch.backends.cudnn.allow_tf32
