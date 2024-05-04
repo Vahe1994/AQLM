@@ -126,18 +126,16 @@ class StraightThroughAdamW(torch.optim.AdamW):
         if update_non_quantized_parameters is not None:
             all_optimized_params.update(non_quantized_params)
             param_groups.append(dict(params=list(non_quantized_params.values()),
-                                     param_role='non_quantized_params',
+                                     role='non_quantized_params',
                                      **update_non_quantized_parameters))
         if update_codebooks_and_scales is not None:
-            all_optimized_params.update(non_quantized_params)
+            all_optimized_params.update(quantized_representation_params)
             param_groups.append(dict(params=list(quantized_representation_params.values()),
-                                     param_role='quantized_representation_params',
+                                     role='quantized_representation_params',
                                      **update_codebooks_and_scales))
         if update_codes is not None:
-            all_optimized_params.update(non_quantized_params)
-            param_groups.append(dict(params=list(quantized_params.values()),
-                                     param_role='quantized_params',
-                                     **update_codes))
+            all_optimized_params.update(quantized_params)
+            param_groups.append(dict(params=list(quantized_params.values()), role='quantized_params', **update_codes))
         assert len(param_groups) > 0, ("Please set at least one of update_codes, update_codebooks_and_scales "
                                        "or update_non_quantized_parameters")
 
@@ -180,7 +178,6 @@ class StraightThroughAdamW(torch.optim.AdamW):
                 all_quantized_representation_parameters |= set(module.parameters())
 
         for name, param in all_optimized_params.items():
-            print(name)
             self.state[param]['name'] = name
             self.state[param]['is_quantized'] = isinstance(named_master_params.get(name), QuantizedWeight)
             self.state[param]['is_part_of_quantized'] = param in all_quantized_representation_parameters
