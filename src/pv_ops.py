@@ -56,7 +56,7 @@ def create_dequantized_model(
                        for param in dequantized_module.parameters())
 
     for name, param_or_buffer in chain(model.named_parameters(), model.named_buffers()):
-        if name in master_parameters or param_or_buffer in quantized_weight_parameters:
+        if name in master_parameters or param_or_buffer in all_quantized_weight_parameters:
             continue  # parameter already accounted for in the previous loop
         assert name not in master_parameters, name
         assert id(param_or_buffer) not in memo, name
