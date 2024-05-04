@@ -1,6 +1,6 @@
 """ Core mathematics for Additive Quantization (AQ): initialization, reconstruction and beam search"""
 from __future__ import annotations
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Tuple
 
 import torch
 import torch.nn as nn
@@ -185,6 +185,10 @@ class QuantizedWeight(nn.Module):
             return dequantized_scales
         else:  # train scale codebook only
             return self.scales_clusters.gather(1, self.scales_indices)[:, :, None, None]
+
+    @property
+    def shape(self) -> Tuple[int, int]:
+        return self.out_features, self.in_features
 
     def forward(self, selection: Union[slice, ellipsis, torch.Tensor] = ...):
         """
