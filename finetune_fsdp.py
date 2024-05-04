@@ -487,7 +487,6 @@ def _save_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Mo
         exec(args.on_save)
 
 
-
 def _save_model(args: argparse.Namespace, quantized_model: nn.Module):
     """Save consolidated model state dict"""
     os.makedirs(args.save, exist_ok=True)
