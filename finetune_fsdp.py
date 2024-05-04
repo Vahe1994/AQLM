@@ -4,6 +4,7 @@ based on https://github.com/huggingface/transformers/blob/main/examples/pytorch/
 """
 import argparse
 import os
+from contextlib import nullcontext
 from copy import deepcopy
 from functools import partial
 from typing import Tuple, Optional
@@ -125,6 +126,13 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         "--gradient_checkpointing",
         action="store_true",
         help="Whether to apply gradient checkpointing",
+    )
+    parser.add_argument(
+        "--minimize_sync",
+        action="store_true",
+        help="if True, accumulate microbatch gradients locally and synchronize once per optimizer step. If False, "
+             "synchronize after every step. This reduces communication overhead but increases memory usage. See "
+             "https://pytorch.org/docs/stable/fsdp.html#torch.distributed.fsdp.FullyShardedDataParallel.no_sync",
     )
     parser.add_argument(
         "--seed",
@@ -598,7 +606,7 @@ if __name__ == "__main__":
             metadata['loss_denominator'] += 1
             metadata['grad_steps_accumulated'] += 1
             if metadata['grad_steps_accumulated'] < grad_accumulation_steps:
-                with quantized_model.no_sync():
+                with quantized_model.no_sync() if args.minimize_sync else nullcontext():
                     (loss / grad_accumulation_steps).backward()
             else:
                 (loss / grad_accumulation_steps).backward()
