@@ -1,4 +1,5 @@
 """ Core mathematics for Additive Quantization (AQ): initialization, reconstruction and beam search"""
+from __future__ import annotations
 from typing import List, Optional, Union
 
 import torch
@@ -14,7 +15,7 @@ from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_k
 
 
 class QuantizedLinear(nn.Module):
-    def __init__(self, quantized_weight, bias: Optional[nn.Parameter]):
+    def __init__(self, quantized_weight: QuantizedWeight, bias: Optional[nn.Parameter]):
         super().__init__()
         self.out_features, self.in_features = quantized_weight.out_features, quantized_weight.in_features
         self.quantized_weight = quantized_weight
