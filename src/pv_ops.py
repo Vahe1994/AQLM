@@ -124,12 +124,18 @@ class StraightThroughAdamW(torch.optim.AdamW):
         param_groups = []
         all_optimized_params = dict()
         if update_non_quantized_parameters is not None:
-            param_groups.append(dict(params=list(non_quantized_params.values()), **update_non_quantized_parameters))
+            param_groups.append(dict(params=list(non_quantized_params.values()),
+                                     param_role='non_quantized_params',
+                                     **update_non_quantized_parameters))
             all_optimized_params.update(non_quantized_params)
         if update_codebooks_and_scales is not None:
-            param_groups.append(dict(params=list(quantized_representation_params.values()), **update_codebooks_and_scales))
+            param_groups.append(dict(params=list(quantized_representation_params.values()),
+                                     param_role='quantized_representation_params',
+                                     **update_codebooks_and_scales))
         if update_codes is not None:
-            param_groups.append(dict(params=list(quantized_params.values()), **update_codes))
+            param_groups.append(dict(params=list(quantized_params.values()),
+                                     param_role='quantized_params',
+                                     **update_codes))
         assert len(param_groups) > 0, ("Please set at least one of update_codes, update_codebooks_and_scales "
                                        "or update_non_quantized_parameters")
 
