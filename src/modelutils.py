@@ -8,6 +8,8 @@ import transformers
 from accelerate import dispatch_model
 from transformers import AutoConfig, AutoModelForCausalLM
 
+from src.aq import QuantizedWeight
+
 MODEL_ERROR_MSG = "Unsupported model type {} - only 'llama', 'Yi', 'opt' and 'falcon' are supported"
 FALCON_TYPES = ("falcon", "refinedweb", "refinedwebmodel")
 LLAMA_LIKE = ("llama", "Yi", "mistral", "mixtral", "gemma", "cohere")
@@ -226,6 +228,11 @@ def load_dequantized_model(model, load_path):
         print("layer", layer_index)
         layer = layers[layer_index]
         quant_layer = torch.load(os.path.join(load_path, str(layer_index) + ".pth"), map_location="cpu")
+        for module in quant_layer.modules():
+            if isinstance(module, QuantizedWeight):
+                if not hasattr(module, 'codes_storage'):
+                    module.codes_storage = None  # backwards compatibility
+
         layers[layer_index] = load_linear_layers(layer, quant_layer, model)
     model.load_state_dict(torch.load(os.path.join(load_path, "not_quantized_weights.pt")), strict=False)
     return model
