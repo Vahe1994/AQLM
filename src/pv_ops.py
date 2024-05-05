@@ -248,12 +248,17 @@ class StraightThroughAdamW(torch.optim.AdamW):
 
         if self.should_update_codebooks_and_scales:
             # propagate accumulated gradients from dequantized weights to quantization parameters so they can be updated
+            quantized_weights_to_backpropagate = dict()
             for param_group in self.param_groups:
                 if param_group['role'] == ParameterRole.QUANTIZED_REPRESENTATION_PARAMETER:
                     for param in param_group['params']:
-                        with torch.enable_grad():
-                            grad = self.state[param]['param_version_that_accumulates_grad'].grad
-                            self.state[param]['quantized_weight'].forward().backward(grad)
+                        grad = self.state[param]['param_version_that_accumulates_grad'].grad
+                        if self.state[param]['quantized_weight'] in quantized_weights_to_backpropagate:
+                            assert quantized_weights_to_backpropagate[self.state[param]['quantized_weight']] is grad
+                        quantized_weights_to_backpropagate[self.state[param]['quantized_weight']] = grad
+            with torch.enable_grad():
+                for quantized_weight, grad in quantized_weights_to_backpropagate.items():
+                    quantized_weight.forward().backward(grad)
 
     @torch.no_grad()
     def _update_quantized_weights(self):
