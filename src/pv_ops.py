@@ -117,7 +117,7 @@ class StraightThroughAdamW(torch.optim.AdamW):
     :param beam_size: beam search width used only when updating codes. See beam_size in aq.py
     :param stochastic_rounding_tau: if above 0, use stochastic rounding with this temperature. See aq.py
     """
-    EXTRA_STATE_KEYS = ['name', 'param_version_that_accumulated_grad', 'quantized_weight']
+    EXTRA_STATE_KEYS = ['name', 'param_version_that_accumulates_grad', 'quantized_weight']
 
     def __init__(self,
                  named_dequantized_params: Dict[str, nn.Parameter],
