@@ -1,6 +1,7 @@
 """Module containing utilities for straight-through fine-tuning of language models"""
 import random
 from copy import deepcopy
+from enum import Enum, auto
 from itertools import chain
 from typing import Optional, Iterable, Dict, Union
 
@@ -93,6 +94,13 @@ def verify_dequantized_model(dequantized_model: nn.Module, master_parameters: di
     assert len(unmatched_master_parameters) == 0, f"Found unmatched tensors: {unmatched_master_parameters}"
 
 
+
+class ParameterRole(Enum):
+    QUANTIZED_PARAMETER = auto()   # entire quantized weight, in a de-quantized form
+    QUANTIZED_REPRESENTATION_PARAMETER = auto()  # part of quantized weight inner parameters, e.g. codebooks or scales
+    NON_QUANTIZED_PARAMETER = auto()
+
+
 class StraightThroughAdamW(torch.optim.AdamW):
     """
     A wrapper for a PyTorch optimizer that enables updates on quantized parameters
@@ -107,6 +115,8 @@ class StraightThroughAdamW(torch.optim.AdamW):
     :param beam_size: beam search width used only when updating codes. See beam_size in aq.py
     :param stochastic_rounding_tau: if above 0, use stochastic rounding with this temperature. See aq.py
     """
+    ADDED_STATE_KEYS = ['name', 'param_version_that_accumulated_grad', 'quantized_weight']
+
     def __init__(self,
                  named_dequantized_params: Dict[str, nn.Parameter],
                  named_master_params: Dict[str, Union[QuantizedWeight, nn.Parameter]],
@@ -126,16 +136,18 @@ class StraightThroughAdamW(torch.optim.AdamW):
         if update_non_quantized_parameters is not None:
             all_optimized_params.update(non_quantized_params)
             param_groups.append(dict(params=list(non_quantized_params.values()),
-                                     role='non_quantized_params',
+                                     role=ParameterRole.NON_QUANTIZED_PARAMETER,
                                      **update_non_quantized_parameters))
         if update_codebooks_and_scales is not None:
             all_optimized_params.update(quantized_representation_params)
             param_groups.append(dict(params=list(quantized_representation_params.values()),
-                                     role='quantized_representation_params',
+                                     role=ParameterRole.QUANTIZED_REPRESENTATION_PARAMETER,
                                      **update_codebooks_and_scales))
         if update_codes is not None:
             all_optimized_params.update(quantized_params)
-            param_groups.append(dict(params=list(quantized_params.values()), role='quantized_params', **update_codes))
+            param_groups.append(dict(params=list(quantized_params.values()),
+                                     role=ParameterRole.QUANTIZED_PARAMETER,
+                                     **update_codes))
         assert len(param_groups) > 0, ("Please set at least one of update_codes, update_codebooks_and_scales "
                                        "or update_non_quantized_parameters")
 
@@ -147,6 +159,7 @@ class StraightThroughAdamW(torch.optim.AdamW):
         self.max_code_change_per_step = max_code_change_per_step
         self.stochastic_rounding_tau = stochastic_rounding_tau
         self.beam_size = beam_size
+        self.state_initialized = False
 
     def _select_optimized_parameters(self, named_dequantized_params, named_master_params, delta_dtype):
         """Choose which version of parameter to optimize: the parameter itself or a straight-through buffer"""
@@ -179,15 +192,13 @@ class StraightThroughAdamW(torch.optim.AdamW):
 
         for name, param in all_optimized_params.items():
             self.state[param]['name'] = name
-            self.state[param]['is_quantized'] = isinstance(named_master_params.get(name), QuantizedWeight)
-            self.state[param]['is_part_of_quantized'] = param in all_quantized_representation_parameters
 
-            if self.state[param]['is_quantized']:
+            if isinstance(named_master_params.get(name), QuantizedWeight):
                 quantized_weight = named_master_params[name]
                 assert isinstance(quantized_weight, QuantizedWeight)
                 self.state[param]['quantized_weight'] = quantized_weight
                 self.state[param]['param_version_that_accumulates_grad'] = named_dequantized_params[name]
-            elif self.state[param]['is_part_of_quantized']:
+            elif param in all_quantized_representation_parameters:
                 self.state[param]['param_version_that_accumulates_grad'] = param
             else:  # non_quantized params, e.g. biases, layernorms, etc
                 self.state[param]['param_version_that_accumulates_grad'] = named_dequantized_params[name]
@@ -210,8 +221,8 @@ class StraightThroughAdamW(torch.optim.AdamW):
         if self.should_update_codebooks_and_scales:
             # propagate accumulated gradients from dequantized weights to quantization parameters so they can be updated
             for param_group in self.param_groups:
-                for param in param_group['params']:
-                    if self.state[param]['is_quantized']:
+                if param_group['role'] == ParameterRole.QUANTIZED_PARAMETER:
+                    for param in param_group['params']:
                         with torch.enable_grad():
                             grad = self.state[param]['param_version_that_accumulates_grad'].grad
                             self.state[param]['quantized_weight'].forward().backward(grad)
@@ -222,8 +233,8 @@ class StraightThroughAdamW(torch.optim.AdamW):
             raise NotImplementedError("TODO FSDP SUPPORT")
 
         for param_group in self.param_groups:
-            for param in param_group['params']:
-                if self.state[param]['is_quantized']:
+            if param_group['role'] == ParameterRole.QUANTIZED_PARAMETER:
+                for param in param_group['params']:
                     delta_weight = param    # a tensor that receives optimizer updates
                     quantized_weight = self.state[param]['quantized_weight']
                     dequantized_weight = quantized_weight()
@@ -248,7 +259,7 @@ class StraightThroughAdamW(torch.optim.AdamW):
             for param in param_group['params']:
                 if self.state[param]['param_version_that_accumulates_grad'] is not param:
                     param.grad = None  # deference so that previous grads can be deleted on zero_grad(set_to_none=True)
-                    if self.state[param]['is_quantized']:
+                    if param_group['role'] == ParameterRole.QUANTIZED_PARAMETER:
                         self.state[param]['param_version_that_accumulates_grad'].data[...] = (
                             self.state[param]['quantized_weight']()  # de-quantize the (possibly) updated weight
                         )
