@@ -186,7 +186,7 @@ class StraightThroughAdamW(torch.optim.AdamW):
             param_groups.append(dict(params=list(quantized_representation_params.values()),
                                      role=ParameterRole.QUANTIZED_REPRESENTATION_PARAMETER,
                                      **update_codebooks_and_scales))
-        if update_codes is not None:
+        if update_codes is not None or update_codebooks_and_scales is not None:
             all_optimized_params.update(quantized_params)
             param_groups.append(dict(params=list(quantized_params.values()),
                                      role=ParameterRole.QUANTIZED_PARAMETER,
@@ -198,21 +198,30 @@ class StraightThroughAdamW(torch.optim.AdamW):
     def _link_parameters_in_optimizer_state(self, all_optimized_params, named_dequantized_params, named_master_params):
         """For each optimizer parameter in state, add its name, corresponding quantized and/or offloaded parameter"""
 
-        all_quantized_representation_parameters = set()
+        all_quantized_representation_parameters = dict()
         for module in named_master_params.values():
             if isinstance(module, QuantizedWeight):
-                all_quantized_representation_parameters |= set(module.parameters())
+                all_quantized_representation_parameters.update({param: module for param in module.parameters()})
+
+        quantized_weight_to_dequantized = dict()
+        for name, dequantized_param in named_dequantized_params.items():
+            if isinstance(named_master_params.get(name), QuantizedWeight):
+                assert named_master_params[name] not in quantized_weight_to_dequantized
+                quantized_weight_to_dequantized[named_master_params[name]] = dequantized_param
 
         for name, param in all_optimized_params.items():
             self.state[param]['name'] = name
-
             if isinstance(named_master_params.get(name), QuantizedWeight):
                 quantized_weight = named_master_params[name]
                 assert isinstance(quantized_weight, QuantizedWeight)
                 self.state[param]['quantized_weight'] = quantized_weight
                 self.state[param]['param_version_that_accumulates_grad'] = named_dequantized_params[name]
             elif param in all_quantized_representation_parameters:
-                self.state[param]['param_version_that_accumulates_grad'] = param
+                quantized_weight = all_quantized_representation_parameters[param]
+                assert isinstance(quantized_weight, QuantizedWeight)
+                self.state[param]['quantized_weight'] = quantized_weight
+                dequantized_param = quantized_weight_to_dequantized[quantized_weight]
+                self.state[param]['param_version_that_accumulates_grad'] = dequantized_param
             else:  # non_quantized params, e.g. biases, layernorms, etc
                 self.state[param]['param_version_that_accumulates_grad'] = named_dequantized_params[name]
 
@@ -270,16 +279,25 @@ class StraightThroughAdamW(torch.optim.AdamW):
 
     def _update_dequantized_weights(self):
         """Apply any updates to master parameters onto dequantized parameters"""
+        quantized_weights_to_update = dict()
         for param_group in self.param_groups:
             for param in param_group['params']:
                 if self.state[param]['param_version_that_accumulates_grad'] is not param:
                     param.grad = None  # deference so that previous grads can be deleted on zero_grad(set_to_none=True)
-                    if param_group['role'] == ParameterRole.QUANTIZED_PARAMETER:
-                        self.state[param]['param_version_that_accumulates_grad'].data[...] = (
-                            self.state[param]['quantized_weight']()  # de-quantize the (possibly) updated weight
-                        )
-                    else:
-                        self.state[param]['param_version_that_accumulates_grad'].data[...] = param.data
+
+                if param_group['role'] in (ParameterRole.QUANTIZED_PARAMETER,
+                                           ParameterRole.QUANTIZED_REPRESENTATION_PARAMETER):
+                    assert isinstance(self.state[param].get('quantized_weight'), QuantizedWeight)
+                    dequantized_weight = self.state[param]['param_version_that_accumulates_grad']
+                    if self.state[param]['quantized_weight'] in quantized_weights_to_update:
+                        assert quantized_weights_to_update[self.state[param]['quantized_weight']] is dequantized_weight
+                    quantized_weights_to_update[self.state[param]['quantized_weight']] = dequantized_weight
+                else:
+                    assert param_group['role'] == ParameterRole.NON_QUANTIZED_PARAMETER
+                    self.state[param]['param_version_that_accumulates_grad'].data[...] = param.data
+
+        for quantized_weight, dequantized_weight in quantized_weights_to_update.items():
+            dequantized_weight.data[...] = quantized_weight().data
 
     @contextlib.contextmanager
     def _hide_extra_state(self):
