@@ -277,6 +277,7 @@ class StraightThroughAdamW(torch.optim.AdamW):
             self.state = defaultdict(dict)
             for param, param_state in original_state.items():
                 self.state[param] = {k: v for k, v in param_state.items() if k not in self.EXTRA_STATE_KEYS}
+                print(self.state[param].keys())
             yield
             for param, param_state in self.state.items():
                 original_state[param].update(param_state)
