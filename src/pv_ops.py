@@ -171,7 +171,7 @@ class StraightThroughAdamW(torch.optim.AdamW):
                 for subparam_name, subparam in quantized_weight.named_parameters():
                     full_name = f'{name}.{subparam_name}'
                     assert full_name not in quantized_representation_params, full_name
-                    quantized_representation_params[full_name] = full_name
+                    quantized_representation_params[full_name] = subparam
         total_params = len(set(non_quantized_params) | set(quantized_params) | set(quantized_representation_params))
         assert total_params == len(non_quantized_params) + len(quantized_params) + len(quantized_representation_params)
         param_groups = []
