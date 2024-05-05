@@ -10,7 +10,6 @@ from typing import Optional, Dict, Union, Tuple
 import torch
 import torch.nn as nn
 import transformers
-from torch.optim.optimizer import params_t
 
 from src.aq import QuantizedLinear, QuantizedWeight
 
@@ -151,10 +150,10 @@ class StraightThroughAdamW(torch.optim.AdamW):
         self.stochastic_rounding_tau = stochastic_rounding_tau
         self.delta_decay = delta_decay
 
-    def _select_optimized_parameters(self, named_dequantized_params, named_master_params, dequantized_dtype,
-                                     update_non_quantized_parameters: Optional[dict],
-                                     update_codebooks_and_scales: Optional[dict],
-                                     update_codes: Optional[dict]) -> Tuple[params_t, Dict[str, nn.Parameter]]:
+    def _select_optimized_parameters(
+            self, named_dequantized_params, named_master_params, dequantized_dtype,
+            update_non_quantized_parameters: Optional[dict], update_codebooks_and_scales: Optional[dict],
+            update_codes: Optional[dict]) -> Tuple[List[Dict[str, Any]], Dict[str, nn.Parameter]]:
         """Choose which version of parameter to optimize: the parameter itself or a straight-through buffer"""
         non_quantized_params, quantized_params, quantized_representation_params = dict(), dict(), dict()
         for name, param in named_dequantized_params.items():
