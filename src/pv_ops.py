@@ -10,7 +10,6 @@ from typing import Optional, Dict, Union
 import torch
 import torch.nn as nn
 import transformers
-from torch_optimizer import Lamb
 
 from src.aq import QuantizedLinear, QuantizedWeight
 
@@ -103,7 +102,7 @@ class ParameterRole(Enum):
     NON_QUANTIZED_PARAMETER = auto()
 
 
-class StraightThroughAdamW(Lamb):
+class StraightThroughAdamW(torch.optim.AdamW):
     """
     A wrapper for a PyTorch optimizer that can perform updates on quantized and/or de-quantized parameters
     :param update_non_quantized_params: how to update parameters that are not directly linked to a QuantizedWeight.
