@@ -243,7 +243,7 @@ class StraightThroughAdamW(torch.optim.AdamW):
                         param.grad = accumulated_grad.to(dtype=param.dtype, device=param.device)
                         # pass gradients to straight-through update buffer or (possibly offloaded) master parameter
                 else:
-                    assert param_group['role'] == ParameterRole.QUANTIZED_REPRESENTATION_PARAMETER
+                    assert param_group['role'] == ParameterRole.QUANTIZED_REPRESENTATION_PARAMETER, param_group['role']
                     # gradients w.r.t quantized representation parameters are computed below (using backprop)
 
         if self.should_update_codebooks_and_scales:
