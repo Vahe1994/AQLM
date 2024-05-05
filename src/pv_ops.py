@@ -5,7 +5,7 @@ from collections import defaultdict
 from copy import deepcopy
 from enum import Enum, auto
 from itertools import chain
-from typing import Optional, Dict, Union, Tuple
+from typing import Optional, Dict, Union, Tuple, List, Any
 
 import torch
 import torch.nn as nn
