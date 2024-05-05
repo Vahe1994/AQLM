@@ -5,11 +5,12 @@ from collections import defaultdict
 from copy import deepcopy
 from enum import Enum, auto
 from itertools import chain
-from typing import Optional, Dict, Union
+from typing import Optional, Dict, Union, Tuple
 
 import torch
 import torch.nn as nn
 import transformers
+from torch.optim.optimizer import params_t
 
 from src.aq import QuantizedLinear, QuantizedWeight
 
@@ -126,43 +127,34 @@ class StraightThroughAdamW(torch.optim.AdamW):
                  update_non_quantized_parameters: Optional[dict] = None,
                  update_codebooks_and_scales: Optional[dict] = None,
                  update_codes: Optional[dict] = None,
-                 max_code_change_per_step: float,
                  beam_size: int,
+                 max_code_change_per_step: float,
                  stochastic_rounding_tau: float = 0,
+                 delta_decay: float = 1.0,
                  dequantized_dtype: Optional[torch.dtype] = None,
                  **kwargs):
-        non_quantized_params, quantized_params, quantized_representation_params = self._select_optimized_parameters(
-            named_dequantized_params, named_master_params, dequantized_dtype)
-        param_groups = []
-        all_optimized_params = dict()
-        if update_non_quantized_parameters is not None:
-            all_optimized_params.update(non_quantized_params)
-            param_groups.append(dict(params=list(non_quantized_params.values()),
-                                     role=ParameterRole.NON_QUANTIZED_PARAMETER,
-                                     **update_non_quantized_parameters))
-        if update_codebooks_and_scales is not None:
-            all_optimized_params.update(quantized_representation_params)
-            param_groups.append(dict(params=list(quantized_representation_params.values()),
-                                     role=ParameterRole.QUANTIZED_REPRESENTATION_PARAMETER,
-                                     **update_codebooks_and_scales))
-        if update_codes is not None:
-            all_optimized_params.update(quantized_params)
-            param_groups.append(dict(params=list(quantized_params.values()),
-                                     role=ParameterRole.QUANTIZED_PARAMETER,
-                                     **update_codes))
-        assert len(param_groups) > 0, ("Please set at least one of update_codes, update_codebooks_and_scales "
-                                       "or update_non_quantized_parameters")
+        param_groups, all_optimized_params = self._select_optimized_parameters(
+            named_dequantized_params=named_dequantized_params,
+            named_master_params=named_master_params,
+            update_non_quantized_parameters=update_non_quantized_parameters,
+            update_codebooks_and_scales=update_codebooks_and_scales,
+            update_codes=update_codes,
+            dequantized_dtype=dequantized_dtype)
 
         super().__init__(param_groups, **kwargs)
         self._link_parameters_in_optimizer_state(all_optimized_params, named_dequantized_params, named_master_params)
         self.should_update_non_quantized_parameters = update_non_quantized_parameters is not None
         self.should_update_codebooks_and_scales = update_codebooks_and_scales is not None
         self.should_update_codes = update_codes is not None
+        self.beam_size = beam_size
         self.max_code_change_per_step = max_code_change_per_step
         self.stochastic_rounding_tau = stochastic_rounding_tau
-        self.beam_size = beam_size
+        self.delta_decay = delta_decay
 
-    def _select_optimized_parameters(self, named_dequantized_params, named_master_params, dequantized_dtype):
+    def _select_optimized_parameters(self, named_dequantized_params, named_master_params, dequantized_dtype,
+                                     update_non_quantized_parameters: Optional[dict],
+                                     update_codebooks_and_scales: Optional[dict],
+                                     update_codes: Optional[dict]) -> Tuple[params_t, Dict[str, nn.Parameter]]:
         """Choose which version of parameter to optimize: the parameter itself or a straight-through buffer"""
         non_quantized_params, quantized_params, quantized_representation_params = dict(), dict(), dict()
         for name, param in named_dequantized_params.items():
@@ -182,7 +174,26 @@ class StraightThroughAdamW(torch.optim.AdamW):
                     quantized_representation_params[full_name] = full_name
         total_params = len(set(non_quantized_params) | set(quantized_params) | set(quantized_representation_params))
         assert total_params == len(non_quantized_params) + len(quantized_params) + len(quantized_representation_params)
-        return non_quantized_params, quantized_params, quantized_representation_params
+        param_groups = []
+        all_optimized_params = dict()
+        if update_non_quantized_parameters is not None:
+            all_optimized_params.update(non_quantized_params)
+            param_groups.append(dict(params=list(non_quantized_params.values()),
+                                     role=ParameterRole.NON_QUANTIZED_PARAMETER,
+                                     **update_non_quantized_parameters))
+        if update_codebooks_and_scales is not None:
+            all_optimized_params.update(quantized_representation_params)
+            param_groups.append(dict(params=list(quantized_representation_params.values()),
+                                     role=ParameterRole.QUANTIZED_REPRESENTATION_PARAMETER,
+                                     **update_codebooks_and_scales))
+        if update_codes is not None:
+            all_optimized_params.update(quantized_params)
+            param_groups.append(dict(params=list(quantized_params.values()),
+                                     role=ParameterRole.QUANTIZED_PARAMETER,
+                                     **update_codes))
+        assert len(param_groups) > 0, ("Please set at least one of update_codes, update_codebooks_and_scales "
+                                       "or update_non_quantized_parameters")
+        return param_groups, all_optimized_params
 
     def _link_parameters_in_optimizer_state(self, all_optimized_params, named_dequantized_params, named_master_params):
         """For each optimizer parameter in state, add its name, corresponding quantized and/or offloaded parameter"""
@@ -240,7 +251,6 @@ class StraightThroughAdamW(torch.optim.AdamW):
                 for param in param_group['params']:
                     reference_weight = param    # dequantized weight after optimizer updates
                     quantized_weight = self.state[param]['quantized_weight']
-                    dequantized_weight = quantized_weight()
                     assert isinstance(quantized_weight, QuantizedWeight)
 
                     prev_codes = quantized_weight.get_codes().clone()  # [num_output_groups, num_input_groups]
@@ -253,6 +263,10 @@ class StraightThroughAdamW(torch.optim.AdamW):
                     )  # note: this updates quantized_weight.get_codes()[...] in-place
                     change_rate = torch.not_equal(prev_codes, new_codes).float().mean().item()
                     print(f"{self.state[param]['name']} change rate:", change_rate)
+                    if self.delta_decay < 1.0:
+                        reference_weight[...] = (
+                            self.delta_decay * reference_weight + (1 - self.delta_decay) * quantized_weight()
+                        )
 
     def _update_dequantized_weights(self):
         """Apply any updates to master parameters onto dequantized parameters"""
