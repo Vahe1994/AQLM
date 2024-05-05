@@ -10,6 +10,7 @@ from typing import Optional, Iterable, Dict, Union
 import torch
 import torch.nn as nn
 import transformers
+from torch_optimizer import Lamb
 
 from src.aq import QuantizedLinear, QuantizedWeight
 
@@ -103,7 +104,7 @@ class ParameterRole(Enum):
     NON_QUANTIZED_PARAMETER = auto()
 
 
-class StraightThroughAdamW(torch.optim.AdamW):
+class StraightThroughAdamW(Lamb):
     """
     A wrapper for a PyTorch optimizer that enables updates on quantized parameters
     :param update_non_quantized_params: how to update parameters that are not directly linked to a QuantizedWeight.
@@ -161,7 +162,6 @@ class StraightThroughAdamW(torch.optim.AdamW):
         self.max_code_change_per_step = max_code_change_per_step
         self.stochastic_rounding_tau = stochastic_rounding_tau
         self.beam_size = beam_size
-
 
     def _select_optimized_parameters(self, named_dequantized_params, named_master_params, delta_dtype):
         """Choose which version of parameter to optimize: the parameter itself or a straight-through buffer"""
@@ -282,7 +282,6 @@ class StraightThroughAdamW(torch.optim.AdamW):
                 original_state[param].update(param_state)
         finally:
             self.state = original_state
-
 
     def zero_grad(self, set_to_none: bool = True, *args, **kwargs) -> None:
         super().zero_grad(set_to_none=set_to_none, *args, **kwargs)
