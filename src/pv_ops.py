@@ -105,7 +105,7 @@ class ParameterRole(Enum):
 
 class StraightThroughAdamW(Lamb):
     """
-    A wrapper for a PyTorch optimizer that enables updates on quantized parameters
+    A wrapper for a PyTorch optimizer that can perform updates on quantized and/or de-quantized parameters
     :param update_non_quantized_params: how to update parameters that are not directly linked to a QuantizedWeight.
         This may include biases, embeddings/heads, normalization layers or parts of the model that were not quantized.
     :param update_codebooks_and_scales: how to update continuous params of QuantizedWeight: codebooks and scales.
@@ -116,6 +116,7 @@ class StraightThroughAdamW(Lamb):
     :param max_code_change_per_step: max portion of discrete code groups that can be updated; only affects codes
     :param beam_size: beam search width used only when updating codes. See beam_size in aq.py
     :param stochastic_rounding_tau: if above 0, use stochastic rounding with this temperature. See aq.py
+    :param dequantized_dtype: use this dtype when accumulating updates to de-quantized weight matrices
     """
     EXTRA_STATE_KEYS = ['name', 'param_version_that_accumulates_grad', 'quantized_weight']
 
