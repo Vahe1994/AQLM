@@ -97,7 +97,6 @@ def verify_dequantized_model(dequantized_model: nn.Module, master_parameters: di
     assert len(unmatched_master_parameters) == 0, f"Found unmatched tensors: {unmatched_master_parameters}"
 
 
-
 class ParameterRole(Enum):
     QUANTIZED_PARAMETER = auto()   # entire quantized weight, in a de-quantized form
     QUANTIZED_REPRESENTATION_PARAMETER = auto()  # part of quantized weight inner parameters, e.g. codebooks or scales
@@ -130,10 +129,10 @@ class StraightThroughAdamW(Lamb):
                  max_code_change_per_step: float,
                  beam_size: int,
                  stochastic_rounding_tau: float = 0,
-                 delta_dtype: Optional[torch.dtype] = None,
+                 dequantized_dtype: Optional[torch.dtype] = None,
                  **kwargs):
         non_quantized_params, quantized_params, quantized_representation_params = self._select_optimized_parameters(
-            named_dequantized_params, named_master_params, delta_dtype)
+            named_dequantized_params, named_master_params, dequantized_dtype)
         param_groups = []
         all_optimized_params = dict()
         if update_non_quantized_parameters is not None:
@@ -163,7 +162,7 @@ class StraightThroughAdamW(Lamb):
         self.stochastic_rounding_tau = stochastic_rounding_tau
         self.beam_size = beam_size
 
-    def _select_optimized_parameters(self, named_dequantized_params, named_master_params, delta_dtype):
+    def _select_optimized_parameters(self, named_dequantized_params, named_master_params, dequantized_dtype):
         """Choose which version of parameter to optimize: the parameter itself or a straight-through buffer"""
         non_quantized_params, quantized_params, quantized_representation_params = dict(), dict(), dict()
         for name, param in named_dequantized_params.items():
@@ -172,9 +171,10 @@ class StraightThroughAdamW(Lamb):
             elif name in named_master_params and isinstance(named_master_params[name], nn.Parameter):
                 non_quantized_params[name] = named_master_params[name]
             elif name in named_master_params and isinstance(named_master_params[name], QuantizedWeight):
-                delta = torch.zeros_like(param, dtype=delta_dtype, requires_grad=True)
-                quantized_params[name] = delta  # accumulator for optimizer updates; sharded alongside FSDP
-                # note: we track delta (difference) instead of raw weight to better handle half precision
+                dequantized_weight = named_master_params[name]()
+                dequantized_weight = nn.Parameter(dequantized_weight.to(dtype=dequantized_dtype),
+                                                  requires_grad=dequantized_weight.requires_grad)
+                quantized_params[name] = dequantized_weight  # accumulator for optimizer updates; sharded alongside FSDP
                 quantized_weight = named_master_params[name]
                 for subparam_name, subparam in quantized_weight.named_parameters():
                     full_name = f'{name}.{subparam_name}'
@@ -238,10 +238,9 @@ class StraightThroughAdamW(Lamb):
         for param_group in self.param_groups:
             if param_group['role'] == ParameterRole.QUANTIZED_PARAMETER:
                 for param in param_group['params']:
-                    delta_weight = param    # a tensor that receives optimizer updates
+                    reference_weight = param    # dequantized weight after optimizer updates
                     quantized_weight = self.state[param]['quantized_weight']
                     dequantized_weight = quantized_weight()
-                    reference_weight = dequantized_weight + delta_weight
                     assert isinstance(quantized_weight, QuantizedWeight)
 
                     prev_codes = quantized_weight.get_codes().clone()  # [num_output_groups, num_input_groups]
@@ -254,7 +253,6 @@ class StraightThroughAdamW(Lamb):
                     )  # note: this updates quantized_weight.get_codes()[...] in-place
                     change_rate = torch.not_equal(prev_codes, new_codes).float().mean().item()
                     print(f"{self.state[param]['name']} change rate:", change_rate)
-                    delta_weight[...] = reference_weight - quantized_weight()
 
     def _update_dequantized_weights(self):
         """Apply any updates to master parameters onto dequantized parameters"""
