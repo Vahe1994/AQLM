@@ -1,5 +1,7 @@
 """Module containing utilities for straight-through fine-tuning of language models"""
+import contextlib
 import random
+from collections import defaultdict
 from copy import deepcopy
 from enum import Enum, auto
 from itertools import chain
@@ -115,7 +117,7 @@ class StraightThroughAdamW(torch.optim.AdamW):
     :param beam_size: beam search width used only when updating codes. See beam_size in aq.py
     :param stochastic_rounding_tau: if above 0, use stochastic rounding with this temperature. See aq.py
     """
-    ADDED_STATE_KEYS = ['name', 'param_version_that_accumulated_grad', 'quantized_weight']
+    EXTRA_STATE_KEYS = ['name', 'param_version_that_accumulated_grad', 'quantized_weight']
 
     def __init__(self,
                  named_dequantized_params: Dict[str, nn.Parameter],
@@ -159,7 +161,7 @@ class StraightThroughAdamW(torch.optim.AdamW):
         self.max_code_change_per_step = max_code_change_per_step
         self.stochastic_rounding_tau = stochastic_rounding_tau
         self.beam_size = beam_size
-        self.state_initialized = False
+
 
     def _select_optimized_parameters(self, named_dequantized_params, named_master_params, delta_dtype):
         """Choose which version of parameter to optimize: the parameter itself or a straight-through buffer"""
@@ -205,7 +207,8 @@ class StraightThroughAdamW(torch.optim.AdamW):
 
     def step(self, *args, **kwargs):
         self._propagate_grads_to_optimized_parameters()
-        original_output = super().step(*args, **kwargs)
+        with self._hide_extra_state():
+            original_output = super().step(*args, **kwargs)
         self._update_quantized_weights()
         self._update_dequantized_weights()
         return original_output
@@ -265,6 +268,21 @@ class StraightThroughAdamW(torch.optim.AdamW):
                         )
                     else:
                         self.state[param]['param_version_that_accumulates_grad'].data[...] = param.data
+
+    @contextlib.contextmanager
+    def _hide_extra_state(self):
+        """Hide """
+        original_state = self.state
+        try:
+            self.state = defaultdict(dict)
+            for param, param_state in original_state.items():
+                self.state[param] = {k: v for k, v in param_state.items() if k not in self.EXTRA_STATE_KEYS}
+            yield
+            for param, param_state in self.state.items():
+                original_state[param].update(param_state)
+        finally:
+            self.state = original_state
+
 
     def zero_grad(self, set_to_none: bool = True, *args, **kwargs) -> None:
         super().zero_grad(set_to_none=set_to_none, *args, **kwargs)
