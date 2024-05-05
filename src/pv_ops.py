@@ -186,7 +186,7 @@ class StraightThroughAdamW(torch.optim.AdamW):
             param_groups.append(dict(params=list(quantized_representation_params.values()),
                                      role=ParameterRole.QUANTIZED_REPRESENTATION_PARAMETER,
                                      **update_codebooks_and_scales))
-        if update_codes is not None or update_codebooks_and_scales is not None:
+        if update_codes is not None:
             all_optimized_params.update(quantized_params)
             param_groups.append(dict(params=list(quantized_params.values()),
                                      role=ParameterRole.QUANTIZED_PARAMETER,
