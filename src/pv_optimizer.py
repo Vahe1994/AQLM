@@ -32,7 +32,7 @@ class StraightThroughAdamW(torch.optim.AdamW):
     :param stochastic_rounding_tau: if above 0, use stochastic rounding with this temperature. See aq.py
     :param dequantized_dtype: use this dtype when accumulating updates to de-quantized weight matrices
     """
-    EXTRA_STATE_KEYS = ['name', 'param_version_that_accumulates_grad', 'quantized_weight']
+    EXTRA_STATE_KEYS = ['name', 'grad_accumulator', 'quantized_weight']
 
     def __init__(self,
                  named_dequantized_params: Dict[str, nn.Parameter],
@@ -129,15 +129,15 @@ class StraightThroughAdamW(torch.optim.AdamW):
                 quantized_weight = named_master_params[name]
                 assert isinstance(quantized_weight, QuantizedWeight)
                 self.state[param]['quantized_weight'] = quantized_weight
-                self.state[param]['param_version_that_accumulates_grad'] = named_dequantized_params[name]
+                self.state[param]['grad_accumulator'] = named_dequantized_params[name]
             elif param in all_quantized_representation_parameters:
                 quantized_weight = all_quantized_representation_parameters[param]
                 assert isinstance(quantized_weight, QuantizedWeight)
                 self.state[param]['quantized_weight'] = quantized_weight
                 dequantized_param = quantized_weight_to_dequantized[quantized_weight]
-                self.state[param]['param_version_that_accumulates_grad'] = dequantized_param
+                self.state[param]['grad_accumulator'] = dequantized_param
             else:  # non_quantized params, e.g. biases, layernorms, etc
-                self.state[param]['param_version_that_accumulates_grad'] = named_dequantized_params[name]
+                self.state[param]['grad_accumulator'] = named_dequantized_params[name]
 
     def step(self, *args, **kwargs):
         self._propagate_grads_to_optimized_parameters()
@@ -152,8 +152,8 @@ class StraightThroughAdamW(torch.optim.AdamW):
         for param_group in self.param_groups:
             for param in param_group['params']:
                 if param_group['role'] in (ParameterRole.QUANTIZED_PARAMETER, ParameterRole.NON_QUANTIZED_PARAMETER):
-                    if self.state[param]['param_version_that_accumulates_grad'] is not param:
-                        accumulated_grad = self.state[param]['param_version_that_accumulates_grad'].grad
+                    if self.state[param]['grad_accumulator'] is not param:
+                        accumulated_grad = self.state[param]['grad_accumulator'].grad
                         param.grad = accumulated_grad.to(dtype=param.dtype, device=param.device)
                         # pass gradients to straight-through update buffer or (possibly offloaded) master parameter
                 else:
@@ -166,7 +166,7 @@ class StraightThroughAdamW(torch.optim.AdamW):
             for param_group in self.param_groups:
                 if param_group['role'] == ParameterRole.QUANTIZED_REPRESENTATION_PARAMETER:
                     for param in param_group['params']:
-                        grad = self.state[param]['param_version_that_accumulates_grad'].grad
+                        grad = self.state[param]['grad_accumulator'].grad
                         if self.state[param]['quantized_weight'] in quantized_weights_to_backpropagate:
                             assert quantized_weights_to_backpropagate[self.state[param]['quantized_weight']] is grad
                         quantized_weights_to_backpropagate[self.state[param]['quantized_weight']] = grad
@@ -206,19 +206,19 @@ class StraightThroughAdamW(torch.optim.AdamW):
         quantized_weights_to_update = dict()
         for param_group in self.param_groups:
             for param in param_group['params']:
-                if self.state[param]['param_version_that_accumulates_grad'] is not param:
+                if self.state[param]['grad_accumulator'] is not param:
                     param.grad = None  # deference so that previous grads can be deleted on zero_grad(set_to_none=True)
 
                 if param_group['role'] in (ParameterRole.QUANTIZED_PARAMETER,
                                            ParameterRole.QUANTIZED_REPRESENTATION_PARAMETER):
                     assert isinstance(self.state[param].get('quantized_weight'), QuantizedWeight)
-                    dequantized_weight = self.state[param]['param_version_that_accumulates_grad']
+                    dequantized_weight = self.state[param]['grad_accumulator']
                     if self.state[param]['quantized_weight'] in quantized_weights_to_update:
                         assert quantized_weights_to_update[self.state[param]['quantized_weight']] is dequantized_weight
                     quantized_weights_to_update[self.state[param]['quantized_weight']] = dequantized_weight
                 else:
                     assert param_group['role'] == ParameterRole.NON_QUANTIZED_PARAMETER
-                    self.state[param]['param_version_that_accumulates_grad'].data[...] = param.data
+                    self.state[param]['grad_accumulator'].data[...] = param.data
 
         for quantized_weight, dequantized_weight in quantized_weights_to_update.items():
             dequantized_weight.data[...] = quantized_weight().data
@@ -242,6 +242,6 @@ class StraightThroughAdamW(torch.optim.AdamW):
         for param_group in self.param_groups:
             for param in param_group['params']:
                 if set_to_none:
-                    self.state[param]['param_version_that_accumulates_grad'].grad = None
-                elif self.state[param]['param_version_that_accumulates_grad'].grad is not None:
-                    self.state[param]['param_version_that_accumulates_grad'].grad.zero_()
+                    self.state[param]['grad_accumulator'].grad = None
+                elif self.state[param]['grad_accumulator'].grad is not None:
+                    self.state[param]['grad_accumulator'].grad.zero_()
