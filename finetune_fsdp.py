@@ -521,7 +521,7 @@ if __name__ == "__main__":
         assert args.eval_datasets is not None, f"--keep_best_model requires --eval_datasets"
     if args.wandb and rank == 0:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
-        wandb.init(config=args)
+        wandb.init(config={a: getattr(args, a) for a in dir(args) if not a.startswith("_")})
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(args.base_model)
     assert tokenizer.eos_token_id is not None
