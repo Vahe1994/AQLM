@@ -42,7 +42,7 @@ We provide a number of prequantized models:
 
 
 Above perplexity is evaluated on **4k** context length for Llama-2 models and **8k** for Mistral/Mixtral. 
-Please see more evaluations results in the model pages.
+Please see more evaluation results on the model pages.
 
 ### Inference kernels
 
