@@ -489,7 +489,7 @@ def _save_model(args: argparse.Namespace, quantized_model: nn.Module):
             print(f"Saved {os.path.join(args.save, f'best_model_state_dict.pt')}")
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(add_help=True)
     add_model_args(parser)
     add_data_args(parser)
@@ -634,3 +634,7 @@ if __name__ == "__main__":
         metadata['current_epoch'] += 1
 
     _save_state(args, metadata, quantized_model, optimizer)
+
+
+if __name__ == "__main__":
+    main()
