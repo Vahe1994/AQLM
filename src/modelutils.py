@@ -1,11 +1,13 @@
 import math
 import os
 from contextlib import contextmanager
+from typing import Tuple
 
 import torch
 import torch.nn as nn
 import transformers
 from accelerate import dispatch_model
+from torch import nn as nn
 from transformers import AutoConfig, AutoModelForCausalLM
 
 from src.aq import QuantizedWeight
@@ -263,3 +265,16 @@ def save_not_quantized_weights(model: nn.Module, save_dir: str):
         name: param for name, param in model.named_parameters() if param not in already_saved_weights
     }
     torch.save(not_quantized_weights, os.path.join(save_dir, "not_quantized_weights.pt"))
+
+
+def infer_block_classes(model: nn.Module, block_type: str) -> Tuple[type, ...]:
+    """find transformer block classes that should be wrapped with inner FullyShardedDataParallel (auto_wrap_policy)"""
+    transformer_block_types = []
+    for module in model.modules():
+        if module.__class__.__name__ == block_type:
+            transformer_block_types.append(type(module))
+    if not transformer_block_types:
+        raise ValueError(f"Could not find {block_type} among model layers")
+    transformer_block_types = tuple(transformer_block_types)
+    assert any(isinstance(module, transformer_block_types) for module in model.modules())
+    return transformer_block_types

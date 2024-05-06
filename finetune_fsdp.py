@@ -7,7 +7,7 @@ import os
 from contextlib import nullcontext
 from copy import deepcopy
 from functools import partial
-from typing import Tuple, Optional
+from typing import Optional
 
 import transformers
 import datasets
@@ -23,7 +23,7 @@ from tqdm.auto import tqdm
 from src.aq import QuantizedWeight, QuantizedLinear
 from src.aq_ops import IntCodes, master_rank_first, one_rank_at_a_time, is_signed
 from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
-from src.modelutils import get_model
+from src.modelutils import get_model, infer_block_classes
 
 try:
     import wandb
@@ -292,19 +292,6 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     )
     assert is_tokenized(lm_dataset)
     return lm_dataset
-
-
-def infer_block_classes(model: nn.Module, block_type: str) -> Tuple[type, ...]:
-    """find transformer block classes that should be wrapped with inner FullyShardedDataParallel (auto_wrap_policy)"""
-    transformer_block_types = []
-    for module in model.modules():
-        if module.__class__.__name__ == block_type:
-            transformer_block_types.append(type(module))
-    if not transformer_block_types:
-        raise ValueError(f"Could not find {block_type} among model layers")
-    transformer_block_types = tuple(transformer_block_types)
-    assert any(isinstance(module, transformer_block_types) for module in model.modules())
-    return transformer_block_types
 
 
 def load_base_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
