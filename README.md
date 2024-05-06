@@ -28,6 +28,10 @@ We provide a number of prequantized models:
 | Llama-2-13b| 1x16        | 5.22           | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-13b-AQLM-2Bit-1x16-hf)|
 | Llama-2-70b| 1x16        | 3.83           | 18.8           | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-70b-AQLM-2Bit-1x16-hf)|
 | Llama-2-70b| 2x8         | 4.21           | 18.2           | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-70b-AQLM-2Bit-2x8-hf) |
+| Llama-3-8b | 1x16        | -          | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-8B-AQLM-2Bit-1x16) |
+| Llama-3-8b-Instruct | 1x16        | -          | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-8B-Instruct-AQLM-2Bit-1x16) |
+| Llama-3-70b | 1x16        | -          | 21.9            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-AQLM-2Bit-1x16) |
+| Llama-3-70b-Instruct | 1x16        | -          | 21.9            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-Instruct-AQLM-2Bit-1x16) |
 | Mistral-7b| 1x16       | 5.40           | 2.5            | [Link](https://huggingface.co/ISTA-DASLab/Mistral-7B-v0.1-AQLM-2Bit-1x16-hf)|
 | Mixtral-8x7b| 1x16       | 3.35           | 12.6            | [Link](https://huggingface.co/ISTA-DASLab/Mixtral-8x7b-AQLM-2Bit-1x16-hf)|
 | Mixtral-8x7b-Instruct| 1x16       | -           | 12.6            | [Link](https://huggingface.co/ISTA-DASLab/Mixtral-8x7B-Instruct-v0_1-AQLM-2Bit-1x16-hf)|
@@ -38,6 +42,7 @@ We provide a number of prequantized models:
 
 
 Above perplexity is evaluated on **4k** context length for Llama-2 models and **8k** for Mistral/Mixtral. 
+Please see more evaluations results in the model pages.
 
 ### Inference kernels
 
