@@ -9,7 +9,6 @@ import torch
 import torch.nn as nn
 import transformers
 from accelerate import dispatch_model
-from torch import nn as nn
 from transformers import AutoConfig, AutoModelForCausalLM
 
 from src.aq import QuantizedWeight, QuantizedLinear
