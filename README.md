@@ -20,25 +20,26 @@ The models reported below use **full model fine-tuning** as described in appendi
 
 We provide a number of prequantized models:
 
-| Model      | AQLM scheme | WikiText 2 PPL | Model size, Gb | Hub link                                                                 |
-|------------|-------------|----------------|----------------|--------------------------------------------------------------------------|
-| Llama-2-7b | 1x16        | 5.92          | 2.4            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-2Bit-1x16-hf) |
-| Llama-2-7b | 2x8         | 6.69          | 2.2            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-2Bit-2x8-hf)  |
-| Llama-2-7b | 8x8         | 6.61          | 2.2            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-2Bit-8x8-hf)  |
-| Llama-2-13b| 1x16        | 5.22           | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-13b-AQLM-2Bit-1x16-hf)|
-| Llama-2-70b| 1x16        | 3.83           | 18.8           | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-70b-AQLM-2Bit-1x16-hf)|
-| Llama-2-70b| 2x8         | 4.21           | 18.2           | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-70b-AQLM-2Bit-2x8-hf) |
-| Llama-3-8b | 1x16        | -          | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-8B-AQLM-2Bit-1x16) |
-| Llama-3-8b-Instruct | 1x16        | -          | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-8B-Instruct-AQLM-2Bit-1x16) |
-| Llama-3-70b | 1x16        | -          | 21.9            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-AQLM-2Bit-1x16) |
-| Llama-3-70b-Instruct | 1x16        | -          | 21.9            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-Instruct-AQLM-2Bit-1x16) |
-| Mistral-7b| 1x16       | 5.40           | 2.5            | [Link](https://huggingface.co/ISTA-DASLab/Mistral-7B-v0.1-AQLM-2Bit-1x16-hf)|
-| Mixtral-8x7b| 1x16       | 3.35           | 12.6            | [Link](https://huggingface.co/ISTA-DASLab/Mixtral-8x7b-AQLM-2Bit-1x16-hf)|
-| Mixtral-8x7b-Instruct| 1x16       | -           | 12.6            | [Link](https://huggingface.co/ISTA-DASLab/Mixtral-8x7B-Instruct-v0_1-AQLM-2Bit-1x16-hf)|
-| gemma-2b | 1x16      | -           | 1.7            | [Link](https://huggingface.co/ISTA-DASLab/gemma-2b-AQLM-2Bit-1x16-hf)|
-| gemma-2b | 2x8      | -           | 1.6            | [Link](https://huggingface.co/ISTA-DASLab/gemma-2b-AQLM-2Bit-2x8-hf)|
-| Command-R | 1x16      | -           | 12.7            | [Link](https://huggingface.co/ISTA-DASLab/c4ai-command-r-v01-AQLM-2Bit-1x16)|
-| Command-R+ | 1x16      | -           |  	31.9            | [Link](https://huggingface.co/ISTA-DASLab/c4ai-command-r-plus-AQLM-2Bit-1x16)|
+| Model      | AQLM scheme | WikiText 2 PPL | MMLU (5-shot) FP16→AQLM | Model size, Gb | Hub link                                                                 |
+|------------|-------------|----------------|---------------|----------------|--------------------------------------------------------------------------|
+| Llama-3-8b | 1x16        | -          | 0.65→0.56 | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-8B-AQLM-2Bit-1x16) |
+| Llama-3-8b-Instruct | 1x16        | -          | 0.66→0.59 | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-8B-Instruct-AQLM-2Bit-1x16) |
+| Llama-3-70b | 1x16        | -          | 0.79→0.75 | 21.9            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-AQLM-2Bit-1x16) |
+| Llama-3-70b-Instruct | 1x16        | -          | 0.80→0.76 | 21.9            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-Instruct-AQLM-2Bit-1x16) |
+| Command-R | 1x16      | -           | 0.68→0.57 | 12.7            | [Link](https://huggingface.co/ISTA-DASLab/c4ai-command-r-v01-AQLM-2Bit-1x16)|
+| Command-R+ | 1x16      | -           | 0.74→0.68 | 31.9            | [Link](https://huggingface.co/ISTA-DASLab/c4ai-command-r-plus-AQLM-2Bit-1x16)|
+| Mistral-7b| 1x16       | 5.40           | - | 2.5            | [Link](https://huggingface.co/ISTA-DASLab/Mistral-7B-v0.1-AQLM-2Bit-1x16-hf)|
+| Mistral-7B-Instruct-v0.2 | 2x8       | -           | 0.59→0.44 | 2.5            | [Link](https://huggingface.co/ISTA-DASLab/Mistral-7B-Instruct-v0.2-AQLM-2Bit-2x8)|
+| Mixtral-8x7b| 1x16       | 3.35           | -| 12.6            | [Link](https://huggingface.co/ISTA-DASLab/Mixtral-8x7b-AQLM-2Bit-1x16-hf)|
+| Mixtral-8x7b-Instruct| 1x16       | -           | -| 12.6            | [Link](https://huggingface.co/ISTA-DASLab/Mixtral-8x7B-Instruct-v0_1-AQLM-2Bit-1x16-hf)|
+| Llama-2-7b | 1x16        | 5.92          | 0.46→0.39 | 2.4            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-2Bit-1x16-hf) |
+| Llama-2-7b | 2x8         | 6.69          | - | 2.2            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-2Bit-2x8-hf)  |
+| Llama-2-7b | 8x8         | 6.61          | - | 2.2            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-2Bit-8x8-hf)  |
+| Llama-2-13b| 1x16        | 5.22           | 0.55→0.49 | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-13b-AQLM-2Bit-1x16-hf)|
+| Llama-2-70b| 1x16        | 3.83           | 0.69→0.65 | 18.8           | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-70b-AQLM-2Bit-1x16-hf)|
+| Llama-2-70b| 2x8         | 4.21           | - | 18.2           | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-70b-AQLM-2Bit-2x8-hf) |
+| gemma-2b | 1x16      | -           | - | 1.7            | [Link](https://huggingface.co/ISTA-DASLab/gemma-2b-AQLM-2Bit-1x16-hf)|
+| gemma-2b | 2x8      | -           | - | 1.6            | [Link](https://huggingface.co/ISTA-DASLab/gemma-2b-AQLM-2Bit-2x8-hf)|
 
 
 Above perplexity is evaluated on **4k** context length for Llama-2 models and **8k** for Mistral/Mixtral. 
