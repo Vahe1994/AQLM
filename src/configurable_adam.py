@@ -3,6 +3,8 @@ import math
 import torch
 from typing import Tuple, Iterable, Union, Optional
 
+from src.aq_ops import maybe_script
+
 
 class ConfigurableAdamW(torch.optim.Optimizer):
     r"""
@@ -78,31 +80,12 @@ class ConfigurableAdamW(torch.optim.Optimizer):
                 grad = grad.to(compute_dtype)
 
                 # Decay the first and second moment running average coefficient
-                update = grad.clone()
-                if beta1 != 0:
-                    exp_avg = state["exp_avg"].to(compute_dtype)
-                    exp_avg = exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
-                    if exp_avg is not state["exp_avg"]:
-                        state["exp_avg"].copy_(exp_avg)
-                    update = update.copy_(exp_avg)
-                    del exp_avg
-
-                if beta2 != 0:
-                    exp_avg_sq = state["exp_avg_sq"].to(compute_dtype)
-                    exp_avg_sq = exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-                    if exp_avg_sq is not state["exp_avg_sq"]:
-                        state["exp_avg_sq"].copy_(exp_avg_sq)
-                    if group["amsgrad"]:
-                        exp_avg_sq = torch.maximum(exp_avg_sq, state["v_hat_max"], out=exp_avg_sq)
-                        state["v_hat_max"].copy_(exp_avg_sq)
-                    update = update.div_(exp_avg_sq.sqrt().add(group["eps"]))
-                    del exp_avg_sq
-
-                if group["weight_decay"] != 0:
-                    update = update.add_(p.data, alpha=group["weight_decay"])  # note: this is later multiplied by -lr
+                update = _inner_adam_step_and_update_statistics(
+                    p, grad, state.get("exp_avg"), state.get("exp_avg_sq"), state.get("v_hat_max"),
+                    compute_dtype, group["weight_decay"], beta1, beta2, group["amsgrad"], group["eps"]
+                )
 
                 update_scale = -group["lr"]
-                debias_factor = 1
                 # below: to save compute, we update scalar coefficient to account for debias/lamb/.. and multiply once
                 if group["debias"]:
                     mt_debias = 1. / (1 - beta1 ** state["step"]) if beta1 != 0 else 1
@@ -112,8 +95,8 @@ class ConfigurableAdamW(torch.optim.Optimizer):
 
                 if group["lamb"]:
                     weight_norm = torch.norm(p.data.to(compute_dtype))
-                    update_norm = torch.norm(update) * debias_factor
-                    # note: lamb cancels-out debias factor unless clamp_value is set
+                    update_norm = torch.norm(update)
+                    # note: lamb does not count debiasing when computing trust ratio
                     if group["clamp_value"] is not None:
                         weight_norm = torch.clamp_max_(weight_norm, group["clamp_value"])
                     if weight_norm == 0 or update_norm == 0:
@@ -124,3 +107,39 @@ class ConfigurableAdamW(torch.optim.Optimizer):
 
                 p.data.add_(update, alpha=update_scale)
         return loss
+
+
+@maybe_script
+def _inner_adam_step_and_update_statistics(
+    p: torch.Tensor, grad: torch.Tensor,
+    exp_avg: Optional[torch.Tensor], exp_avg_sq: Optional[torch.Tensor], v_hat_max: Optional[torch.Tensor],
+    weight_decay: float, beta1: float, beta2: float, amsgrad: bool, eps: float, compute_dtype: torch.dtype,
+    ):
+    grad = grad.to(compute_dtype, copy=True)
+    stored_exp_avg, stored_exp_avg_sq, stored_v_hat_max = exp_avg, exp_avg_sq, v_hat_max
+
+    if beta1 != 0:
+        assert exp_avg is not None
+        exp_avg = exp_avg.to(compute_dtype) * beta1 + grad * (1 - beta1)
+        stored_exp_avg.copy_(exp_avg, non_blocking=True)
+        update = exp_avg
+    else:
+        assert exp_avg is None
+        update = grad.clone()
+
+    if beta2 != 0:
+        assert exp_avg_sq is not None
+        exp_avg_sq = exp_avg_sq.to(compute_dtype) * beta2 + grad.square() * (1 - beta2)
+        stored_exp_avg.copy_(exp_avg_sq, non_blocking=True)
+        if amsgrad:
+            assert v_hat_max is not None
+            exp_avg_sq = torch.maximum(exp_avg_sq, v_hat_max, out=exp_avg_sq)
+        else:
+            assert v_hat_max is None
+        update /= exp_avg_sq.sqrt().add(eps)
+    else:
+        assert exp_avg_sq is None
+
+    if weight_decay != 0:
+        update += update.add(p.data, alpha=weight_decay)  # note: this is later multiplied by -lr, see step
+    return update
