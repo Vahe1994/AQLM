@@ -84,7 +84,8 @@ class ConfigurableAdamW(torch.optim.Optimizer):
                     exp_avg = exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
                     if exp_avg is not state["exp_avg"]:
                         state["exp_avg"].copy_(exp_avg)
-                    update = exp_avg
+                    update = update.copy_(exp_avg)
+                    del exp_avg
 
                 if beta2 != 0:
                     exp_avg_sq = state["exp_avg_sq"].to(compute_dtype)
@@ -94,7 +95,8 @@ class ConfigurableAdamW(torch.optim.Optimizer):
                     if group["amsgrad"]:
                         exp_avg_sq = torch.maximum(exp_avg_sq, state["v_hat_max"], out=exp_avg_sq)
                         state["v_hat_max"].copy_(exp_avg_sq)
-                    update /= exp_avg_sq.sqrt().add(group["eps"])
+                    update = update.div_(exp_avg_sq.sqrt().add(group["eps"]))
+                    del exp_avg_sq
 
                 if group["weight_decay"] != 0:
                     update = update.add_(p.data, alpha=group["weight_decay"])  # note: this is later multiplied by -lr
