@@ -76,13 +76,13 @@ class ConfigurableAdamW(torch.optim.Optimizer):
                 state = self._maybe_init_state(p, group)
                 state["step"] += 1
                 beta1, beta2 = group["betas"]
-                compute_dtype = group["compute_dtype"]
+                compute_dtype = group.get("compute_dtype") or p.dtype
                 grad = grad.to(compute_dtype)
 
                 # Decay the first and second moment running average coefficient
                 update = _inner_adam_step_and_update_statistics(
                     p, grad, state.get("exp_avg", grad), state.get("exp_avg_sq", grad), state.get("v_hat_max", grad),
-                    compute_dtype or p.dtype, group["weight_decay"], beta1, beta2, group["amsgrad"], group["eps"]
+                    compute_dtype, group["weight_decay"], beta1, beta2, group["amsgrad"], group["eps"]
                 )
 
                 update_scale = -group["lr"]
