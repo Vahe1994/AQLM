@@ -22,7 +22,7 @@ from src.utils import _extract_into_tensor, maybe_get_0th_element
 
 
 @torch.inference_mode()
-def cache_hiddens(model, dataloader):
+def cache_hiddens(model, dataloader, args):
     device = next(model.parameters()).device
     cached_hiddens = []
     for i in trange(len(dataloader), total=len(dataloader), desc="Caching hiddens", leave=False):
@@ -165,7 +165,7 @@ def print_memory_stats():
     print(f"GPU max memory reserved: {torch.cuda.max_memory_reserved() / 2 ** 30:.2f} GB.")
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(add_help=True)
     # Model params
     parser.add_argument(
@@ -353,9 +353,9 @@ if __name__ == "__main__":
     if not args.device_map:
         orig_model = orig_model.to(device)
     # cache logits
-    orig_train_hiddens = cache_hiddens(orig_model, train_dataloader)
+    orig_train_hiddens = cache_hiddens(orig_model, train_dataloader, args)
     if val_dataloader:
-        orig_val_hiddens = cache_hiddens(orig_model, val_dataloader)
+        orig_val_hiddens = cache_hiddens(orig_model, val_dataloader, args)
     else:
         orig_val_hiddens = None
     del orig_model
@@ -415,3 +415,7 @@ if __name__ == "__main__":
     print(f"eval: {torch.cuda.max_memory_allocated()=:,}")
     if args.wandb:
         wandb.log({"max_cuda_mem_eval": round(torch.cuda.max_memory_allocated() / 1e9, 2)})
+
+
+if __name__ == "__main__":
+    main()

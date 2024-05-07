@@ -580,7 +580,7 @@ def update_outs_parallel(
     return list(chain(*out_losses_by_device))
 
 
-if __name__ == "__main__":
+def main():
     import argparse
 
     parser = argparse.ArgumentParser(add_help=True)
@@ -912,3 +912,7 @@ if __name__ == "__main__":
     print(f"eval: {torch.cuda.max_memory_allocated()=:,}")
     if args.wandb:
         wandb.log({"max_cuda_mem_eval": round(torch.cuda.max_memory_allocated() / 1e9, 2)})
+
+
+if __name__ == "__main__":
+    main()
