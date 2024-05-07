@@ -11,6 +11,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
     A version of Adam optimizer that supports custom parameter dtypes, amsgrad, lamb or rmsprop on per-group basis.
     Adam and Amsgrad based on https://github.com/pytorch/pytorch/blob/main/torch/optim/adamw.py
     Lamb flag based on https://github.com/cybertronai/pytorch-lamb/blob/master/pytorch_lamb/lamb.py
+    This was tested to match Adam and Lamb exactly for torch 2.3.0 (when compute_dtypes are all None)
 
     :param exp_avg_dtype: dtype for storing first moments; only created if betas[0] != 0; defaults to param dtype
     :param exp_avg_sq_dtype: dtype for storing second moments; only created if betas[0] != 0; defaults to param dtype
@@ -25,7 +26,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
             betas: Tuple[float] = (0.9, 0.999),
             eps: float = 1e-6,
             weight_decay: float = 0,
-            debias: bool = True,
+            debias: Optional[bool] = None,
             amsgrad: bool = False,
             lamb: bool = False,
             clamp_value: Optional[float] = None,
@@ -35,6 +36,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
             v_hat_max_dtype: Optional[torch.dtype] = None,
 
     ) -> None:
+        debias = debias if debias is not None else not lamb
         defaults = dict(
             lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, debias=debias, amsgrad=amsgrad, lamb=lamb,
             clamp_value=clamp_value, compute_dtype=compute_dtype, exp_avg_dtype=exp_avg_dtype,
@@ -44,18 +46,20 @@ class ConfigurableAdamW(torch.optim.Optimizer):
 
     def _maybe_init_state(self, param: torch.Tensor, group: dict) -> dict:
         state = self.state[param]
-        state["step"] = 0
-        if group['betas'][0] != 0:
+        if "step" not in state:
+            state["step"] = 0
+        if group["betas"][0] != 0 and "exp_avg" not in state:
             state["exp_avg"] = torch.zeros_like(
                 param, dtype=group['exp_avg_dtype'], memory_format=torch.preserve_format)
-        if group['betas'][1] != 0:
+        if group["betas"][1] not in (0, 1) and "exp_avg_sq" not in state:
             state["exp_avg_sq"] = torch.zeros_like(
                 param, dtype=group['exp_avg_sq_dtype'], memory_format=torch.preserve_format)
-        if group['amsgrad']:
+        if group["betas"] and "v_hat_max" not in state:
             state["v_hat_max"] = torch.zeros_like(
                 param, dtype=group['v_hat_max_dtype'], memory_format=torch.preserve_format)
         return state
 
+    @torch.no_grad()
     def step(self, closure: Optional[callable] = None):
         r"""Performs a single optimization step.
 
@@ -77,21 +81,28 @@ class ConfigurableAdamW(torch.optim.Optimizer):
                 state["step"] += 1
                 beta1, beta2 = group["betas"]
                 compute_dtype = group.get("compute_dtype") or p.dtype
-                grad = grad.to(compute_dtype)
+
+                if not group["lamb"] and group["weight_decay"] != 0:
+                    p.data = p.data.mul_(1 - group["lr"] * group["weight_decay"])
+                    # adam weight decay is not scaled by bias correction
 
                 # Decay the first and second moment running average coefficient
                 update = _inner_adam_step_and_update_statistics(
-                    p, grad, state.get("exp_avg", grad), state.get("exp_avg_sq", grad), state.get("v_hat_max", grad),
-                    compute_dtype, group["weight_decay"], beta1, beta2, group["amsgrad"], group["eps"]
+                    p, grad, state.get("exp_avg", p), state.get("exp_avg_sq", p), state.get("v_hat_max", p),
+                    beta1, beta2, group["eps"], group["amsgrad"], compute_dtype
                 )
+
+                if group["lamb"] and group["weight_decay"] != 0:
+                    update = update.add(p, alpha=group["weight_decay"])
+                    # lamb weight decay is later multiplied by -lr * trust_ratio * bias_correction
 
                 update_scale = -group["lr"]
                 # below: to save compute, we update scalar coefficient to account for debias/lamb/.. and multiply once
                 if group["debias"]:
                     mt_debias = 1. / (1 - beta1 ** state["step"]) if beta1 != 0 else 1
                     vt_debias = 1. / math.sqrt(1 - beta2 ** state["step"]) if beta2 != 0 else 1
-                    debias_factor = mt_debias / vt_debias
-                    update_scale *= debias_factor
+                    bias_correction = mt_debias / vt_debias
+                    update_scale *= bias_correction
 
                 if group["lamb"]:
                     weight_norm = torch.norm(p.data.to(compute_dtype))
@@ -111,12 +122,11 @@ class ConfigurableAdamW(torch.optim.Optimizer):
 
 @maybe_script
 def _inner_adam_step_and_update_statistics(
-    p: torch.Tensor, grad: torch.Tensor, exp_avg: torch.Tensor, exp_avg_sq: torch.Tensor, v_hat_max: torch.Tensor,
-    compute_dtype: torch.dtype, weight_decay: float, beta1: float, beta2: float, amsgrad: bool, eps: float
-    ):
+        p: torch.Tensor, grad: torch.Tensor, exp_avg: torch.Tensor, exp_avg_sq: torch.Tensor, v_hat_max: torch.Tensor,
+        beta1: float, beta2: float, eps: float, amsgrad: bool, compute_dtype: torch.dtype,
+):
     grad = grad.to(compute_dtype, copy=True)
     stored_exp_avg, stored_exp_avg_sq, stored_v_hat_max = exp_avg, exp_avg_sq, v_hat_max
-
     if beta1 != 0:
         exp_avg = exp_avg.to(compute_dtype) * beta1 + grad * (1 - beta1)
         stored_exp_avg.copy_(exp_avg, non_blocking=True)
@@ -124,15 +134,19 @@ def _inner_adam_step_and_update_statistics(
     else:
         update = grad.clone()
 
-    if beta2 != 0:
-        exp_avg_sq = exp_avg_sq.to(compute_dtype) * beta2 + grad.square() * (1 - beta2)
-        stored_exp_avg.copy_(exp_avg_sq, non_blocking=True)
+    if beta2 == 1:
+        pass
+    else:
+        if beta2 == 0:
+            exp_avg_sq = grad.square()
+        else:
+            exp_avg_sq = exp_avg_sq.to(compute_dtype) * beta2 + grad.square() * (1 - beta2)
+            stored_exp_avg_sq.copy_(exp_avg_sq, non_blocking=True)
+
         if amsgrad:
             exp_avg_sq = torch.maximum(exp_avg_sq, v_hat_max, out=exp_avg_sq)
             stored_v_hat_max.copy_(exp_avg_sq, non_blocking=True)
 
         update /= exp_avg_sq.sqrt().add(eps)
 
-    if weight_decay != 0:
-        update += update.add(p, alpha=weight_decay)  # note: this is later multiplied by -lr, see step
     return update
