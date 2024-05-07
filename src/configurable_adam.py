@@ -78,7 +78,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
                 grad = grad.to(compute_dtype)
 
                 # Decay the first and second moment running average coefficient
-                update = grad
+                update = grad.clone()
                 if beta1 != 0:
                     exp_avg = state["exp_avg"].to(compute_dtype)
                     exp_avg = exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
@@ -111,7 +111,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
                 if group["lamb"]:
                     weight_norm = torch.norm(p.data.to(compute_dtype))
                     update_norm = torch.norm(update) * debias_factor
-                    # note: lamb cancels-out debias unless clamp_value is st
+                    # note: lamb cancels-out debias factor unless clamp_value is set
                     if group["clamp_value"] is not None:
                         weight_norm = torch.clamp_max_(weight_norm, group["clamp_value"])
                     if weight_norm == 0 or update_norm == 0:
