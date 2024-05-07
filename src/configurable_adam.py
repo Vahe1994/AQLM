@@ -97,7 +97,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
                     update /= exp_avg_sq.sqrt().add(group["eps"])
 
                 if group["weight_decay"] != 0:
-                    update.add_(p.data, alpha=group["weight_decay"])  # note: this is later multiplied by learning rate
+                    update = update.add_(p.data, alpha=group["weight_decay"])  # note: this is later multiplied by -lr
 
                 update_scale = -group["lr"]
                 debias_factor = 1
