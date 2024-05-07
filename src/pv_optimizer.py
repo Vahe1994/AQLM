@@ -1,5 +1,6 @@
 """Module containing utilities for straight-through fine-tuning of language models"""
 import contextlib
+import dataclasses
 import random
 from collections import defaultdict
 from enum import Enum, auto
@@ -7,6 +8,7 @@ from typing import Optional, Dict, Union, Tuple, List, Any
 
 import torch
 import torch.nn as nn
+import torch.distributed
 
 from src.aq import QuantizedWeight
 from src.configurable_adam import ConfigurableAdamW
@@ -16,6 +18,12 @@ class ParameterRole(Enum):
     QUANTIZED_PARAMETER = auto()   # entire quantized weight, in a de-quantized form
     QUANTIZED_REPRESENTATION_PARAMETER = auto()  # part of quantized weight inner parameters, e.g. codebooks or scales
     NON_QUANTIZED_PARAMETER = auto()
+
+
+@dataclasses.dataclass(init=True, frozen=True)
+class YourQuantizedWeightIsInAnotherRank:
+    """This replaces quantized weights that are not held on this rank"""
+    rank: int
 
 
 class StraightThroughAdamW(ConfigurableAdamW):
@@ -140,6 +148,49 @@ class StraightThroughAdamW(ConfigurableAdamW):
             else:  # non_quantized params, e.g. biases, layernorms, etc
                 self.state[param]['grad_accumulator'] = named_dequantized_params[name]
 
+        if torch.distributed.is_initialized() and len(all_quantized_representation_parameters) > 0:
+            self._split_quantized_weights_between_ranks()
+
+    def _split_quantized_weights_between_ranks(self):
+        """Split all quantized weights between ranks in a distributed setup; uses greedy knapsack heuristic"""
+        own_rank = torch.distributed.get_rank()
+        world_size = torch.distributed.get_world_size()
+        all_quantized_weights: Dict[QuantizedWeight, List[str]] = defaultdict(list)
+        for param_group in self.param_groups:
+            for param in param_group['params']:
+                maybe_quantized_weight = self.state[param].get('quantized_weight')
+                if isinstance(maybe_quantized_weight, QuantizedWeight):
+                    all_quantized_weights[maybe_quantized_weight].append(param['name'])
+
+        # order quantized weights in a rank-agnostic way: order by (param size desc, linked param name asc)
+        def _compute_size(qw: QuantizedWeight) -> float:
+            return qw.out_features * qw.in_features * qw.estimate_nbits_per_parameter()
+        ordered_quantized_weights = sorted(
+            all_quantized_weights, key=lambda qw: (-_compute_size(qw), min(all_quantized_weights[qw]))
+        )
+        assert len(ordered_quantized_weights) > 0, "internal error: could not find any linked QuantizedWeight in state"
+
+        # split between ranks
+        quantized_weights_by_rank = [set() for _ in range(world_size)]
+        total_size_by_rank = [0 for _ in range(world_size)]
+        for quantized_weight in ordered_quantized_weights:
+            least_busy_rank = min(range(world_size), key=lambda rank: total_size_by_rank[rank])
+            total_size_by_rank[least_busy_rank] += _compute_size(quantized_weight)
+            quantized_weights_by_rank[least_busy_rank].add(quantized_weight)
+
+        print(f"Rank {own_rank} has {len(quantized_weights_by_rank[own_rank])} quantized weights {total_size_by_rank}")
+        quantized_weight_to_rank = {
+            qw: rank for rank, quantized_weights in enumerate(quantized_weights_by_rank) for qw in quantized_weights
+        }
+        for param_group in self.param_groups:
+            for param in param_group['params']:
+                maybe_quantized_weight = self.state[param].get('quantized_weight')
+                target_rank = quantized_weight_to_rank[maybe_quantized_weight]
+                if target_rank == own_rank:
+                    pass  # keep this quantized weight
+                else:
+                    self.state[param]['quantized_weight'] = YourQuantizedWeightIsInAnotherRank(target_rank)
+
     def step(self, *args, **kwargs):
         self._propagate_grads_to_optimized_parameters()
         with self._hide_extra_state():
@@ -246,3 +297,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                     self.state[param]['grad_accumulator'].grad = None
                 elif self.state[param]['grad_accumulator'].grad is not None:
                     self.state[param]['grad_accumulator'].grad.zero_()
+
+
+
+
