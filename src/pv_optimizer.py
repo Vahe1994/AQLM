@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 
 from src.aq import QuantizedWeight
+from src.configurable_adam import ConfigurableAdamW
 
 
 class ParameterRole(Enum):
@@ -17,7 +18,7 @@ class ParameterRole(Enum):
     NON_QUANTIZED_PARAMETER = auto()
 
 
-class StraightThroughAdamW(torch.optim.AdamW):
+class StraightThroughAdamW(ConfigurableAdamW):
     """
     A wrapper for a PyTorch optimizer that can perform updates on quantized and/or de-quantized parameters
     :param update_non_quantized_params: how to update parameters that are not directly linked to a QuantizedWeight.
