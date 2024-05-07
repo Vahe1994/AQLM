@@ -124,21 +124,16 @@ def _inner_adam_step_and_update_statistics(
             stored_exp_avg.copy_(exp_avg, non_blocking=True)
         update = exp_avg
     else:
-        assert exp_avg is None
         update = grad.clone()
 
     if beta2 != 0:
         exp_avg_sq = exp_avg_sq.to(compute_dtype) * beta2 + grad.square() * (1 - beta2)
         stored_exp_avg.copy_(exp_avg_sq, non_blocking=True)
         if amsgrad:
-            assert v_hat_max is not None
             exp_avg_sq = torch.maximum(exp_avg_sq, v_hat_max, out=exp_avg_sq)
             stored_v_hat_max.copy_(exp_avg_sq, non_blocking=True)
-        else:
-            assert v_hat_max is None
+
         update /= exp_avg_sq.sqrt().add(eps)
-    else:
-        assert exp_avg_sq is None
 
     if weight_decay != 0:
         update += update.add(p, alpha=weight_decay)  # note: this is later multiplied by -lr, see step
