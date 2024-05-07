@@ -105,7 +105,8 @@ def main():
 
     if args.test_model:
         # Changes model dtype, save should be before test
-        fixed_model.float()(torch.tensor([0], dtype=torch.int32).reshape(1, 1))
+        with torch.no_grad():
+            fixed_model.float()(torch.tensor([0], dtype=torch.int32).reshape(1, 1))
         print('Model is ok')
 
 
