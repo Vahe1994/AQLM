@@ -45,7 +45,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                  beam_size: int,
                  max_code_change_per_step: float,
                  stochastic_rounding_tau: float = 0,
-                 delta_decay: float = 1.0,
+                 delta_decay: float = 0,
                  dequantized_dtype: Optional[torch.dtype] = None,
                  **kwargs):
         param_groups, all_optimized_params = self._select_optimized_parameters(
@@ -197,9 +197,9 @@ class StraightThroughAdamW(ConfigurableAdamW):
                     )  # note: this updates quantized_weight.get_codes()[...] in-place
                     change_rate = torch.not_equal(prev_codes, new_codes).float().mean().item()
                     print(f"{self.state[param]['name']} change rate:", change_rate)
-                    if self.delta_decay < 1.0:
+                    if self.delta_decay != 0:
                         reference_weight[...] = (
-                            self.delta_decay * reference_weight + (1 - self.delta_decay) * quantized_weight()
+                            self.delta_decay * quantized_weight() + (1 - self.delta_decay) * reference_weight
                         )
 
     def _update_dequantized_weights(self):
