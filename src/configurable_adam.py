@@ -112,28 +112,28 @@ class ConfigurableAdamW(torch.optim.Optimizer):
 @maybe_script
 def _inner_adam_step_and_update_statistics(
     p: torch.Tensor, grad: torch.Tensor,
-    exp_avg: Optional[torch.Tensor], exp_avg_sq: Optional[torch.Tensor], v_hat_max: Optional[torch.Tensor],
+    exp_avg: torch.Tensor, exp_avg_sq: torch.Tensor, v_hat_max: torch.Tensor,
     weight_decay: float, beta1: float, beta2: float, amsgrad: bool, eps: float, compute_dtype: torch.dtype,
     ):
     grad = grad.to(compute_dtype, copy=True)
     stored_exp_avg, stored_exp_avg_sq, stored_v_hat_max = exp_avg, exp_avg_sq, v_hat_max
 
     if beta1 != 0:
-        assert exp_avg is not None
         exp_avg = exp_avg.to(compute_dtype) * beta1 + grad * (1 - beta1)
-        stored_exp_avg.copy_(exp_avg, non_blocking=True)
+        if isinstance(stored_exp_avg, torch.Tensor):
+            stored_exp_avg.copy_(exp_avg, non_blocking=True)
         update = exp_avg
     else:
         assert exp_avg is None
         update = grad.clone()
 
     if beta2 != 0:
-        assert exp_avg_sq is not None
         exp_avg_sq = exp_avg_sq.to(compute_dtype) * beta2 + grad.square() * (1 - beta2)
         stored_exp_avg.copy_(exp_avg_sq, non_blocking=True)
         if amsgrad:
             assert v_hat_max is not None
             exp_avg_sq = torch.maximum(exp_avg_sq, v_hat_max, out=exp_avg_sq)
+            stored_v_hat_max.copy_(exp_avg_sq, non_blocking=True)
         else:
             assert v_hat_max is None
         update /= exp_avg_sq.sqrt().add(eps)
@@ -141,5 +141,5 @@ def _inner_adam_step_and_update_statistics(
         assert exp_avg_sq is None
 
     if weight_decay != 0:
-        update += update.add(p.data, alpha=weight_decay)  # note: this is later multiplied by -lr, see step
+        update += update.add(p, alpha=weight_decay)  # note: this is later multiplied by -lr, see step
     return update
