@@ -111,8 +111,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
 
 @maybe_script
 def _inner_adam_step_and_update_statistics(
-    p: torch.Tensor, grad: torch.Tensor,
-    exp_avg: torch.Tensor, exp_avg_sq: torch.Tensor, v_hat_max: torch.Tensor,
+    p: torch.Tensor, grad: torch.Tensor, exp_avg: torch.Tensor, exp_avg_sq: torch.Tensor, v_hat_max: torch.Tensor,
     compute_dtype: torch.dtype, weight_decay: float, beta1: float, beta2: float, amsgrad: bool, eps: float
     ):
     grad = grad.to(compute_dtype, copy=True)
@@ -120,8 +119,7 @@ def _inner_adam_step_and_update_statistics(
 
     if beta1 != 0:
         exp_avg = exp_avg.to(compute_dtype) * beta1 + grad * (1 - beta1)
-        if isinstance(stored_exp_avg, torch.Tensor):
-            stored_exp_avg.copy_(exp_avg, non_blocking=True)
+        stored_exp_avg.copy_(exp_avg, non_blocking=True)
         update = exp_avg
     else:
         update = grad.clone()
