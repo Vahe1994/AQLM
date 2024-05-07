@@ -132,9 +132,14 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to save in safetensors format",
     )
+    parser.add_argument(
+        "--trust_remote_code",
+        action="store_true",
+        help="Whether to trust remote code",
+    )
     args = parser.parse_args()
 
-    old_config = AutoConfig.from_pretrained(args.model)
+    old_config = AutoConfig.from_pretrained(args.model, trust_remote_code=args.trust_remote_code)
     metadata = get_metadata(args.in_path)
 
     state_dict, linear_weights_not_to_quantize = get_converted_state_dict(
