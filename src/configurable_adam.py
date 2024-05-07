@@ -72,14 +72,9 @@ class ConfigurableAdamW(torch.optim.Optimizer):
                 assert not grad.is_sparse, f"{self} does not support sparse gradients"
 
                 state = self._maybe_init_state(p, group)
-                beta1, beta2 = group["betas"]
-                lamb = group["lamb"]
-                clamp_value = group["clamp_value"]
-                weight_decay = group["weight_decay"]
-                compute_dtype = group["compute_dtype"]
-
                 state["step"] += 1
-
+                beta1, beta2 = group["betas"]
+                compute_dtype = group["compute_dtype"]
                 grad = grad.to(compute_dtype)
 
                 # Decay the first and second moment running average coefficient
@@ -101,8 +96,8 @@ class ConfigurableAdamW(torch.optim.Optimizer):
                         state["v_hat_max"].copy_(exp_avg_sq)
                     update /= exp_avg_sq.sqrt().add(group["eps"])
 
-                if weight_decay != 0:
-                    update.add_(p.data, alpha=weight_decay)  # note: this update is multiplied by learning rate later
+                if group["weight_decay"] != 0:
+                    update.add_(p.data, alpha=group["weight_decay"])  # note: this is later multiplied by learning rate
 
                 update_scale = -group["lr"]
                 debias_factor = 1
@@ -113,11 +108,12 @@ class ConfigurableAdamW(torch.optim.Optimizer):
                     debias_factor = mt_debias / vt_debias
                     update_scale *= debias_factor
 
-                if lamb:
+                if group["lamb"]:
+                    weight_norm = torch.norm(p.data.to(compute_dtype))
                     update_norm = torch.norm(update) * debias_factor
-                    weight_norm = torch.norm(p.data)
-                    if clamp_value is not None:
-                        weight_norm = torch.clamp_max_(weight_norm, clamp_value)
+                    # note: lamb cancels-out debias unless clamp_value is st
+                    if group["clamp_value"] is not None:
+                        weight_norm = torch.clamp_max_(weight_norm, group["clamp_value"])
                     if weight_norm == 0 or update_norm == 0:
                         trust_ratio = 1
                     else:
