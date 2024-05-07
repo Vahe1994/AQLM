@@ -81,8 +81,8 @@ class ConfigurableAdamW(torch.optim.Optimizer):
 
                 # Decay the first and second moment running average coefficient
                 update = _inner_adam_step_and_update_statistics(
-                    p, grad, state.get("exp_avg"), state.get("exp_avg_sq"), state.get("v_hat_max"),
-                    compute_dtype, group["weight_decay"], beta1, beta2, group["amsgrad"], group["eps"]
+                    p, grad, state.get("exp_avg", grad), state.get("exp_avg_sq", grad), state.get("v_hat_max", grad),
+                    compute_dtype or p.dtype, group["weight_decay"], beta1, beta2, group["amsgrad"], group["eps"]
                 )
 
                 update_scale = -group["lr"]
@@ -113,7 +113,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
 def _inner_adam_step_and_update_statistics(
     p: torch.Tensor, grad: torch.Tensor,
     exp_avg: torch.Tensor, exp_avg_sq: torch.Tensor, v_hat_max: torch.Tensor,
-    weight_decay: float, beta1: float, beta2: float, amsgrad: bool, eps: float, compute_dtype: torch.dtype,
+    compute_dtype: torch.dtype, weight_decay: float, beta1: float, beta2: float, amsgrad: bool, eps: float
     ):
     grad = grad.to(compute_dtype, copy=True)
     stored_exp_avg, stored_exp_avg_sq, stored_v_hat_max = exp_avg, exp_avg_sq, v_hat_max
