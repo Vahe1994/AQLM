@@ -249,7 +249,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
 
     def zero_grad(self, set_to_none: bool = True, *args, **kwargs) -> None:
         super().zero_grad(set_to_none=set_to_none, *args, **kwargs)
-        for param in self.dequantized_weights_by_name.items():
+        for param in self.dequantized_weights_by_name.values():
             # dequantized weights are not in param_groups, but they still accumulate grads; reset them manually
             if set_to_none:
                 param.grad = None
