@@ -96,9 +96,9 @@ class ConfigurableAdamW(torch.optim.Optimizer):
 
                 state = self._maybe_init_state(p, group)
                 with (
-                    fetch_to_device(state.get("exp_avg", p)) as exp_avg,
-                    fetch_to_device(state.get("exp_avg_sq", p)) as exp_avg_sq,
-                    fetch_to_device(state.get("v_hat_max", p)) as v_hat_max,
+                    fetch_to_device(state.get("exp_avg", NO_DATA), p.device) as exp_avg,
+                    fetch_to_device(state.get("exp_avg_sq", NO_DATA), p.device) as exp_avg_sq,
+                    fetch_to_device(state.get("v_hat_max", NO_DATA), p.device) as v_hat_max,
                 ):
                     state["step"] += 1
                     beta1, beta2 = group["betas"]
