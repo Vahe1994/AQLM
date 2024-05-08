@@ -154,18 +154,21 @@ class StraightThroughAdamW(ConfigurableAdamW):
     @torch.no_grad()
     def _propagate_grads_to_optimized_parameters(self):
         """Ensure that every optimized parameter receives gradient"""
+        aggregated_grads_by_name = dict()
+        for name, dequantized_weight in self.dequantized_weights_by_name.grad():
+            grad = self.dequantized_weights_by_name[name].grad
+            assert grad is not None
+            if self.sharded:
+                raise NotImplementedError("TODO gather async; wait for handles after loop")
+            aggregated_grads_by_name[name] = grad
+
         for param_group in self.param_groups:
             for param in param_group['params']:
                 name = self.optimized_param_to_name[param]
                 if param_group['role'] == ParameterRole.QUANTIZED_PARAMETER:
                     assert param is self.straight_through_buffer_by_name[name]
                     # pass gradients to straight-through update buffer or (possibly offloaded) quantized parameter
-                    grad_wrt_dequantized_parameter = self.dequantized_weights_by_name[name].grad
-                    assert grad_wrt_dequantized_parameter is not None
-
-                    if self.sharded:
-                        raise NotImplementedError("TODO gather async; wait for handles after loop")
-
+                    grad_wrt_dequantized_parameter = aggregated_grads_by_name[name]
                     assert grad_wrt_dequantized_parameter.shape == param.shape
                     param.grad = grad_wrt_dequantized_parameter.to(dtype=param.dtype, device=param.device)
 
@@ -183,9 +186,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
             # if sharded, every rank propagates gradients only for the QuantizedWeight instances owned by this rank
             with torch.enable_grad():
                 for name, quantized_weight in self.quantized_weights_by_name.items():
-                    grad = self.straight_through_buffer_by_name[name].grad
-                    #TODO use not ST buffers but accumulated grads. Reason: there may be no st buffers if no V step
-                    assert grad is not None
+                    grad = aggregated_grads_by_name[name]
                     quantized_weight.forward().backward(grad)
 
     @torch.no_grad()
