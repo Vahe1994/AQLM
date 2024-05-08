@@ -76,6 +76,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
             dequantized_dtype=dequantized_dtype)
 
         super().__init__(param_groups, **kwargs)
+        self.ordered_quantized_weight_names = tuple(sorted(named_quantized_params.keys()))
         self.optimized_param_to_name = {param: name for name, param in all_optimized_params.items()}
         self.quantized_weights_by_name = {name: qw for name, qw in named_quantized_params.items()
                                           if isinstance(qw, (QuantizedWeight, YourQuantizedWeightIsInAnotherRank))}
@@ -155,13 +156,42 @@ class StraightThroughAdamW(ConfigurableAdamW):
     @torch.no_grad()
     def _propagate_grads_to_optimized_parameters(self):
         """Ensure that every optimized parameter receives gradient"""
+        async_ops = list()
         aggregated_grads_by_name = dict()
-        for name, dequantized_weight in self.dequantized_weights_by_name.items():
+        for name in self.ordered_quantized_weight_names:
             grad = self.dequantized_weights_by_name[name].grad
             assert grad is not None
-            if self.sharded:
-                raise NotImplementedError("TODO gather async; wait for handles after loop")
-            aggregated_grads_by_name[name] = grad
+            if not self.sharded:
+                aggregated_grads_by_name[name] = grad
+            else:
+                quantized_weight = self.quantized_weights_by_name[name]
+                if isinstance(quantized_weight, QuantizedWeight):
+                    destination_rank = torch.distributed.get_rank()
+                    shard_sizes: Sequence[Tuple[int, ...]] = self.sharded_param_sizes_by_rank[name]
+                    shard_numels = tuple(torch.Size(shard_dims).numel() for shard_dims in shard_sizes)
+                    # TODO in actuality we dont need shard sizes, just the numels. Modify sharded_param_sizes to contain numels directly.
+                    combined_grad_buffer = torch.full(
+                        [quantized_weight.out_features, quantized_weight.in_features], fill_value=torch.nan,
+                        dtype=grad.dtype, device=grad.device)
+                    assert sum(shard_numels) == combined_grad_buffer.numel()
+                    gather_buffers = combined_grad_buffer.view(-1).split_with_sizes(shard_numels)
+                    assert all(part.untyped_storage().data_ptr() == combined_grad_buffer.untyped_storage().data_ptr()
+                               for part in gather_buffers)
+                    aggregated_grads_by_name[name] = combined_grad_buffer
+                else:
+                    assert isinstance(quantized_weight, YourQuantizedWeightIsInAnotherRank)
+                    destination_rank = self.quantized_weights_by_name[name].rank
+                    gather_buffers = None
+
+                async_ops.append(
+                    torch.distributed.gather(grad.flatten(), gather_buffers, dst=destination_rank, async_op=True)
+                )
+
+        for handle in async_ops:
+            handle.wait()
+        if self.sharded:
+            for name, grad in aggregated_grads_by_name.values():
+                print('DEBUG aggregated grads:', name, grad.norm())
 
         for param_group in self.param_groups:
             for param in param_group['params']:
@@ -242,16 +272,32 @@ class StraightThroughAdamW(ConfigurableAdamW):
     @torch.no_grad()
     def _update_dequantized_weights(self):
         """Assign dequantized weight buffers to latest quantized weights after codebook/scale/code updates"""
-
-        for name in self.dequantized_weights_by_name.keys():
+        async_ops = list()
+        for name in self.ordered_quantized_weight_names:
             quantized_weight = self.quantized_weights_by_name[name]
             new_dequantized_weight = quantized_weight()
+            output_buffer = self.dequantized_weights_by_name[name]
+            torch.fill_(output_buffer, float('nan'))  # TODO remove after you are sure it works
 
-            if self.sharded:
-                raise NotImplementedError()#TODO
+            if not self.sharded:
+                output_buffer[...] = new_dequantized_weight
+            else:
+                if isinstance(quantized_weight, QuantizedWeight):
+                    source_rank = torch.distributed.get_rank()
+                    shard_sizes: Sequence[Tuple[int, ...]] = self.sharded_param_sizes_by_rank[name]
+                    shard_numels = tuple(torch.Size(shard_dims).numel() for shard_dims in shard_sizes)
+                    assert sum(shard_numels) == new_dequantized_weight.numel()
+                    scatter_list = new_dequantized_weight.flatten().split_with_sizes(shard_numels)
+                else:
+                    assert isinstance(quantized_weight, YourQuantizedWeightIsInAnotherRank)
+                    source_rank = self.quantized_weights_by_name[name].rank
+                    scatter_list = None
 
-            assert self.dequantized_weights_by_name[name].shape == new_dequantized_weight.shape
-            self.dequantized_weights_by_name[name][...] = new_dequantized_weight
+                async_ops.append(
+                    torch.distributed.scatter(output_buffer.flatten(), scatter_list, src=source_rank, async_op=True)
+                )
+        for handle in async_ops:
+            handle.wait()
 
     def zero_grad(self, set_to_none: bool = True, *args, **kwargs) -> None:
         super().zero_grad(set_to_none=set_to_none, *args, **kwargs)
