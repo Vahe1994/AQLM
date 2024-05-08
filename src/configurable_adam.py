@@ -6,6 +6,7 @@ from typing import Tuple, Iterable, Union, Optional
 
 from src.aq_ops import maybe_script
 
+NO_DATA = torch.empty(0)
 
 class ConfigurableAdamW(torch.optim.Optimizer):
     r"""
@@ -180,4 +181,5 @@ def fetch_to_device(x: torch.Tensor, device: torch.device):
     try:
         yield fetched
     finally:
-        x.copy_(fetched, non_blocking=True)
+        if fetched is not x:
+            x.copy_(fetched, non_blocking=True)
