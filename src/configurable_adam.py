@@ -50,7 +50,6 @@ class ConfigurableAdamW(torch.optim.Optimizer):
         super().__init__(params, defaults)
 
     def _maybe_init_state(self, param: torch.Tensor, group: dict) -> dict:
-        group["state_offload_device"]
         state = self.state[param]
         if "step" not in state:
             state["step"] = 0
