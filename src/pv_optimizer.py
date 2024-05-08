@@ -232,7 +232,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         if self.delta_decay != 1:
                             _dequantized_weight = quantized_weight()
                             delta_norm = (reference_weight - _dequantized_weight).norm().item()
-                            relative_error = delta_norm / _dequantized_weight.norm().item()
+                            relative_error = delta_norm / max(_dequantized_weight.norm().item(), 1e-9)
                             maybe_delta_msg = (f"\t||quantized_weight - optimized_weight|| / ||quantized_weight||"
                                                f" = {relative_error}\n")
                         print(end=f"Updated codes for {name}{maybe_distributed_msg}:\n\tFraction of weights with at "
