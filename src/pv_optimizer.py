@@ -228,7 +228,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         maybe_delta_msg = ""
                         if self.delta_decay != 1:
                             delta_norm = (reference_weight - quantized_weight()).norm().item()
-                            maybe_delta_msg = f"\t||quantized_weight - straight_through_buffer||_2 = {delta_norm}"
+                            maybe_delta_msg = f"\t||quantized_weight - straight_through_buffer||_2 = {delta_norm}\n"
                         print(end=f"Updated codes for {name}{maybe_distributed_msg}:\n"
                                   f"\t{code_change_rate} weights changed at least one code {maybe_limit_msg}\n"
                                   f"{maybe_individual_change_msg}{maybe_delta_msg}")
