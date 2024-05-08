@@ -184,6 +184,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
             with torch.enable_grad():
                 for name, quantized_weight in self.quantized_weights_by_name.items():
                     grad = self.straight_through_buffer_by_name[name].grad
+                    #TODO use not ST buffers but accumulated grads. Reason: there may be no st buffers if no V step
                     assert grad is not None
                     quantized_weight.forward().backward(grad)
 
@@ -245,7 +246,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
             new_dequantized_weight = quantized_weight()
 
             if self.sharded:
-                raise NotImplementedError()
+                raise NotImplementedError()#TODO
 
             assert self.dequantized_weights_by_name[name].shape == new_dequantized_weight.shape
             self.dequantized_weights_by_name[name][...] = new_dequantized_weight
