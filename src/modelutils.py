@@ -288,7 +288,7 @@ def create_dequantized_model(
 ):
     """
     Create a version of the model where all QuanizedWeight and derivative layers are de-quantized and cast to dtype.
-    :param model: model to be dequantzied (out-of-place)
+    :param model: model to be dequantized (out-of-place)
     :param reuse_non_quantized: if True, any non-quantized parameters and buffers are reused for de-quantized model;
         otherwise (default) they are copied and linked in the returned dictionary
     :returns: a model (converted out-of-place) and a mapping (dict) from de-quantized to master parameters
