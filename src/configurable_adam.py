@@ -95,12 +95,12 @@ class ConfigurableAdamW(torch.optim.Optimizer):
                 grad = p.grad.data
                 assert not grad.is_sparse, f"{self} does not support sparse gradients"
 
+                state = self._maybe_init_state(p, group)
                 with (
                     fetch_to_device(state.get("exp_avg", p)) as exp_avg,
                     fetch_to_device(state.get("exp_avg_sq", p)) as exp_avg_sq,
                     fetch_to_device(state.get("v_hat_max", p)) as v_hat_max,
                 ):
-                    state = self._maybe_init_state(p, group)
                     state["step"] += 1
                     beta1, beta2 = group["betas"]
                     compute_dtype = group.get("compute_dtype") or p.dtype
