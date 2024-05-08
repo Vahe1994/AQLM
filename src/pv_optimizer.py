@@ -227,8 +227,11 @@ class StraightThroughAdamW(ConfigurableAdamW):
                             maybe_individual_change_msg = f"\tAverage individual code change {subcode_change}\n"
                         maybe_delta_msg = ""
                         if self.delta_decay != 1:
-                            delta_norm = (reference_weight - quantized_weight()).norm().item()
-                            maybe_delta_msg = f"\t||quantized_weight - optimized_weight||_2 = {delta_norm}\n"
+                            _dequantized_weight = quantized_weight()
+                            delta_norm = (reference_weight - _dequantized_weight).norm().item()
+                            relative_error = delta_norm / _dequantized_weight.norm().item()
+                            maybe_delta_msg = (f"\t||quantized_weight - optimized_weight|| / ||quantized_weight||"
+                                               f" = {relative_error}\n")
                         print(end=f"Updated codes for {name}{maybe_distributed_msg}:\n"
                                   f"\t{code_change_rate} weights changed at least one code {maybe_limit_msg}\n"
                                   f"{maybe_individual_change_msg}{maybe_delta_msg}")
