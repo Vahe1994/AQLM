@@ -156,7 +156,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
     def _propagate_grads_to_optimized_parameters(self):
         """Ensure that every optimized parameter receives gradient"""
         aggregated_grads_by_name = dict()
-        for name, dequantized_weight in self.dequantized_weights_by_name.grad():
+        for name, dequantized_weight in self.dequantized_weights_by_name.items():
             grad = self.dequantized_weights_by_name[name].grad
             assert grad is not None
             if self.sharded:
