@@ -224,10 +224,10 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         maybe_limit_msg = ""
                         if self.max_code_change_per_step is not None:
                             maybe_limit_msg = f"(limit {self.max_code_change_per_step})"
-                        maybe_individual_change_msg = ""
+                        maybe_individual_msg = ""
                         if quantized_weight.num_codebooks > 0:
                             subcode_change = torch.not_equal(prev_codes, new_codes).float().mean().item()
-                            maybe_individual_change_msg = f"\tAverage individual code change {subcode_change}\n"
+                            maybe_individual_msg = f" | individual code change {subcode_change}\n"
                         maybe_delta_msg = ""
                         if self.delta_decay != 1:
                             _dequantized_weight = quantized_weight()
@@ -235,9 +235,9 @@ class StraightThroughAdamW(ConfigurableAdamW):
                             relative_error = delta_norm / _dequantized_weight.norm().item()
                             maybe_delta_msg = (f"\t||quantized_weight - optimized_weight|| / ||quantized_weight||"
                                                f" = {relative_error}\n")
-                        print(end=f"Updated codes for {name}{maybe_distributed_msg}:\n"
-                                  f"\t{code_change_rate} weights changed at least one code {maybe_limit_msg}\n"
-                                  f"{maybe_individual_change_msg}{maybe_delta_msg}")
+                        print(end=f"Updated codes for {name}{maybe_distributed_msg}:\n\tFraction of weights with at "
+                                  f"least one code change: {code_change_rate} {maybe_limit_msg}{maybe_individual_msg}\n"
+                                  f"{maybe_delta_msg}")
 
     @torch.no_grad()
     def _update_dequantized_weights(self):
