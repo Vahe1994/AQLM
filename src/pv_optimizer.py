@@ -80,7 +80,8 @@ class StraightThroughAdamW(ConfigurableAdamW):
         self.quantized_weights_by_name = {name: qw for name, qw in named_quantized_params.items()
                                           if isinstance(qw, (QuantizedWeight, YourQuantizedWeightIsInAnotherRank))}
         self.straight_through_buffer_by_name = {name: all_optimized_params[name]
-                                                for name in self.quantized_weights_by_name.keys()}
+                                                for name in self.quantized_weights_by_name.keys()
+                                                if name in all_optimized_params}
         self.dequantized_weights_by_name = {name: param for name, param in named_dequantized_params.items()
                                             if name in named_quantized_params}
         if sharded:
