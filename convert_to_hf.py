@@ -137,10 +137,24 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to trust remote code",
     )
+    parser.add_argument(
+        "--load_model",
+        action="store_true",
+        help="Whether to load model",
+    )
     args = parser.parse_args()
 
     old_config = AutoConfig.from_pretrained(args.model, trust_remote_code=args.trust_remote_code)
     metadata = get_metadata(args.in_path)
+
+    # load dummy model
+    if args.load_model:
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model, 
+            trust_remote_code=args.trust_remote_code, 
+            low_cpu_mem_usage=True,
+            torch_dtype=torch.float16
+        )
 
     state_dict, linear_weights_not_to_quantize = get_converted_state_dict(
         old_config, metadata["nbits_per_codebook"], args.in_path
