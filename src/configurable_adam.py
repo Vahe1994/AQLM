@@ -1,4 +1,5 @@
 import math
+from contextlib import contextmanager
 
 import torch
 from typing import Tuple, Iterable, Union, Optional
@@ -34,29 +35,45 @@ class ConfigurableAdamW(torch.optim.Optimizer):
             exp_avg_dtype: Optional[torch.dtype] = None,
             exp_avg_sq_dtype: Optional[torch.dtype] = None,
             v_hat_max_dtype: Optional[torch.dtype] = None,
-
+            exp_avg_device: torch.device = None,
+            exp_avg_sq_device: torch.device = None,
+            v_hat_max_device: torch.device = None,
     ) -> None:
         debias = debias if debias is not None else not lamb
         defaults = dict(
             lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, debias=debias, amsgrad=amsgrad, lamb=lamb,
             clamp_value=clamp_value, compute_dtype=compute_dtype, exp_avg_dtype=exp_avg_dtype,
-            exp_avg_sq_dtype=exp_avg_sq_dtype, v_hat_max_dtype=v_hat_max_dtype,
+            exp_avg_sq_dtype=exp_avg_sq_dtype, v_hat_max_dtype=v_hat_max_dtype, exp_avg_device=exp_avg_device,
+            exp_avg_sq_device=exp_avg_sq_device, v_hat_max_device=v_hat_max_device,
         )
         super().__init__(params, defaults)
 
     def _maybe_init_state(self, param: torch.Tensor, group: dict) -> dict:
+        group["state_offload_device"]
         state = self.state[param]
         if "step" not in state:
             state["step"] = 0
         if group["betas"][0] != 0 and "exp_avg" not in state:
+            pin_memory = group["exp_avg_device"] == torch.device("cpu")
             state["exp_avg"] = torch.zeros_like(
-                param, dtype=group['exp_avg_dtype'], memory_format=torch.preserve_format)
+                param, dtype=group['exp_avg_dtype'],
+                memory_format=torch.preserve_format,
+                device=group["exp_avg_device"],
+                pin_memory=pin_memory)
         if group["betas"][1] not in (0, 1) and "exp_avg_sq" not in state:
+            pin_memory = group["exp_avg_sq_device"] == torch.device("cpu")
             state["exp_avg_sq"] = torch.zeros_like(
-                param, dtype=group['exp_avg_sq_dtype'], memory_format=torch.preserve_format)
+                param, dtype=group['exp_avg_sq_dtype'],
+                memory_format=torch.preserve_format,
+                device=group["exp_avg_sq_device"],
+                pin_memory=pin_memory)
         if group["betas"] and "v_hat_max" not in state:
+            pin_memory = group["v_hat_max_device"] == torch.device("cpu")
             state["v_hat_max"] = torch.zeros_like(
-                param, dtype=group['v_hat_max_dtype'], memory_format=torch.preserve_format)
+                param, dtype=group['v_hat_max_dtype'],
+                memory_format=torch.preserve_format,
+                device=group["v_hat_max_device"],
+                pin_memory=pin_memory)
         return state
 
     @torch.no_grad()
@@ -77,46 +94,51 @@ class ConfigurableAdamW(torch.optim.Optimizer):
                 grad = p.grad.data
                 assert not grad.is_sparse, f"{self} does not support sparse gradients"
 
-                state = self._maybe_init_state(p, group)
-                state["step"] += 1
-                beta1, beta2 = group["betas"]
-                compute_dtype = group.get("compute_dtype") or p.dtype
+                with (
+                    fetch_to_device(state.get("exp_avg", p)) as exp_avg,
+                    fetch_to_device(state.get("exp_avg_sq", p)) as exp_avg_sq,
+                    fetch_to_device(state.get("v_hat_max", p)) as v_hat_max,
+                ):
+                    state = self._maybe_init_state(p, group)
+                    state["step"] += 1
+                    beta1, beta2 = group["betas"]
+                    compute_dtype = group.get("compute_dtype") or p.dtype
 
-                if not group["lamb"] and group["weight_decay"] != 0:
-                    p.data = p.data.mul_(1 - group["lr"] * group["weight_decay"])
-                    # adam weight decay is not scaled by bias correction
+                    if not group["lamb"] and group["weight_decay"] != 0:
+                        p.data = p.data.mul_(1 - group["lr"] * group["weight_decay"])
+                        # adam weight decay is not scaled by bias correction
 
-                # Decay the first and second moment running average coefficient
-                update = _inner_adam_step_and_update_statistics(
-                    p, grad, state.get("exp_avg", p), state.get("exp_avg_sq", p), state.get("v_hat_max", p),
-                    beta1, beta2, group["eps"], group["amsgrad"], compute_dtype
-                )
+                    # Decay the first and second moment running average coefficient
+                    update = _inner_adam_step_and_update_statistics(
+                        p, grad, exp_avg, exp_avg_sq, v_hat_max,
+                        beta1, beta2, group["eps"], group["amsgrad"], compute_dtype
+                    )
 
-                if group["lamb"] and group["weight_decay"] != 0:
-                    update = update.add(p, alpha=group["weight_decay"])
-                    # lamb weight decay is later multiplied by -lr * trust_ratio * bias_correction
+                    if group["lamb"] and group["weight_decay"] != 0:
+                        update = update.add(p, alpha=group["weight_decay"])
+                        # lamb weight decay is later multiplied by -lr * trust_ratio * bias_correction
 
-                update_scale = -group["lr"]
-                # below: to save compute, we update scalar coefficient to account for debias/lamb/.. and multiply once
-                if group["debias"]:
-                    mt_debias = 1. / (1 - beta1 ** state["step"]) if beta1 != 0 else 1
-                    vt_debias = 1. / math.sqrt(1 - beta2 ** state["step"]) if beta2 != 0 else 1
-                    bias_correction = mt_debias / vt_debias
-                    update_scale *= bias_correction
+                    update_scale = -group["lr"]
+                    # below: to save compute, we update scalar coefficient to account for debias/lamb/.. and multiply once
+                    if group["debias"]:
+                        mt_debias = 1. / (1 - beta1 ** state["step"]) if beta1 != 0 else 1
+                        vt_debias = 1. / math.sqrt(1 - beta2 ** state["step"]) if beta2 != 0 else 1
+                        bias_correction = mt_debias / vt_debias
+                        update_scale *= bias_correction
 
-                if group["lamb"]:
-                    weight_norm = torch.norm(p.data.to(compute_dtype))
-                    update_norm = torch.norm(update)
-                    # note: lamb does not count debiasing when computing trust ratio
-                    if group["clamp_value"] is not None:
-                        weight_norm = torch.clamp_max_(weight_norm, group["clamp_value"])
-                    if weight_norm == 0 or update_norm == 0:
-                        trust_ratio = 1
-                    else:
-                        trust_ratio = weight_norm / update_norm
-                    update_scale *= trust_ratio
+                    if group["lamb"]:
+                        weight_norm = torch.norm(p.data.to(compute_dtype))
+                        update_norm = torch.norm(update)
+                        # note: lamb does not count debiasing when computing trust ratio
+                        if group["clamp_value"] is not None:
+                            weight_norm = torch.clamp_max_(weight_norm, group["clamp_value"])
+                        if weight_norm == 0 or update_norm == 0:
+                            trust_ratio = 1
+                        else:
+                            trust_ratio = weight_norm / update_norm
+                        update_scale *= trust_ratio
 
-                p.data.add_(update, alpha=update_scale)
+                    p.data.add_(update, alpha=update_scale)
         return loss
 
 
@@ -150,3 +172,12 @@ def _inner_adam_step_and_update_statistics(
         update /= exp_avg_sq.sqrt().add(eps)
 
     return update
+
+
+@contextmanager
+def fetch_to_device(x: torch.Tensor, device: torch.device):
+    fetched = x.to(device, non_blocking=True)
+    try:
+        yield fetched
+    finally:
+        x.copy_(fetched, non_blocking=True)
