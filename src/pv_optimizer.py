@@ -170,6 +170,8 @@ class StraightThroughAdamW(ConfigurableAdamW):
                 aggregated_grads_by_name[name] = grad
             else:
                 quantized_weight = self.quantized_weights_by_name[name]
+                own_rank = torch.distributed.get_rank()
+                world_size = torch.distributed.get_world_size()
                 if isinstance(quantized_weight, QuantizedWeight):
                     destination_rank = torch.distributed.get_rank()
                     shard_sizes: Sequence[Tuple[int, ...]] = self.sharded_param_sizes_by_rank[name]
@@ -182,21 +184,16 @@ class StraightThroughAdamW(ConfigurableAdamW):
                     gather_buffers = list(combined_grad_buffer.view(-1).split_with_sizes(shard_numels))
                     assert all(part.untyped_storage().data_ptr() == combined_grad_buffer.untyped_storage().data_ptr()
                                for part in gather_buffers)
+                    for i in range(world_size):
+                        if i != own_rank:
+                            async_ops.append(torch.distributed.irecv(gather_buffers[i], src=i))
+                        else:
+                            gather_buffers[i].copy_(grad)
                     aggregated_grads_by_name[name] = combined_grad_buffer
-                    gather_buffers[0] = torch.randn(123, dtype=gather_buffers[0].dtype, device=gather_buffers[0].device)#TODO REMOVE
                 else:
                     assert isinstance(quantized_weight, YourQuantizedWeightIsInAnotherRank)
                     destination_rank = self.quantized_weights_by_name[name].rank
-                    gather_buffers = None
-
-                # async_ops.append( TODO
-                #     torch.distributed.gather(grad.flatten(), gather_buffers, dst=destination_rank, async_op=True)
-                # )
-                print(f"rank{torch.distributed.get_rank()} - grad {grad.shape}, gather_buffers {[x.shape for x in gather_buffers] if gather_buffers else None} | dst={destination_rank}")
-                torch.distributed.barrier()
-                torch.distributed.gather(grad.flatten(), gather_buffers, dst=destination_rank)
-                torch.distributed.barrier()
-                exit()
+                    async_ops.append(torch.distributed.isend(grad.flatten(), destination_rank))
 
         for handle in async_ops:
             handle.wait()
