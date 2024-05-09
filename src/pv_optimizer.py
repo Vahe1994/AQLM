@@ -184,7 +184,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         [quantized_weight.out_features, quantized_weight.in_features], fill_value=torch.nan,
                         dtype=grad.dtype, device=grad.device)
                     assert sum(shard_numels) == combined_grad_buffer.numel()
-                    gather_buffers = combined_grad_buffer.view(-1).split_with_sizes(shard_numels)
+                    gather_buffers = list(combined_grad_buffer.view(-1).split_with_sizes(shard_numels))
                     assert all(part.untyped_storage().data_ptr() == combined_grad_buffer.untyped_storage().data_ptr()
                                for part in gather_buffers)
                     aggregated_grads_by_name[name] = combined_grad_buffer
