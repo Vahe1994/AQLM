@@ -90,6 +90,13 @@ def add_model_args(parser: argparse.ArgumentParser):
         "--attn_implementation", type=str, default=None,
         help="Attention implementation for both teacher and student models: eager, sdpa, or flash_attention_2"
     )
+    parser.add_argument(
+        "--limit_parallel_inits",
+        type=int,
+        default=1,
+        help="this many ranks (per host) initialize their model in parallel. This parameter is meant to save host RAM.",
+    )
+
 
 
 def add_finetuning_args(parser: argparse.ArgumentParser):
@@ -155,9 +162,8 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         '--verbose_optimizer',
         action="store_true",
-        help="If set, use Lamb (adam with trust ratio) for both continuous and discrete parameters",
+        help="If set, the optimizer will print beam search results, tensors norms, etc",
     )
-
     parser.add_argument(
         "--batch_size",
         type=int,
@@ -600,7 +606,7 @@ def main():
         ) for dataset_name in args.eval_datasets
     }
 
-    with one_rank_at_a_time(local=True):
+    with one_rank_at_a_time(local=True, group_size=args.limit_parallel_inits):
         base_model = load_base_model(args, device)
         dequantized_model, named_quantized_params = load_dequantized_model(args, device)
         if rank == 0:
@@ -612,8 +618,8 @@ def main():
                                     for name, param in dequantized_model.named_parameters()}
         assert all(name in named_dequantized_params for name in named_quantized_params)
 
-    for quantized_weight in named_quantized_params.values():
-        quantized_weight.to(device)
+        for quantized_weight in named_quantized_params.values():
+            quantized_weight.to(device)
 
     optimizer = StraightThroughAdamW(
         named_dequantized_params=named_dequantized_params,

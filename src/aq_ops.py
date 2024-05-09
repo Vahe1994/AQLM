@@ -170,14 +170,19 @@ class IntCodes(nn.Module):
 
 
 @contextlib.contextmanager
-def one_rank_at_a_time(local: bool):
+def one_rank_at_a_time(local: bool = False, group_size: int = 1):
+    """
+    In distributed setting, let only group_size processes enter at a time
+    :param local: if True, the limit is enforced within each host, i.e. distributed hosts can act concurrently
+    :param group_size: if more than one is specified,
+    """
     distributed = torch.distributed.is_initialized()
     rank = int(os.environ.get("LOCAL_RANK" if local else "RANK", 0)) if distributed else 0
     world_size = int(os.environ.get("LOCAL_WORLD_SIZE" if local else "WORLD_SIZE", 0)) if distributed else 1
     if distributed:
         torch.distributed.barrier()
-    for current_rank in range(world_size):
-        if current_rank == rank:
+    for current_group_index in range(world_size // group_size):
+        if current_group_index == rank // group_size:
             yield
         if distributed:
             torch.distributed.barrier()
