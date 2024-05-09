@@ -97,20 +97,56 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         "--lr",
         type=float,
         default=1e-5,
-        help="finetuning learning rate",
+        help="finetuning learning rate for continuous params",
     )
     parser.add_argument(
         "--adam_beta1",
         type=float,
         default=0.90,
-        help="Adam beta1",
+        help="Adam beta1 for continuous params",
     )
     parser.add_argument(
         "--adam_beta2",
         type=float,
         default=0.98,
-        help="Adam beta2",
+        help="Adam beta2 for continuous params",
     )
+
+    parser.add_argument(
+        "--code_lr",
+        type=float,
+        default=1e-2,
+        help="finetuning learning rate for discrete codes",
+    )
+    parser.add_argument(
+        "--code_beta1",
+        type=float,
+        default=0.0,
+        help="Adam beta1 for discrete params",
+    )
+    parser.add_argument(
+        "--code_beta2",
+        type=float,
+        default=0.98,
+        help="Adam beta2 for discrete params",
+    )
+    parser.add_argument(
+        "--max_code_change_per_step",
+        type=float,
+        default=1e-3,
+        help="Maximum number of code groups that can be changed during one update to codes. "
+             "This constraint is enforced on a per-tensor level. If the weight is represented with multiple codes, "
+             "changing any of the codes will count towards the limit. If more than this many code groups have changed, "
+             "the algorithm will rollback the changes with least update norm until the constraint is satisfied.",
+    )
+
+
+    parser.add_argument(
+        '--lamb',
+        action="store_true",
+        help="If set, use Lamb (adam with trust ratio) for both continuous and discrete parameters",
+    )
+
     parser.add_argument(
         "--batch_size",
         type=int,
@@ -564,14 +600,14 @@ def main():
         named_dequantized_params=dict(dequantized_model.named_parameters()),
         named_quantized_params=named_quantized_params,
         update_codes=dict(
-            lr=args.code_lr, betas=args.code_betas, lamb=args.lamb,
+            lr=args.code_lr, betas=(args.code_beta1, args.code_beta2), lamb=args.lamb,
             compute_dtype=args.master_dtype, exp_avg_dtype=torch.float16, exp_avg_sq_dtype=torch.bfloat16), #TODO set dtype in args
         update_codebooks_and_scales=dict(
-            lr=args.codebook_lr, betas=args.codebook_betas, lamb=args.lamb,
+            lr=args.lr, betas=(args.adam_beta1, args.adam_beta2), lamb=args.lamb,
             compute_dtype=args.master_dtype,
         ),
         update_non_quantized_parameters=dict(
-            lr=args.codebook_lr, betas=args.codebook_betas, lamb=True, debias=True,
+            lr=args.lr, betas=(args.adam_beta1, args.adam_beta2), lamb=args.lamb,
             compute_dtype=args.master_dtype,
         ),
         max_code_change_per_step=args.max_code_change_per_step,
