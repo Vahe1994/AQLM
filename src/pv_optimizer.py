@@ -359,13 +359,9 @@ def _split_quantized_weights_between_ranks(quantized_weights: Dict[str, Quantize
         total_size_by_rank[least_busy_rank] += _compute_size(quantized_weight)
         quantized_weight_to_rank[quantized_weight] = least_busy_rank
 
-    with one_rank_at_a_time(True):
-        print('checksum input for rank', own_rank, '=',
-              tuple((min(all_quantized_weights[qw]), quantized_weight_to_rank[qw], _compute_size(qw))
-                               for qw in ordered_quantized_weights))
-    checksum: int = hash(tuple((min(all_quantized_weights[qw]), quantized_weight_to_rank[qw], _compute_size(qw))
-                               for qw in ordered_quantized_weights))
-    checksums = [0 for _ in range(world_size)]
+    checksum = tuple((min(all_quantized_weights[qw]), quantized_weight_to_rank[qw], _compute_size(qw))
+                     for qw in ordered_quantized_weights)
+    checksums = [() for _ in range(world_size)]
     torch.distributed.all_gather_object(checksums, checksum)
     assert checksums[own_rank] == checksum, (checksums, own_rank, checksum)
     assert all(other_checksum == checksum for other_checksum in checksums), checksums
