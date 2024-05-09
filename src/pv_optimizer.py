@@ -62,7 +62,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                  delta_decay: float = 0,
                  dequantized_dtype: Optional[torch.dtype] = None,
                  sharded: bool = False,
-                 verbose: bool = True,
+                 verbose: bool = False,
                  **kwargs):
         self.sharded = sharded
         assert all(name in named_dequantized_params for name in named_quantized_params), "param names mismatch"
@@ -279,7 +279,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                                                f" = {relative_error}\n")
                         print(end=f"Updated codes for {name}{maybe_distributed_msg}:\n\tFraction of weights with at "
                                   f"least one code change: {code_change_rate} {maybe_limit_msg}{maybe_individual_msg}\n"
-                                  f"{maybe_delta_msg}")
+                                  f"{maybe_delta_msg}\n")
 
     @torch.no_grad()
     def _update_dequantized_weights(self):
