@@ -160,6 +160,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
         async_ops = list()
         aggregated_grads_by_name = dict()
         for name in self.ordered_quantized_weight_names:
+            print(self.dequantized_weights_by_name)
             grad = self.dequantized_weights_by_name[name].grad
             assert grad is not None
             if not self.sharded:
