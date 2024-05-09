@@ -666,6 +666,11 @@ def main():
                     (loss / grad_accumulation_steps).backward()
             else:
                 (loss / grad_accumulation_steps).backward()
+                with one_rank_at_a_time(True):
+                    print("After backward on rank", rank)
+                    for name, param in dequantized_model.named_parameters():
+                        print(name, 'requires_grad:', param.requires_grad, 'grad is not None:', param.grad is not None)
+                    print(flush=True)
                 optimizer.step()
                 optimizer.zero_grad()
                 metadata['grad_steps_accumulated'] = 0
