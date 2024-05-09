@@ -150,13 +150,13 @@ class StraightThroughAdamW(ConfigurableAdamW):
         return param_groups, all_optimized_params
 
     def step(self, *args, **kwargs):
-        with print_runtime_stats("_propagate_grads_to_optimized_parameters"):
+        with print_runtime_stats("_propagate_grads_to_optimized_parameters", enabled=self.verbose):
             self._propagate_grads_to_optimized_parameters()
-        with print_runtime_stats("super().step"):
+        with print_runtime_stats("super().step", enabled=self.verbose):
             original_output = super().step(*args, **kwargs)
-        with print_runtime_stats("_optimize_quantized_weights"):
+        with print_runtime_stats("_optimize_quantized_weights", enabled=self.verbose):
             self._optimize_quantized_weights()
-        with print_runtime_stats("_update_dequantized_weights"):
+        with print_runtime_stats("_update_dequantized_weights", enabled=self.verbose):
             self._update_dequantized_weights()
         return original_output
 
