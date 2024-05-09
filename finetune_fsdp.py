@@ -602,7 +602,8 @@ def main():
             print(dequantized_model)
             for name, param in dequantized_model.named_parameters():
                 print(name, param.shape, param.dtype)
-        named_dequantized_params = dict(dequantized_model._fsdp_wrapped_module.named_parameters())
+        named_dequantized_params = {name.replace('._fsdp_wrapped_module', ''): param
+                                    for name, param in dequantized_model.named_parameters()}
         print('named_dequantized_params:', sorted(named_dequantized_params))
         print('named_quantized_params:', sorted(named_quantized_params))
         assert all(name in named_dequantized_params for name in named_quantized_params)
