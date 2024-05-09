@@ -305,8 +305,8 @@ def evaluate_perplexity(
     num_padding_sequences = -len(inps) % world_size
     inps.extend([inps[-1]] * num_padding_sequences)
 
-    total_nll = torch.tensor(0.0, dtype=torch.float64, device=device)
-    total_tokens = torch.tensor(0.0, dtype=torch.float64, device=device)
+    total_nll_and_tokens = torch.tensor([0.0, 0.0], dtype=torch.float64, device=device)
+    total_nll, total_tokens = total_nll_and_tokens[0], total_nll_and_tokens[1]
 
     for sequence_index, input_ids in enumerate(tqdm(inps, desc="Evaluating perplexity") if rank == 0 else inps):
         if sequence_index % world_size != rank:
@@ -324,6 +324,6 @@ def evaluate_perplexity(
             total_tokens += shift_labels.numel()
 
     if world_size > 1:
-        torch.distributed.all_reduce_coalesced([total_nll, total_tokens], op=torch.distributed.ReduceOp.SUM)
+        torch.distributed.all_reduce(total_nll_and_tokens, op=torch.distributed.ReduceOp.SUM)
     ppl = torch.exp(total_nll / total_tokens)
     return ppl.item()

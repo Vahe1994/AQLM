@@ -688,11 +688,12 @@ def main():
                 metadata['total_optimizer_steps'] += 1
 
                 if args.print_every_steps and metadata['total_optimizer_steps'] % args.print_every_steps == 0:
-                    loss_numerator = torch.tensor([metadata['loss_numerator']], dtype=torch.float64, device=device)
-                    loss_denominator = torch.tensor([metadata['loss_denominator']], dtype=torch.float64, device=device)
-                    torch.distributed.all_reduce_coalesced(
-                        [loss_numerator, loss_denominator], op=torch.distributed.ReduceOp.SUM)
-                    metadata['aggregated_loss'] = loss_numerator.item() / loss_denominator.item()
+                    loss_numerator_and_denominator = torch.tensor(
+                        [metadata['loss_numerator'], metadata['loss_denominator']], dtype=torch.float64, device=device)
+
+                    torch.distributed.all_reduce(loss_numerator_and_denominator, op=torch.distributed.ReduceOp.SUM)
+                    loss_numerator, loss_denominator = loss_numerator_and_denominator.tolist()
+                    metadata['aggregated_loss'] = loss_numerator / loss_denominator
                     metadata['loss_numerator'] = metadata['loss_denominator'] = 0
                     if rank == 0:
                         print(f"epoch {metadata['current_epoch']}\tbatch {batch_index}",
