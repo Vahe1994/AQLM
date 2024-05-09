@@ -307,7 +307,6 @@ class StraightThroughAdamW(ConfigurableAdamW):
         for name in self.ordered_quantized_weight_names:
             quantized_weight = self.quantized_weights_by_name[name]
             dequantized_weight_buffer = self.dequantized_weights_by_name[name]
-            torch.fill_(dequantized_weight_buffer, float('nan'))  # TODO remove after you are sure it works
 
             if not self.sharded:
                 dequantized_weight_buffer[...] = quantized_weight()
