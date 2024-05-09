@@ -500,6 +500,7 @@ def _load_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Mo
             print(f"No checkpoint found at {args.save}")
     else:
         with FullyShardedDataParallel.state_dict_type(quantized_model, StateDictType.LOCAL_STATE_DICT):
+            # this loads non-quantized weights and de-quantized versions of QuantizedWeight instances
             state_dict_ptr = quantized_model.state_dict()
             loaded_state_dict = torch.load(os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'))
             with torch.no_grad():
@@ -508,6 +509,7 @@ def _load_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Mo
                 assert len(loaded_state_dict) == 0, f"Unused keys:, {tuple(loaded_state_dict.keys())}"
             del state_dict_ptr, loaded_state_dict
 
+        # v-- loading optimizer state dict also loads all QuantizedWeights and straight-through buffers
         optimizer.load_state_dict(torch.load(
             os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'),
             map_location='cpu'))
