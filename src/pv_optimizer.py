@@ -1,4 +1,5 @@
 """Module containing utilities for straight-through fine-tuning of language models"""
+import contextlib
 import dataclasses
 import random
 import time
@@ -149,29 +150,14 @@ class StraightThroughAdamW(ConfigurableAdamW):
         return param_groups, all_optimized_params
 
     def step(self, *args, **kwargs):
-        rank = torch.distributed.get_rank()
-        device = torch.device(f'cuda:{rank}')
-        torch.cuda.synchronize(device)
-        t0 = time.perf_counter()
-        self._propagate_grads_to_optimized_parameters()
-        torch.cuda.synchronize(device)
-        print(end=f"rank{rank} _propagate_grads_to_optimized_parameters took {time.perf_counter() - t0}\n")
-
-        t1 = time.perf_counter()
-        original_output = super().step(*args, **kwargs)
-        torch.cuda.synchronize(device)
-        print(end=f"rank{rank} super().step(*args, **kwargs) took {time.perf_counter() - t1}\n")
-
-        t2 = time.perf_counter()
-        self._optimize_quantized_weights()
-        torch.cuda.synchronize(device)
-        print(end=f"rank{rank} _optimize_quantized_weights took {time.perf_counter() - t2}\n")
-
-        t3 = time.perf_counter()
-        self._update_dequantized_weights()
-        torch.cuda.synchronize(device)
-        print(end=f"rank{rank} _update_dequantized_weights took {time.perf_counter() - t3}\n")
-        print(end=f"rank{rank} full optimizer step took {time.perf_counter() - t0}\n")
+        with print_runtime_stats("_propagate_grads_to_optimized_parameters"):
+            self._propagate_grads_to_optimized_parameters()
+        with print_runtime_stats("super().step"):
+            original_output = super().step(*args, **kwargs)
+        with print_runtime_stats("_optimize_quantized_weights"):
+            self._optimize_quantized_weights()
+        with print_runtime_stats("_update_dequantized_weights"):
+            self._update_dequantized_weights()
         return original_output
 
     def _aggregate_gradients_for_dequantized_weights(self):
@@ -408,4 +394,22 @@ def _split_quantized_weights_between_ranks(quantized_weights: Dict[str, Quantize
 class YourQuantizedWeightIsInAnotherRank:
     """This replaces quantized weights that are not held on this rank"""
     rank: int
+
+
+@contextlib.contextmanager
+def print_runtime_stats(operation_name: str, enabled: bool = True):
+    if not enabled:
+        yield
+        return
+
+    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
+    if torch.device.type == 'cuda':
+        torch.cuda.synchronize(device)
+    start_time = time.perf_counter()
+    yield
+    if torch.device.type == 'cuda':
+        torch.cuda.synchronize(device)
+    print(end=f"rank{rank} {operation_name} took {time.perf_counter() - start_time}\n")
+
 
