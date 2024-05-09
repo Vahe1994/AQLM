@@ -299,7 +299,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                     shard_sizes: Sequence[Tuple[int, ...]] = self.sharded_param_sizes_by_rank[name]
                     shard_numels = tuple(torch.Size(shard_dims).numel() for shard_dims in shard_sizes)
                     assert sum(shard_numels) == new_dequantized_weight.numel()
-                    scatter_list = new_dequantized_weight.flatten().split_with_sizes(shard_numels)
+                    scatter_list = list(new_dequantized_weight.flatten().split_with_sizes(shard_numels))
                 else:
                     assert isinstance(quantized_weight, YourQuantizedWeightIsInAnotherRank)
                     source_rank = self.quantized_weights_by_name[name].rank
