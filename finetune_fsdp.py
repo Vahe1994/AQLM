@@ -576,7 +576,7 @@ def main():
         max_code_change_per_step=args.max_code_change_per_step,
         beam_size=args.beam_size,
         dequantized_dtype=args.autocast_dtype,
-        sharded=False, #TODO enable sharded
+        sharded=(world_size > 1),
     )
 
     metadata = dict(
