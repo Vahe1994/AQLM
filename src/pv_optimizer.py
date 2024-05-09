@@ -64,6 +64,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                  sharded: bool = False,
                  verbose: bool = True,
                  **kwargs):
+        assert all(name in named_dequantized_params for name in named_quantized_params), "param names mismatch"
         assert all(isinstance(qw, QuantizedWeight) for qw in named_quantized_params.values())
         if sharded:
             # distributed pv: each rank holds a subset of all quantized weights; the rest are replaced with pointers
@@ -86,10 +87,6 @@ class StraightThroughAdamW(ConfigurableAdamW):
                                                 if name in all_optimized_params}
         self.dequantized_weights_by_name = {name: param for name, param in named_dequantized_params.items()
                                             if name in named_quantized_params}
-
-        print(end=f"rank={torch.distributed.get_rank()} num dequantized_weights_by_name = {len(self.dequantized_weights_by_name)}\n"
-                  f"named_quantized_params.keys={named_quantized_params.keys()}\n"
-                  f"named_dequantized_params.keys={named_dequantized_params.keys()}")
         if sharded:
             self.sharded_param_sizes_by_rank = _get_sharded_param_sizes_by_rank(named_dequantized_params)
 

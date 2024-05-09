@@ -602,9 +602,10 @@ def main():
             print(dequantized_model)
             for name, param in dequantized_model.named_parameters():
                 print(name, param.shape, param.dtype)
+        named_dequantized_params = dict(dequantized_model._fsdp_wrapped_module.named_parameters())
 
     optimizer = StraightThroughAdamW(
-        named_dequantized_params=dict(dequantized_model.named_parameters()),
+        named_dequantized_params=named_dequantized_params,
         named_quantized_params=named_quantized_params,
         update_codes=dict(
             lr=args.code_lr, betas=(args.code_beta1, args.code_beta2), lamb=args.lamb,
