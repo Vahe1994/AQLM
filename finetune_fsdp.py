@@ -341,7 +341,7 @@ def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> Fu
     assert any(isinstance(module, IntCodes) for module in quantized_model.modules())
 
     dequantized_model, named_quantized_params = create_dequantized_model(
-        quantized_model, reuse_non_quantized=True, dequantized_dtype=args.autocast_dtype)
+        quantized_model, reuse_non_quantized=True, dequantized_dtype=args.amp_dtype)
     del quantized_model
 
     transformer_block_types = infer_block_classes(dequantized_model, args.block_type)
@@ -575,7 +575,7 @@ def main():
         ),
         max_code_change_per_step=args.max_code_change_per_step,
         beam_size=args.beam_size,
-        dequantized_dtype=args.autocast_dtype,
+        dequantized_dtype=args.amp_dtype,
         sharded=(world_size > 1),
     )
 
