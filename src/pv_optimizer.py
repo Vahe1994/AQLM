@@ -163,7 +163,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
         with one_rank_at_a_time(True):
             print('inside optimizer: rank', torch.distributed.get_rank())
             for name, param in self.dequantized_weights_by_name.items():
-                print(name, 'requires_grad:', param.requires_grad, f"grad is not None: {param.grad is not None}")
+                print(name, 'requires_grad:', param.requires_grad, f"grad is not None: {param.grad is not None}", 'numel:', param.numel())
             print(flush=True)
         for name in self.ordered_quantized_weight_names:
             grad = self.dequantized_weights_by_name[name].grad
