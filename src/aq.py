@@ -263,7 +263,7 @@ class QuantizedWeight(nn.Module):
             groupwise_update_norms = (reference_weight - dequantized_weight).view(
                 num_output_groups, self.out_group_size, num_input_groups, self.in_group_size
             ).square().sum(dim=(1, 3))
-            max_updates = max(int(max_change_fraction * self.codes.shape[0] * self.codes.shape[1]), 1)
+            max_updates = max(int(max_change_fraction * new_codes.shape[0] * new_codes.shape[1]), 1)
             new_codes = _select_updates_with_highest_priority(
                 prev_codes, new_codes, priorities=groupwise_update_norms, max_updates=max_updates)
         self.get_codes()[selection] = new_codes
