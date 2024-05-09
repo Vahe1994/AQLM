@@ -284,30 +284,35 @@ class StraightThroughAdamW(ConfigurableAdamW):
     @torch.no_grad()
     def _update_dequantized_weights(self):
         """Assign dequantized weight buffers to latest quantized weights after codebook/scale/code updates"""
+        own_rank = torch.distributed.get_rank() if torch.distribted.is_initialized() else 0
+        world_size = torch.distributed.get_world_size() if torch.distribted.is_initialized() else 1
         async_ops = list()
         for name in self.ordered_quantized_weight_names:
             quantized_weight = self.quantized_weights_by_name[name]
-            output_buffer = self.dequantized_weights_by_name[name]
-            torch.fill_(output_buffer, float('nan'))  # TODO remove after you are sure it works
+            dequantized_weight_buffer = self.dequantized_weights_by_name[name]
+            torch.fill_(dequantized_weight_buffer, float('nan'))  # TODO remove after you are sure it works
 
             if not self.sharded:
-                output_buffer[...] = quantized_weight()
+                dequantized_weight_buffer[...] = quantized_weight()
+
             else:
                 if isinstance(quantized_weight, QuantizedWeight):
                     source_rank = torch.distributed.get_rank()
-                    new_dequantized_weight = quantized_weight().to(output_buffer.dtype)
+                    new_dequantized_weight = quantized_weight().to(dequantized_weight_buffer.dtype)
                     shard_sizes: Sequence[Tuple[int, ...]] = self.sharded_param_sizes_by_rank[name]
                     shard_numels = tuple(torch.Size(shard_dims).numel() for shard_dims in shard_sizes)
                     assert sum(shard_numels) == new_dequantized_weight.numel()
-                    scatter_list = list(new_dequantized_weight.flatten().split_with_sizes(shard_numels))
+                    new_dequantized_weight_parts = new_dequantized_weight.flatten().split_with_sizes(shard_numels)
+                    for i in range(world_size):
+                        if i != own_rank:
+                            async_ops.append(torch.distributed.isend(new_dequantized_weight_parts[i], dst=i))
+                        else:
+                            dequantized_weight_buffer.copy_(new_dequantized_weight_parts[i])
+
                 else:
                     assert isinstance(quantized_weight, YourQuantizedWeightIsInAnotherRank)
                     source_rank = self.quantized_weights_by_name[name].rank
-                    scatter_list = None
-
-                async_ops.append(
-                    torch.distributed.scatter(output_buffer.flatten(), scatter_list, src=source_rank, async_op=True)
-                )
+                    async_ops.append(torch.distributed.irecv(dequantized_weight_buffer, src=source_rank))
         for handle in async_ops:
             handle.wait()
 
