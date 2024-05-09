@@ -284,8 +284,8 @@ class StraightThroughAdamW(ConfigurableAdamW):
     @torch.no_grad()
     def _update_dequantized_weights(self):
         """Assign dequantized weight buffers to latest quantized weights after codebook/scale/code updates"""
-        own_rank = torch.distributed.get_rank() if torch.distribted.is_initialized() else 0
-        world_size = torch.distributed.get_world_size() if torch.distribted.is_initialized() else 1
+        own_rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+        world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
         async_ops = list()
         for name in self.ordered_quantized_weight_names:
             quantized_weight = self.quantized_weights_by_name[name]
