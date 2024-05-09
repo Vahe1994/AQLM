@@ -197,7 +197,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
             handle.wait()
         if self.verbose:
             for name, grad in aggregated_grads_by_name.items():
-                print('DEBUG aggregated grads:', name, grad.norm())
+                print(end=f'aggregated grad norm for {name}: {grad.norm().item()}\n')
         return aggregated_grads_by_name
 
     @torch.no_grad()
