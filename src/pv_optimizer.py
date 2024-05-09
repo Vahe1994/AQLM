@@ -191,7 +191,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                 # async_ops.append(
                 #     torch.distributed.gather(grad.flatten(), gather_buffers, dst=destination_rank, async_op=True)
                 # )
-                print(f"rank{torch.distributed.get_rank()} - grad {grad.shape}, gather_buffers {[x.shape for x in gather_buffers] if gather_buffers else None}")
+                print(f"rank{torch.distributed.get_rank()} - grad {grad.shape}, gather_buffers {[x.shape for x in gather_buffers] if gather_buffers else None} | dst={destination_rank}")
                 torch.distributed.barrier()
                 torch.distributed.gather(grad.flatten(), gather_buffers, dst=destination_rank)
                 torch.distributed.barrier()
