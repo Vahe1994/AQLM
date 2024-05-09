@@ -558,7 +558,7 @@ def _save_model(args: argparse.Namespace, dequantized_model: FullyShardedDataPar
             non_quantized_state_dict = dict()
             for name, tensor in dequantized_model.state_dict().items():
                 if name in quantized_weight_names:
-                    quantized_weight_names.remove(name)
+                    quantized_weight_names.remove(name)  # do not save de-quantized versions of quantized weights
                 else:
                     non_quantized_state_dict[name] = tensor
             torch.save(model_state_dict, os.path.join(output_path, "non_quantized_state_dict.pth"))
