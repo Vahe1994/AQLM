@@ -152,6 +152,11 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         action="store_true",
         help="If set, use Lamb (adam with trust ratio) for both continuous and discrete parameters",
     )
+    parser.add_argument(
+        '--verbose_optimizer',
+        action="store_true",
+        help="If set, use Lamb (adam with trust ratio) for both continuous and discrete parameters",
+    )
 
     parser.add_argument(
         "--batch_size",
@@ -627,6 +632,7 @@ def main():
         beam_size=args.beam_size,
         dequantized_dtype=args.amp_dtype,
         sharded=(world_size > 1),
+        verbose=args.verbose_optimizer,
     )
 
     metadata = dict(
