@@ -157,7 +157,7 @@ def _beam_search_update_codes_groupwise(
             # ^-- [num_groups, beam_size]
             keep_prob = scores[:, :-1] / (scores[:, :-1] + scores[:, 1:])  # [num_groups, beam_size - 1]
             keep_prob = torch.where(torch.isinf(scores[:, :-1]), 1.0, keep_prob)  # [num_groups, beam_size - 1]
-            best_code_changed = (beam_codes[:, 0, :] != codes).all(dim=-1, keepdim=True)
+            best_code_changed = torch.not_equal(beam_codes[:, 0, :], codes).all(dim=-1, keepdim=True)
             keep_best = torch.logical_or(
                 best_code_changed.tile(1, 3), torch.less_equal(torch.rand_like(keep_prob), keep_prob)
             )
