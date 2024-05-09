@@ -59,99 +59,24 @@ def beam_search_optimal_codes(
     dim_order = list(range(num_codebooks))
     if dim_rng is not None:
         dim_rng.shuffle(dim_order)
-    new_codes_groupwise = _beam_search_update_codes_groupwise(
-        reference=reference, codebooks=codebooks, codes=prev_codes,
-        beam_size=beam_size, stochastic_rounding_tau=stochastic_rounding_tau,
-        chunk_size_values=chunk_size_bytes // reference[0, 0].nbytes,
-        dim_order=dim_order)
+
+    if num_codebooks == 1 and beam_size == 1 and stochastic_rounding_tau == 0:
+        # a faster algorithm for a special case of one codebook
+        new_codes_groupwise = _greedy_find_best_codes(
+            reference=reference, codebook=codebooks[0],
+            chunk_size_values=chunk_size_bytes // reference[0, 0].nbytes,
+            code_dtype=prev_codes.dtype
+        )
+    else:
+        new_codes_groupwise = _beam_search_update_codes_groupwise(
+            reference=reference, codebooks=codebooks, codes=prev_codes,
+            beam_size=beam_size, stochastic_rounding_tau=stochastic_rounding_tau,
+            chunk_size_values=chunk_size_bytes // reference[0, 0].nbytes,
+            dim_order=dim_order)
     new_codes_groupwise = new_codes_groupwise.reshape(num_out_groups, num_in_groups, num_codebooks)
     if verbose:
         print(f"Beam search for {reference_weight.numel()} weights finished in {time.perf_counter() - t0} seconds.")
     return new_codes_groupwise
-
-
-@torch.inference_mode
-def update_codes_and_codebooks(
-        reference_weight: torch.Tensor,
-        codebooks: torch.Tensor,
-        prev_codes: torch.Tensor,
-        scales: Optional[torch.Tensor],
-        *,
-        beam_size: int,
-        num_iter: int,
-        stochastic_rounding_tau: float = 0.0,
-        dim_rng: Optional[random.Random] = None,
-        chunk_size_bytes: int = 2 ** 32,
-) -> (torch.Tensor, torch.IntTensor):
-    """
-    Update codes and codebooks (but not scales) to minimize L2 error with reference weight (regardless of activations)
-    The codes are updated with beam search; codebooks are updated with closed form least squares solver
-
-    :param reference_weight: a target for L2 error, [out_features, in_features]
-    :param codebooks: look-up tables of codes, shape: [num_codebooks, codebook_size, out_group_size, in_group_size]
-    :param prev_codes: previous-best integer weight codes, shape: [num_out_groups, num_in_groups, num_codebooks]
-    :param scales: weight will be multiplied by this factor, shape = [num_out_groups, num_in_groups or 1, 1, 1]
-    :param dim_rng: a source of randomness to (optionally) shuffle the order in which the beam search runs
-      None = update dimensions and codebooks in their natural order (0, 1, ..., n)
-      random.Random(optional_seed) = shuffle dimensions at random, optionally using the specified seed
-    :param beam_size: consider up to this many best encoding combinations
-
-    :param num_iter: run beam search and least-squares this many times each
-
-    :param stochastic_rounding_tau: if positive, each time the algorithm chooses a code, it will have a probability
-        of replacing it with the second-best choice. If the two best codes increase the error by delta1 and delta2,
-        then the probability of choosing each code is P_i = delta_i ^ -1/tau / (sum_j_in_choices delta_j ^ -1/tau).
-        Note that if there is a code that has zero error, the algorithm will choose allways choose such a code
-    :param chunk_size_bytes: process this many candidates at a time; reduce to save memory
-    :return: updated quantization codes found by beam search, same shape as prev_codes
-
-    :returns: a tuple (updated codebooks, updated codes)
-    """
-
-    orig_code_shape = prev_codes.shape
-    orig_codebook_shape = codebooks.shape
-
-    # reshape references, codes and codebooks so they are no longer group-wise
-    out_features, in_features = reference_weight.shape
-    num_out_groups, num_in_groups, num_codebooks = prev_codes.shape
-    _num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
-    reference_weight = reference_weight.reshape(
-        num_out_groups, out_group_size, num_in_groups, in_group_size
-    ).permute(0, 2, 1, 3)  # [num_out_groups, num_in_groups, out_group_size, in_group_size]
-
-    if scales is not None:
-        reference_weight = reference_weight / scales
-        # divide by scales; the resulting problem is equivalent to multiplying dequantized weight
-
-    reference = reference_weight.flatten(2, 3).flatten(0, 1)
-    prev_codes = prev_codes.flatten(0, -2)
-    codebooks = codebooks.flatten(-2, -1).detach()
-    dim_order = list(range(num_codebooks))
-    if dim_rng is not None:
-        dim_rng.shuffle(dim_order)
-
-    for _ in range(num_iter):
-        new_codes = _beam_search_update_codes_groupwise(
-            reference=reference,
-            codebooks=codebooks,
-            codes=prev_codes,
-            beam_size=beam_size,
-            stochastic_rounding_tau=stochastic_rounding_tau,
-            chunk_size_values=chunk_size_bytes // reference[0, 0].nbytes,
-            dim_order=dim_order,
-        )
-
-        if (new_codes == prev_codes).all():
-            break
-        prev_codes = new_codes
-
-        codebooks = _find_optimal_codebooks(
-            reference,
-            codebooks,
-            prev_codes,
-        )
-
-    return codebooks.reshape(*orig_codebook_shape), prev_codes.reshape(*orig_code_shape)
 
 
 @maybe_script
@@ -240,6 +165,31 @@ def _beam_search_update_codes_groupwise(
                 keep_best[:, :, None], beam_codes[:, :-1, :], beam_codes[:, 1:, :])
 
     return beam_codes[:, 0, :]
+
+
+@maybe_script
+def _greedy_find_best_codes(
+    reference: torch.Tensor,
+    codebook: torch.Tensor,
+    chunk_size_values: int,
+    code_dtype: torch.dtype
+) -> torch.Tensor:
+    """
+    :param reference: [num_groups, group_size]
+    :param codebook: [codebook_size, group_size]
+    :param chunk_size_values: how many values can be materialized in memory simultaneously
+    :parma code_dtype the dtype of optimal codes returned by this function
+    :returns: codes [num_groups, 1]
+    """
+    codebook_t = codebook.T.contiguous()
+    chunk_size = chunk_size_values // len(codebook)
+    codebook_norms_sq = codebook.square().sum(dim=-1)
+    new_codes = torch.empty((len(reference),), dtype=code_dtype, device=reference.device)
+    for chunk_start in range(0, len(reference), chunk_size):
+        new_codes[chunk_start: chunk_start + chunk_size] = torch.addmm(
+            codebook_norms_sq[None], reference[chunk_start: chunk_start + chunk_size], codebook_t, alpha=-2
+        ).argmin(-1)
+    return new_codes.unsqueeze(-1)
 
 
 def _find_optimal_codebooks(
