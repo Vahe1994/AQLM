@@ -10,6 +10,7 @@ from typing import Optional, Dict, Tuple, List, Any, Sequence
 import torch
 import torch.nn as nn
 import torch.distributed
+from torch.optim.optimizer import StateDict
 
 from src.aq import QuantizedWeight
 from src.configurable_adam import ConfigurableAdamW
@@ -325,6 +326,25 @@ class StraightThroughAdamW(ConfigurableAdamW):
                 param.grad = None
             elif param.grad is not None:
                 param.grad.zero_()
+
+    def state_dict(self) -> StateDict:
+        state_dict = super().state_dict()
+        assert "quantized_weight_state_dicts" not in state_dict
+        state_dict["quantized_weight_state_dicts"] = {
+            name: quantized_weight.state_dict()
+            for name, quantized_weight in self.quantized_weights_by_name.items()
+            if isinstance(quantized_weight, QuantizedWeight)  # skip YourQuantizedWeightIsInAnotherRank if sharded
+        }
+        # note: the de-quantized params are not saved here; instead, they are saved with model.state_dict
+        return state_dict
+
+    def load_state_dict(self, state_dict: StateDict) -> None:
+        quantized_weight_state_dicts: Dict[str, StateDict] = dict(state_dict.pop("quantized_weight_state_dicts"))
+        for name, quantized_weight in self.quantized_weights_by_name.items():
+            if isinstance(quantized_weight, QuantizedWeight):
+                quantized_weight.load_state_dict(quantized_weight_state_dicts.pop(name))
+        assert len(quantized_weight_state_dicts) == 0, f"unused keys: {quantized_weight_state_dicts.keys()}"
+        super().load_state_dict(state_dict)
 
 
 def _get_sharded_param_sizes_by_rank(named_dequantized_params: Dict[str, torch.Tensor]) -> Dict[str, Sequence[int]]:
