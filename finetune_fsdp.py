@@ -606,6 +606,9 @@ def main():
                                     for name, param in dequantized_model.named_parameters()}
         assert all(name in named_dequantized_params for name in named_quantized_params)
 
+    for quantized_weight in named_quantized_params.values():
+        quantized_weight.to(device)
+
     optimizer = StraightThroughAdamW(
         named_dequantized_params=named_dequantized_params,
         named_quantized_params=named_quantized_params,
