@@ -262,7 +262,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         code_change_rate = torch.not_equal(prev_codes, new_codes).any(-1).float().mean().item()
                         maybe_distributed_msg = ""
                         if torch.distributed.is_initialized():
-                            maybe_distributed_msg = f" (rank {torch.distributed.get_rank()}"
+                            maybe_distributed_msg = f" (rank {torch.distributed.get_rank()})"
                         maybe_limit_msg = ""
                         if self.max_code_change_per_step is not None:
                             maybe_limit_msg = f"(limit {self.max_code_change_per_step})"
