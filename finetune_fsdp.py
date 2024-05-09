@@ -353,13 +353,14 @@ def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> Fu
             reduce_dtype=args.amp_dtype,
             _module_classes_to_ignore=transformer_block_types + tuple(transformers.pytorch_utils.ALL_LAYERNORM_LAYERS)
         )
-    return FullyShardedDataParallel(
+    fsdp_model = FullyShardedDataParallel(
         dequantized_model,
         auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, transformer_block_types),
         mixed_precision=mixed_precision,
         use_orig_params=True,
         device_id=device,
     )
+    return fsdp_model, named_quantized_params
 
 
 def _scary_load_quantized_model(args: argparse.Namespace):
