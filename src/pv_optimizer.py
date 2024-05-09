@@ -167,6 +167,9 @@ class StraightThroughAdamW(ConfigurableAdamW):
             print(flush=True)
         for name in self.ordered_quantized_weight_names:
             grad = self.dequantized_weights_by_name[name].grad
+            if grad is None:
+                assert self.dequantized_weights_by_name[name].numel() ==0
+                grad = torch.zeros_like(self.dequantized_weights_by_name[name].numel())
             assert grad is not None, name
             if not self.sharded:
                 aggregated_grads_by_name[name] = grad
