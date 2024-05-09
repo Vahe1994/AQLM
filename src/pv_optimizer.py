@@ -10,7 +10,6 @@ import torch.nn as nn
 import torch.distributed
 
 from src.aq import QuantizedWeight
-from src.aq_ops import one_rank_at_a_time
 from src.configurable_adam import ConfigurableAdamW
 
 
