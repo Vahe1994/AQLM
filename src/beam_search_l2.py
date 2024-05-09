@@ -37,13 +37,12 @@ def beam_search_optimal_codes(
         then the probability of choosing each code is P_i = delta_i ^ -1/tau / (sum_j_in_choices delta_j ^ -1/tau).
         Note that if there is a code that has zero error, the algorithm will choose allways choose such a code
     :param chunk_size_bytes: process this many candidates at a time; reduce to save memory
-    :param verbose: if True, print timings
+    :param verbose: if True, print wall time for beam search
     :return: best quantization codes found, same shape as prev_codes
 
     """
     t0 = time.perf_counter()
     # reshape references, codes and codebooks so they are no longer group-wise
-    out_features, in_features = reference_weight.shape
     num_out_groups, num_in_groups, num_codebooks = prev_codes.shape
     _num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
     reference_weight = reference_weight.reshape(
