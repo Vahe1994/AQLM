@@ -160,9 +160,14 @@ class StraightThroughAdamW(ConfigurableAdamW):
         """Ensure that every optimized parameter receives gradient"""
         async_ops = list()
         aggregated_grads_by_name = dict()
+        with one_rank_at_a_time(True):
+            print('rank', torch.distributed.get_rank())
+            for name, param in self.dequantized_weights_by_name.items():
+                print(f"{name} grad is not None: {param.grad is not None}")
+            print(flush=True)
         for name in self.ordered_quantized_weight_names:
             grad = self.dequantized_weights_by_name[name].grad
-            assert grad is not None
+            assert grad is not None, name
             if not self.sharded:
                 aggregated_grads_by_name[name] = grad
             else:
