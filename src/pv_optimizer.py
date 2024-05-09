@@ -339,6 +339,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
         state_dict["quantized_weight_state_dicts"] = {
             name: quantized_weight.state_dict() for name, quantized_weight in self.iterate_local_quantized_weights()
         }
+        state_dict["straight_through_buffers"] = dict(self.straight_through_buffer_by_name)
         # note: the de-quantized params are not saved here; instead, they are saved with model.state_dict
         return state_dict
 
@@ -347,6 +348,11 @@ class StraightThroughAdamW(ConfigurableAdamW):
         for name, quantized_weight in self.iterate_local_quantized_weights():
             quantized_weight.load_state_dict(quantized_weight_state_dicts.pop(name))
         assert len(quantized_weight_state_dicts) == 0, f"unused keys: {quantized_weight_state_dicts.keys()}"
+
+        straight_through_buffers = state_dict.pop("straight_through_buffers")
+        assert all(name in straight_through_buffers for name in self.straight_through_buffer_by_name)
+        for name, loaded_values in straight_through_buffers.items():
+            self.straight_through_buffer_by_name[name][...] = loaded_values
         super().load_state_dict(state_dict)
 
 

@@ -493,7 +493,7 @@ def compute_validation_perplexities(args: argparse.Namespace, model: nn.Module, 
     return perplexities
 
 
-def _load_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Module, optimizer: torch.optim.Optimizer):
+def _load_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Module, optimizer: StraightThroughAdamW):
     rank = torch.distributed.get_rank()
     if args.save is None or not os.path.exists(args.save):
         if args.save is not None and rank == 0:
@@ -522,7 +522,7 @@ def _load_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Mo
             print(f"Loaded training state from {args.save}: {metadata}")
 
 
-def _save_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Module, optimizer: torch.optim.Optimizer):
+def _save_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Module, optimizer: StraightThroughAdamW):
     if args.save is None:
         return
     rank = torch.distributed.get_rank()
@@ -532,7 +532,9 @@ def _save_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Mo
         torch.save(metadata, os.path.join(args.save, 'metadata.pt'))
     with FullyShardedDataParallel.state_dict_type(quantized_model, StateDictType.LOCAL_STATE_DICT):
         torch.save(quantized_model.state_dict(), os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'))
+        # model saves non-quantized weights and dequantized versions of QuantizedWeight; the latter is not necessary
     torch.save(optimizer.state_dict(), os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'))
+    # optimizer state dict saves statistics QuantizedWeight instances and straight-through buffers
     if args.on_save:
         exec(args.on_save)
 
