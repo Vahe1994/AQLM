@@ -1,6 +1,7 @@
 """Module containing utilities for straight-through fine-tuning of language models"""
 import dataclasses
 import random
+import time
 from collections import defaultdict
 from enum import Enum, auto
 from typing import Optional, Dict, Tuple, List, Any, Sequence
@@ -148,10 +149,29 @@ class StraightThroughAdamW(ConfigurableAdamW):
         return param_groups, all_optimized_params
 
     def step(self, *args, **kwargs):
+        rank = torch.distributed.get_rank()
+        device = torch.device(f'cuda:{rank}')
+        torch.cuda.synchronize(device)
+        t0 = time.perf_counter()
         self._propagate_grads_to_optimized_parameters()
+        torch.cuda.synchronize(device)
+        print(end=f"rank{rank} _propagate_grads_to_optimized_parameters took {time.perf_counter() - t0}\n")
+
+        t1 = time.perf_counter()
         original_output = super().step(*args, **kwargs)
+        torch.cuda.synchronize(device)
+        print(end=f"rank{rank} super().step(*args, **kwargs) took {time.perf_counter() - t1}\n")
+
+        t2 = time.perf_counter()
         self._optimize_quantized_weights()
+        torch.cuda.synchronize(device)
+        print(end=f"rank{rank} _optimize_quantized_weights took {time.perf_counter() - t2}\n")
+
+        t3 = time.perf_counter()
         self._update_dequantized_weights()
+        torch.cuda.synchronize(device)
+        print(end=f"rank{rank} _update_dequantized_weights took {time.perf_counter() - t3}\n")
+        print(end=f"rank{rank} full optimizer step took {time.perf_counter() - t0}\n")
         return original_output
 
     def _aggregate_gradients_for_dequantized_weights(self):
