@@ -160,11 +160,6 @@ class StraightThroughAdamW(ConfigurableAdamW):
         """Ensure that every optimized parameter receives gradient"""
         async_ops = list()
         aggregated_grads_by_name = dict()
-        with one_rank_at_a_time(True):
-            print('inside optimizer: rank', torch.distributed.get_rank())
-            for name, param in self.dequantized_weights_by_name.items():
-                print(name, 'requires_grad:', param.requires_grad, f"grad is not None: {param.grad is not None}", 'numel:', param.numel())
-            print(flush=True)
         for name in self.ordered_quantized_weight_names:
             grad = self.dequantized_weights_by_name[name].grad
             if grad is None:
@@ -193,9 +188,14 @@ class StraightThroughAdamW(ConfigurableAdamW):
                     destination_rank = self.quantized_weights_by_name[name].rank
                     gather_buffers = None
 
-                async_ops.append(
-                    torch.distributed.gather(grad.flatten(), gather_buffers, dst=destination_rank, async_op=True)
-                )
+                # async_ops.append(
+                #     torch.distributed.gather(grad.flatten(), gather_buffers, dst=destination_rank, async_op=True)
+                # )
+                print(f"rank{torch.distributed.get_rank()} - grad {grad.shape}, gather_buffers {[x.shape for x in gather_buffers] if gather_buffers else None}")
+                torch.distributed.barrier()
+                torch.distributed.gather(grad.flatten(), gather_buffers, dst=destination_rank)
+                torch.distributed.barrier()
+                exit()
 
         for handle in async_ops:
             handle.wait()
