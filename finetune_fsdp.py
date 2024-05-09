@@ -628,16 +628,18 @@ def main():
         named_dequantized_params=named_dequantized_params,
         named_quantized_params=named_quantized_params,
         update_codes=dict(
-            lr=args.code_lr, betas=(args.code_beta1, args.code_beta2), lamb=args.lamb, compute_dtype=args.master_dtype,
+            lr=args.code_lr, betas=(args.code_beta1, args.code_beta2), lamb=args.lamb, debias=True, amsgrad=False,
+            compute_dtype=args.master_dtype,
             exp_avg_dtype=torch.float16 if args.code_adam_16bit else args.master_dtype,
+            v_hat_max_dtype=torch.float16 if args.code_adam_16bit else args.master_dtype,
             exp_avg_sq_dtype=torch.bfloat16 if args.code_adam_16bit else args.master_dtype,
         ),
         update_codebooks_and_scales=dict(
-            lr=args.lr, betas=(args.adam_beta1, args.adam_beta2), lamb=args.lamb,
+            lr=args.lr, betas=(args.adam_beta1, args.adam_beta2), lamb=args.lamb, debias=True, amsgrad=False,
             compute_dtype=args.master_dtype,
         ),
         update_non_quantized_parameters=dict(
-            lr=args.lr, betas=(args.adam_beta1, args.adam_beta2), lamb=args.lamb,
+            lr=args.lr, betas=(args.adam_beta1, args.adam_beta2), lamb=args.lamb, debias=True, amsgrad=False,
             compute_dtype=args.master_dtype,
         ),
         max_code_change_per_step=args.max_code_change_per_step,
