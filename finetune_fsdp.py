@@ -7,7 +7,7 @@ import os
 from contextlib import nullcontext
 from copy import deepcopy
 from functools import partial
-from typing import Optional
+from typing import Optional, Tuple
 
 import transformers
 import datasets
@@ -96,7 +96,6 @@ def add_model_args(parser: argparse.ArgumentParser):
         default=1,
         help="this many ranks (per host) initialize their model in parallel. This parameter is meant to save host RAM.",
     )
-
 
 
 def add_finetuning_args(parser: argparse.ArgumentParser):
@@ -370,7 +369,7 @@ def load_base_model(args: argparse.Namespace, device: torch.device) -> FullyShar
     )
 
 
-def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
+def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> Tuple[FullyShardedDataParallel, dict]:
     if not args.monkeypatch_old_pickle:
         quantized_model = get_model(
             args.base_model, args.quantized_model, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
