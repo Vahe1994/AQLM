@@ -155,15 +155,14 @@ class StraightThroughAdamW(ConfigurableAdamW):
         self._update_dequantized_weights()
         return original_output
 
-    @torch.no_grad()
-    def _propagate_grads_to_optimized_parameters(self):
-        """Ensure that every optimized parameter receives gradient"""
+    def _aggregate_gradients_for_dequantized_weights(self):
+        """move gradients from dequantized params to straight-through buffers. If sharded, gather grads across ranks"""
         async_ops = list()
         aggregated_grads_by_name = dict()
         for name in self.ordered_quantized_weight_names:
             grad = self.dequantized_weights_by_name[name].grad
             if grad is None:
-                assert self.dequantized_weights_by_name[name].numel() ==0
+                assert self.dequantized_weights_by_name[name].numel() == 0
                 grad = torch.zeros_like(self.dequantized_weights_by_name[name])
             assert grad is not None, name
             if not self.sharded:
@@ -173,7 +172,6 @@ class StraightThroughAdamW(ConfigurableAdamW):
                 own_rank = torch.distributed.get_rank()
                 world_size = torch.distributed.get_world_size()
                 if isinstance(quantized_weight, QuantizedWeight):
-                    destination_rank = torch.distributed.get_rank()
                     shard_sizes: Sequence[Tuple[int, ...]] = self.sharded_param_sizes_by_rank[name]
                     shard_numels = tuple(torch.Size(shard_dims).numel() for shard_dims in shard_sizes)
                     # TODO in actuality we dont need shard sizes, just the numels. Modify sharded_param_sizes to contain numels directly.
@@ -198,9 +196,14 @@ class StraightThroughAdamW(ConfigurableAdamW):
         for handle in async_ops:
             handle.wait()
         if self.sharded:
-            for name, grad in aggregated_grads_by_name.values():
+            for name, grad in aggregated_grads_by_name.items():
                 print('DEBUG aggregated grads:', name, grad.norm())
+        return aggregated_grads_by_name
 
+    @torch.no_grad()
+    def _propagate_grads_to_optimized_parameters(self):
+        """Ensure that every optimized parameter receives gradient"""
+        aggregated_grads_by_name = self._aggregate_gradients_for_dequantized_weights()
         for param_group in self.param_groups:
             for param in param_group['params']:
                 name = self.optimized_param_to_name[param]
