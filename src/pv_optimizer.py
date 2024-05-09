@@ -191,14 +191,12 @@ class StraightThroughAdamW(ConfigurableAdamW):
                 own_rank = torch.distributed.get_rank()
                 world_size = torch.distributed.get_world_size()
                 if isinstance(quantized_weight, QuantizedWeight):
-                    shard_sizes: Sequence[Tuple[int, ...]] = self.sharded_param_sizes_by_rank[name]
-                    shard_numels = tuple(torch.Size(shard_dims).numel() for shard_dims in shard_sizes)
-                    # TODO in actuality we dont need shard sizes, just the numels. Modify sharded_param_sizes to contain numels directly.
+                    shard_sizes: Sequence[int] = self.sharded_param_sizes_by_rank[name]
                     combined_grad_buffer = torch.full(
                         [quantized_weight.out_features, quantized_weight.in_features], fill_value=torch.nan,
                         dtype=grad.dtype, device=grad.device)
-                    assert sum(shard_numels) == combined_grad_buffer.numel()
-                    gather_buffers = list(combined_grad_buffer.view(-1).split_with_sizes(shard_numels))
+                    assert sum(shard_sizes) == combined_grad_buffer.numel()
+                    gather_buffers = list(combined_grad_buffer.view(-1).split_with_sizes(shard_sizes))
                     assert all(part.untyped_storage().data_ptr() == combined_grad_buffer.untyped_storage().data_ptr()
                                for part in gather_buffers)
                     for i in range(world_size):
@@ -316,12 +314,10 @@ class StraightThroughAdamW(ConfigurableAdamW):
 
             else:
                 if isinstance(quantized_weight, QuantizedWeight):
-                    source_rank = torch.distributed.get_rank()
                     new_dequantized_weight = quantized_weight().to(dequantized_weight_buffer.dtype)
-                    shard_sizes: Sequence[Tuple[int, ...]] = self.sharded_param_sizes_by_rank[name]
-                    shard_numels = tuple(torch.Size(shard_dims).numel() for shard_dims in shard_sizes)
-                    assert sum(shard_numels) == new_dequantized_weight.numel()
-                    new_dequantized_weight_parts = new_dequantized_weight.flatten().split_with_sizes(shard_numels)
+                    shard_sizes: Sequence[int] = self.sharded_param_sizes_by_rank[name]
+                    assert sum(shard_sizes) == new_dequantized_weight.numel()
+                    new_dequantized_weight_parts = new_dequantized_weight.flatten().split_with_sizes(shard_sizes)
                     for i in range(world_size):
                         if i != own_rank:
                             async_ops.append(torch.distributed.isend(new_dequantized_weight_parts[i], dst=i))
@@ -345,12 +341,10 @@ class StraightThroughAdamW(ConfigurableAdamW):
                 param.grad.zero_()
 
 
-def _get_sharded_param_sizes_by_rank(named_dequantized_params: Dict[str, torch.Tensor]
-                                     ) -> Dict[str, Sequence[Tuple[int, ...]]]:
-    """For each parameter name, return a tuple of shapes for this parameter across all FSDP ranks"""
+def _get_sharded_param_sizes_by_rank(named_dequantized_params: Dict[str, torch.Tensor]) -> Dict[str, Sequence[int]]:
+    """For each parameter name, return a tuple of sizes (numbers of elements) this parameter across all FSDP ranks"""
     assert torch.distributed.is_initialized()
-    own_dequantized_param_shard_size = {name: tuple(param.shape) for name, param in
-                                        named_dequantized_params.items()}
+    own_dequantized_param_shard_size = {name: param.numel() for name, param in named_dequantized_params.items()}
     world_size = torch.distributed.get_world_size()
     gathered_list = [{} for _ in range(world_size)]
     torch.distributed.all_gather_object(gathered_list, own_dequantized_param_shard_size)
