@@ -152,8 +152,11 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         default=1,
         help="Beam size when updating codes; higher is slower but more accurate. For single codebook, use beam_size=1",
     )
-
-
+    parser.add_argument(
+        '--code_adam_16bit',
+        action="store_true",
+        help="If set, adam statistics for codes will be stored as float16 (exp_avg and v_hat) or bfloat16(exp_avg_sq)",
+    )
     parser.add_argument(
         '--lamb',
         action="store_true",
@@ -625,8 +628,10 @@ def main():
         named_dequantized_params=named_dequantized_params,
         named_quantized_params=named_quantized_params,
         update_codes=dict(
-            lr=args.code_lr, betas=(args.code_beta1, args.code_beta2), lamb=args.lamb,
-            compute_dtype=args.master_dtype, exp_avg_dtype=torch.float16, exp_avg_sq_dtype=torch.bfloat16), #TODO set dtype in args
+            lr=args.code_lr, betas=(args.code_beta1, args.code_beta2), lamb=args.lamb, compute_dtype=args.master_dtype,
+            exp_avg_dtype=torch.float16 if args.code_adam_16bit else args.master_dtype,
+            exp_avg_sq_dtype=torch.bfloat16 if args.code_adam_16bit else args.master_dtype,
+        ),
         update_codebooks_and_scales=dict(
             lr=args.lr, betas=(args.adam_beta1, args.adam_beta2), lamb=args.lamb,
             compute_dtype=args.master_dtype,
