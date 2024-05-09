@@ -354,16 +354,15 @@ def _split_quantized_weights_between_ranks(quantized_weights: Dict[str, Quantize
     # split between ranks
     quantized_weight_to_rank = dict()
     total_size_by_rank = [0 for _ in range(world_size)]
-    with one_rank_at_a_time(local=True): #TODO rm debug code
-        print("my rank", own_rank)
-        for quantized_weight in ordered_quantized_weights:
-            least_busy_rank = min(range(world_size), key=lambda rank: total_size_by_rank[rank])
-            total_size_by_rank[least_busy_rank] += _compute_size(quantized_weight)
-            quantized_weight_to_rank[quantized_weight] = least_busy_rank
-            print(min(all_quantized_weights[quantized_weight]), ' -> ', least_busy_rank)
+    for quantized_weight in ordered_quantized_weights:
+        least_busy_rank = min(range(world_size), key=lambda rank: total_size_by_rank[rank])
+        total_size_by_rank[least_busy_rank] += _compute_size(quantized_weight)
+        quantized_weight_to_rank[quantized_weight] = least_busy_rank
 
-        print(flush=True)
-
+    with one_rank_at_a_time(True):
+        print('checksum input for rank', own_rank, '=',
+              tuple((min(all_quantized_weights[qw]), quantized_weight_to_rank[qw], _compute_size(qw))
+                               for qw in ordered_quantized_weights))
     checksum: int = hash(tuple((min(all_quantized_weights[qw]), quantized_weight_to_rank[qw], _compute_size(qw))
                                for qw in ordered_quantized_weights))
     checksums = [0 for _ in range(world_size)]
