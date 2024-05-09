@@ -139,6 +139,12 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
              "changing any of the codes will count towards the limit. If more than this many code groups have changed, "
              "the algorithm will rollback the changes with least update norm until the constraint is satisfied.",
     )
+    parser.add_argument(
+        "--beam_size",
+        type=int,
+        default=1,
+        help="Beam size when updating codes; higher is slower but more accurate. For single codebook, use beam_size=1",
+    )
 
 
     parser.add_argument(
