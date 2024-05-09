@@ -183,6 +183,8 @@ class StraightThroughAdamW(ConfigurableAdamW):
                     assert all(part.untyped_storage().data_ptr() == combined_grad_buffer.untyped_storage().data_ptr()
                                for part in gather_buffers)
                     aggregated_grads_by_name[name] = combined_grad_buffer
+                    #TODO REMOVE
+                    gather_buffers[1] = gather_buffers[1][:-1]
                 else:
                     assert isinstance(quantized_weight, YourQuantizedWeightIsInAnotherRank)
                     destination_rank = self.quantized_weights_by_name[name].rank
