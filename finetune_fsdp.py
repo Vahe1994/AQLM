@@ -646,6 +646,7 @@ def main():
         sharded=(world_size > 1),
         verbose=args.verbose_optimizer,
     )
+    del named_quantized_params
 
     metadata = dict(
         current_epoch=0,
