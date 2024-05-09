@@ -3,7 +3,7 @@ import os
 from contextlib import contextmanager
 from copy import deepcopy
 from itertools import chain
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict
 
 import torch
 import torch.nn as nn
@@ -361,3 +361,7 @@ def verify_dequantized_model(dequantized_model: nn.Module, master_parameters: di
         assert param_or_buffer.shape == master_param_or_buffer.shape
         unmatched_master_parameters.remove(name)
     assert len(unmatched_master_parameters) == 0, f"Found unmatched tensors: {unmatched_master_parameters}"
+
+
+def get_original_named_parameters_from_fsdp_module(dequantized_model) -> Dict[str, nn.Parameter]:
+    return {name.replace('_fsdp_wrapped_module.', ''): param for name, param in dequantized_model.named_parameters()}

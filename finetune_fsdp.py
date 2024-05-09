@@ -23,7 +23,8 @@ from tqdm.auto import tqdm
 from src.aq import QuantizedWeight, QuantizedLinear
 from src.aq_ops import IntCodes, master_rank_first, one_rank_at_a_time, is_signed
 from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
-from src.modelutils import get_model, infer_block_classes, create_dequantized_model
+from src.modelutils import get_model, infer_block_classes, create_dequantized_model, \
+    get_original_named_parameters_from_fsdp_module
 from src.pv_optimizer import StraightThroughAdamW
 
 try:
@@ -536,19 +537,32 @@ def _save_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Mo
         exec(args.on_save)
 
 
-def _save_model(args: argparse.Namespace, quantized_model: nn.Module):
+def _save_model(args: argparse.Namespace, dequantized_model: FullyShardedDataParallel, optimizer: StraightThroughAdamW):
     """Save consolidated model state dict"""
-    os.makedirs(args.save, exist_ok=True)
+    output_path = os.path.join(args.save, "best_model")
+    os.makedirs(output_path, exist_ok=True)
     rank = torch.distributed.get_rank()
+
+    quantized_weight_names = set()
+    for name, quantized_weight in optimizer.iterate_local_quantized_weights():
+        torch.save(quantized_weight, os.path.join(output_path, f"{name}.pth"))
+        quantized_weight_names.add(name)
+
     with FullyShardedDataParallel.state_dict_type(
-            quantized_model,
+            dequantized_model,
             StateDictType.FULL_STATE_DICT,
             state_dict_config=FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
     ):
-        model_state_dict = quantized_model.state_dict()
+        model_state_dict = dequantized_model.state_dict()
         if rank == 0:
-            torch.save(model_state_dict, os.path.join(args.save, f'best_model_state_dict.pt'))
-            print(f"Saved {os.path.join(args.save, f'best_model_state_dict.pt')}")
+            non_quantized_state_dict = dict()
+            for name, tensor in dequantized_model.state_dict().items():
+                if name in quantized_weight_names:
+                    quantized_weight_names.remove(name)
+                else:
+                    non_quantized_state_dict[name] = tensor
+            torch.save(model_state_dict, os.path.join(output_path, "non_quantized_state_dict.pth"))
+            print(f"Saved best model to {output_path}")
 
 
 def main():
@@ -616,8 +630,7 @@ def main():
             print(dequantized_model)
             for name, param in dequantized_model.named_parameters():
                 print(name, param.shape, param.dtype)
-        named_dequantized_params = {name.replace('_fsdp_wrapped_module.', ''): param
-                                    for name, param in dequantized_model.named_parameters()}
+        named_dequantized_params = get_original_named_parameters_from_fsdp_module(dequantized_model)
         assert all(name in named_dequantized_params for name in named_quantized_params)
 
         for quantized_weight in named_quantized_params.values():
@@ -718,7 +731,7 @@ def main():
                         metadata['best_eval_perplexity'] = perplexity_scores[args.eval_datasets[0]]
                         metadata['best_step'] = metadata['total_optimizer_steps']
                         if args.keep_best_model:
-                            _save_model(args, dequantized_model)
+                            _save_model(args, dequantized_model, optimizer)
                 if args.wandb and rank == 0:
                     wandb.log(metadata, step=metadata['total_microbatches'])
                 if args.save_every_steps and metadata['total_optimizer_steps'] % args.save_every_steps == 0:
