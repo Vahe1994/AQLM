@@ -195,7 +195,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
 
         for handle in async_ops:
             handle.wait()
-        if self.sharded:
+        if self.verbose:
             for name, grad in aggregated_grads_by_name.items():
                 print('DEBUG aggregated grads:', name, grad.norm())
         return aggregated_grads_by_name
@@ -228,8 +228,9 @@ class StraightThroughAdamW(ConfigurableAdamW):
             # if sharded, every rank propagates gradients only for the QuantizedWeight instances owned by this rank
             with torch.enable_grad():
                 for name, quantized_weight in self.quantized_weights_by_name.items():
-                    grad = aggregated_grads_by_name[name]
-                    quantized_weight.forward().backward(grad)
+                    if isinstance(quantized_weight, QuantizedWeight):
+                        grad = aggregated_grads_by_name[name]
+                        quantized_weight.forward().backward(grad)
 
     @torch.no_grad()
     def _optimize_quantized_weights(self):
