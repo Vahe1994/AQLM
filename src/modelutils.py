@@ -268,7 +268,7 @@ def save_not_quantized_weights(model: nn.Module, save_dir: str):
     torch.save(not_quantized_weights, os.path.join(save_dir, "not_quantized_weights.pt"))
 
 
-def infer_block_classes(model: nn.Module, block_type: str) -> Tuple[type, ...]:
+def infer_block_classes(model: nn.Module, block_type: str) -> Tuple[type[nn.Module], ...]:
     """find transformer block classes that should be wrapped with inner FullyShardedDataParallel (auto_wrap_policy)"""
     transformer_block_types = []
     for module in model.modules():

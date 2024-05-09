@@ -23,7 +23,8 @@ from tqdm.auto import tqdm
 from src.aq import QuantizedWeight, QuantizedLinear
 from src.aq_ops import IntCodes, master_rank_first, one_rank_at_a_time, is_signed
 from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
-from src.modelutils import get_model, infer_block_classes
+from src.modelutils import get_model, infer_block_classes, create_dequantized_model
+from src.pv_optimizer import StraightThroughAdamW
 
 try:
     import wandb
@@ -312,7 +313,7 @@ def load_base_model(args: argparse.Namespace, device: torch.device) -> FullyShar
     )
 
 
-def load_quantized_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
+def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
     if not args.monkeypatch_old_pickle:
         quantized_model = get_model(
             args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
@@ -328,8 +329,6 @@ def load_quantized_model(args: argparse.Namespace, device: torch.device) -> Full
         quantized_model.gradient_checkpointing_enable()
         quantized_model.enable_input_require_grads()
 
-    transformer_block_types = infer_block_classes(quantized_model, args.block_type)
-
     # convert QuantizedModel state dict to make it compatible with FSDP
     for name, module in quantized_model.named_modules():
         if isinstance(module, QuantizedWeight):
@@ -341,17 +340,22 @@ def load_quantized_model(args: argparse.Namespace, device: torch.device) -> Full
             assert module.codes is None and isinstance(module.codes_storage, IntCodes)
     assert any(isinstance(module, IntCodes) for module in quantized_model.modules())
 
-    blocks_to_wrap = (IntCodes,) + transformer_block_types
+    dequantized_model, named_quantized_params = create_dequantized_model(
+        quantized_model, reuse_non_quantized=True, dequantized_dtype=args.autocast_dtype)
+    del quantized_model
+
+    transformer_block_types = infer_block_classes(dequantized_model, args.block_type)
+
     mixed_precision = None
     if args.amp_dtype is not None:
         mixed_precision = MixedPrecision(
             param_dtype=args.amp_dtype,
             reduce_dtype=args.amp_dtype,
-            _module_classes_to_ignore=(IntCodes,) + tuple(transformers.pytorch_utils.ALL_LAYERNORM_LAYERS)
+            _module_classes_to_ignore=transformer_block_types + tuple(transformers.pytorch_utils.ALL_LAYERNORM_LAYERS)
         )
     return FullyShardedDataParallel(
-        quantized_model,
-        auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, blocks_to_wrap),
+        dequantized_model,
+        auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, transformer_block_types),
         mixed_precision=mixed_precision,
         use_orig_params=True,
         device_id=device,
@@ -504,9 +508,9 @@ def main():
     torch.cuda.set_device(device)
 
     assert args.batch_size is not None, "please specify batch size"
+    assert args.batch_size % world_size == 0
     if args.microbatch_size is None:
         args.microbatch_size = args.batch_size // world_size
-    assert args.batch_size % world_size == 0
     assert args.batch_size % (world_size * args.microbatch_size) == 0
     grad_accumulation_steps = args.batch_size // (world_size * args.microbatch_size)
     args.dtype = getattr(torch, args.dtype) if args.dtype != 'auto' else 'auto'
@@ -548,14 +552,33 @@ def main():
 
     with one_rank_at_a_time(local=True):
         base_model = load_base_model(args, device)
-        quantized_model = load_quantized_model(args, device)
-    if rank == 0:
-        print("Wrapped model:")
-        print(quantized_model)
-        for name, param in quantized_model.named_parameters():
-            print(name, param.shape, param.dtype)
+        dequantized_model, named_quantized_params = load_dequantized_model(args, device)
+        if rank == 0:
+            print("Wrapped model:")
+            print(dequantized_model)
+            for name, param in dequantized_model.named_parameters():
+                print(name, param.shape, param.dtype)
 
-    optimizer = torch.optim.Adam(quantized_model.parameters(), lr=args.lr, betas=(args.adam_beta1, args.adam_beta2))
+    optimizer = StraightThroughAdamW(
+        named_dequantized_params=dict(dequantized_model.named_parameters()),
+        named_quantized_params=named_quantized_params,
+        update_codes=dict(
+            lr=args.code_lr, betas=args.code_betas, lamb=args.lamb,
+            compute_dtype=args.master_dtype, exp_avg_dtype=torch.float16, exp_avg_sq_dtype=torch.bfloat16), #TODO set dtype in args
+        update_codebooks_and_scales=dict(
+            lr=args.codebook_lr, betas=args.codebook_betas, lamb=args.lamb,
+            compute_dtype=args.master_dtype,
+        ),
+        update_non_quantized_parameters=dict(
+            lr=args.codebook_lr, betas=args.codebook_betas, lamb=True, debias=True,
+            compute_dtype=args.master_dtype,
+        ),
+        max_code_change_per_step=args.max_code_change_per_step,
+        beam_size=args.beam_size,
+        dequantized_dtype=args.autocast_dtype,
+        sharded=False, #TODO enable sharded
+    )
+
     metadata = dict(
         current_epoch=0,
         microbatches_since_epoch_start=0,
@@ -570,7 +593,7 @@ def main():
         best_step=0,
     )
 
-    _load_state(args, metadata, quantized_model, optimizer)
+    _load_state(args, metadata, dequantized_model, optimizer)
     torch.distributed.barrier()
 
     for current_epoch in range(args.max_epochs):
@@ -586,13 +609,13 @@ def main():
             metadata['total_microbatches'] += 1
 
             batch = {k: v.to(device) for k, v in batch.items()}
-            loss = compute_loss_on_batch(batch, base_model, quantized_model, amp_dtype=args.amp_dtype)
+            loss = compute_loss_on_batch(batch, base_model, dequantized_model, amp_dtype=args.amp_dtype)
 
             metadata['loss_numerator'] += loss.item()
             metadata['loss_denominator'] += 1
             metadata['grad_steps_accumulated'] += 1
             if metadata['grad_steps_accumulated'] < grad_accumulation_steps:
-                with quantized_model.no_sync() if args.minimize_sync else nullcontext():
+                with dequantized_model.no_sync() if args.minimize_sync else nullcontext():
                     (loss / grad_accumulation_steps).backward()
             else:
                 (loss / grad_accumulation_steps).backward()
@@ -614,7 +637,7 @@ def main():
                               f"\tloss = {metadata['aggregated_loss']:.9f}")
 
                 if args.eval_every_steps and metadata['total_optimizer_steps'] % args.eval_every_steps == 0:
-                    perplexity_scores = compute_validation_perplexities(args, quantized_model, eval_datasets)
+                    perplexity_scores = compute_validation_perplexities(args, dequantized_model, eval_datasets)
                     for dataset_name, perplexity in perplexity_scores.items():
                         metadata[f'perplexity_{dataset_name}'] = perplexity
                     metric_name = metadata['early_stop_on']
@@ -624,16 +647,16 @@ def main():
                         metadata['best_eval_perplexity'] = perplexity_scores[args.eval_datasets[0]]
                         metadata['best_step'] = metadata['total_optimizer_steps']
                         if args.keep_best_model:
-                            _save_model(args, quantized_model)
+                            _save_model(args, dequantized_model)
                 if args.wandb and rank == 0:
                     wandb.log(metadata, step=metadata['total_microbatches'])
                 if args.save_every_steps and metadata['total_optimizer_steps'] % args.save_every_steps == 0:
-                    _save_state(args, metadata, quantized_model, optimizer)
+                    _save_state(args, metadata, dequantized_model, optimizer)
 
         metadata['microbatches_since_epoch_start'] = 0
         metadata['current_epoch'] += 1
 
-    _save_state(args, metadata, quantized_model, optimizer)
+    _save_state(args, metadata, dequantized_model, optimizer)
 
 
 if __name__ == "__main__":
