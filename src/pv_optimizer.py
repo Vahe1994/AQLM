@@ -64,6 +64,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                  sharded: bool = False,
                  verbose: bool = True,
                  **kwargs):
+        self.sharded = sharded
         assert all(name in named_dequantized_params for name in named_quantized_params), "param names mismatch"
         assert all(isinstance(qw, QuantizedWeight) for qw in named_quantized_params.values())
         if sharded:
@@ -97,7 +98,6 @@ class StraightThroughAdamW(ConfigurableAdamW):
         self.max_code_change_per_step = max_code_change_per_step
         self.stochastic_rounding_tau = stochastic_rounding_tau
         self.delta_decay = delta_decay
-        self.sharded = sharded
         self.verbose = verbose
 
     def _select_optimized_parameters(
