@@ -58,7 +58,7 @@ def add_model_args(parser: argparse.ArgumentParser):
         help="Model seqlen and calibration data context length.",
     )
     parser.add_argument(
-        "--dtype",
+        "--load_dtype",
         type=str,
         default="auto",
         choices=["auto", "float16", "float32", "bfloat16"],
@@ -339,9 +339,9 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
 
 def load_base_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
     base_model = get_model(
-        args.base_model, load_quantized=None, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
+        args.base_model, load_quantized=None, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
         attn_implementation=args.attn_implementation,
-    ).to(dtype=args.dtype if args.dtype != 'auto' else None)
+    ).to(dtype=args.load_dtype if args.load_dtype != 'auto' else None)
     base_model.train(False)
     for param in base_model.parameters():
         param.requires_grad = False
@@ -358,7 +358,7 @@ def load_base_model(args: argparse.Namespace, device: torch.device) -> FullyShar
 def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
     if not args.monkeypatch_old_pickle:
         quantized_model = get_model(
-            args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
+            args.base_model, args.quantized_model, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
             attn_implementation=args.attn_implementation
         ).to(args.master_dtype)  # master parameters
     else:
@@ -383,7 +383,7 @@ def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> Fu
     assert any(isinstance(module, IntCodes) for module in quantized_model.modules())
 
     dequantized_model, named_quantized_params = create_dequantized_model(
-        quantized_model, reuse_non_quantized=True, dequantized_dtype=args.amp_dtype)
+        quantized_model, dequantized_dtype=args.amp_dtype, reuse_non_quantized=True)
     del quantized_model
 
     transformer_block_types = infer_block_classes(dequantized_model, args.block_type)
@@ -416,10 +416,10 @@ def _scary_load_quantized_model(args: argparse.Namespace):
     if not hasattr(transformers.models.llama.modeling_llama.LlamaAttention, 'attention_dropout'):
         transformers.models.llama.modeling_llama.LlamaAttention.attention_dropout = 0
     quantized_model = get_model(
-        args.base_model, None, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
+        args.base_model, None, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
         attn_implementation=args.attn_implementation).to(args.master_dtype)
     quantized_model_src = get_model(
-        args.base_model, args.quantized_model, dtype=args.dtype, trust_remote_code=args.trust_remote_code,
+        args.base_model, args.quantized_model, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
         attn_implementation=args.attn_implementation
     )
     for module in quantized_model_src.modules():
@@ -469,7 +469,8 @@ def compute_validation_perplexities(args: argparse.Namespace, model: nn.Module, 
         if rank == 0:
             print(f"Evaluating perplexity on {dataset_name} ...")
         device = next(model.parameters()).device
-        amp_dtype = args.amp_dtype if args.amp_dtype is not None else (args.dtype if args.dtype != 'auto' else None)
+        original_dtype = args.load_dtype if args.load_dtype != 'auto' else None
+        amp_dtype = args.amp_dtype if args.amp_dtype is not None else original_dtype
         ppl = evaluate_perplexity(model, eval_dataset, args.model_seqlen, device=device, amp_dtype=amp_dtype)
         if rank == 0:
             print(f"{dataset_name} perplexity: {ppl:.9f}")
@@ -556,7 +557,7 @@ def main():
         args.microbatch_size = args.batch_size // world_size
     assert args.batch_size % (world_size * args.microbatch_size) == 0
     grad_accumulation_steps = args.batch_size // (world_size * args.microbatch_size)
-    args.dtype = getattr(torch, args.dtype) if args.dtype != 'auto' else 'auto'
+    args.load_dtype = getattr(torch, args.load_dtype) if args.load_dtype != 'auto' else 'auto'
     args.amp_dtype = getattr(torch, args.amp_dtype) if args.amp_dtype is not None else None
     args.code_dtype = getattr(torch, args.code_dtype) if args.code_dtype is not None else None
     args.master_dtype = getattr(torch, args.master_dtype)
