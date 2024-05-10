@@ -17,7 +17,6 @@ from src.aq_ops import is_signed
 from src.modelutils import get_model, save_quantized_model
 
 
-
 def load_quantized_model_with_old_pickle(base_model_name: str, quantized_model_name: str, **kwargs):
     """Hacky way to allow compatibility between old *pickled* layers and new transformers"""
     # because patching it for the fourth time is better than writing a proper saver once >.<
