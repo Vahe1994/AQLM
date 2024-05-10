@@ -273,7 +273,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         maybe_individual_msg = ""
                         if quantized_weight.num_codebooks > 1:
                             subcode_change = torch.not_equal(prev_codes, new_codes).float().mean().item()
-                            maybe_individual_msg = f" | individual code change {subcode_change}\n"
+                            maybe_individual_msg = f" | individual code change {subcode_change}"
                         maybe_delta_msg = ""
                         if self.delta_decay != 1:
                             _dequantized_weight = quantized_weight()
