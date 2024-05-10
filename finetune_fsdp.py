@@ -48,12 +48,6 @@ def add_model_args(parser: argparse.ArgumentParser):
         help="path to quantized model",
     )
     parser.add_argument(
-        "--load_quantized_state_dict",
-        type=str,
-        default=None,
-        help="if specified, load quantized model state dict from this path",
-    )
-    parser.add_argument(
         '--monkeypatch_old_pickle',
         action="store_true",
         help="If set, load quantized_model in a hacky way that allows pickled models with older transformers/torch.",
@@ -409,12 +403,6 @@ def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> Tu
             module.wrap_codes_for_fsdp_()
             assert module.codes is None and isinstance(module.codes_storage, IntCodes)
     assert any(isinstance(module, IntCodes) for module in quantized_model.modules())
-
-    if args.load_quantized_state_dict is not None:
-        print(f"Loading quantized model state dict from {args.load_quantized_state_dict}")
-        state_dict = torch.load(args.load_quanized_state_dict, map_location='cpu')
-        quantized_model.load_state_dict(state_dict, strict=True)
-        del state_dict
 
     dequantized_model, named_quantized_params = create_dequantized_model(
         quantized_model, dequantized_dtype=args.amp_dtype, reuse_non_quantized=True)
