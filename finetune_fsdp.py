@@ -5,7 +5,6 @@ based on https://github.com/huggingface/transformers/blob/main/examples/pytorch/
 import argparse
 import os
 from contextlib import nullcontext
-from copy import deepcopy
 from functools import partial
 from typing import Optional, Tuple
 
@@ -20,7 +19,8 @@ import torch.distributed
 from torch.distributed.fsdp import FullyShardedDataParallel, StateDictType, FullStateDictConfig, MixedPrecision
 from tqdm.auto import tqdm
 
-from src.aq import QuantizedWeight, QuantizedLinear
+from convert_legacy_model_format import load_quantized_model_with_old_pickle
+from src.aq import QuantizedWeight
 from src.aq_ops import IntCodes, master_rank_first, one_rank_at_a_time, is_signed
 from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
 from src.modelutils import get_model
@@ -385,7 +385,10 @@ def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> Tu
             attn_implementation=args.attn_implementation
         ).to(args.master_dtype)  # master parameters
     else:
-        quantized_model = _scary_load_quantized_model(args).to(args.master_dtype)
+        quantized_model = load_quantized_model_with_old_pickle(
+            args.base_model, args.quantized_model, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
+            attn_implementation=args.attn_implementation
+        ).to(args.master_dtype)
 
     quantized_model.config.use_cache = False
     quantized_model.train(True)  # note: HF gradient checkpoints do not work for some models without train(True); see
@@ -426,47 +429,6 @@ def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> Tu
         device_id=device,
     )
     return fsdp_model, named_quantized_params
-
-
-def _scary_load_quantized_model(args: argparse.Namespace):
-    """Hacky way to allow compatibility between old *pickled* layers and new transformers"""
-    # because patching it for the fourth time is better than writing a proper saver once >.<
-    import transformers.activations
-    if not hasattr(transformers.activations, 'SiLUActivation'):
-        transformers.activations.SiLUActivation = deepcopy(torch.nn.SiLU)
-        transformers.activations.SiLUActivation.inplace = False
-        # https://github.com/huggingface/transformers/issues/28496
-    if not hasattr(transformers.models.llama.modeling_llama.LlamaAttention, 'attention_dropout'):
-        transformers.models.llama.modeling_llama.LlamaAttention.attention_dropout = 0
-    quantized_model = get_model(
-        args.base_model, None, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
-        attn_implementation=args.attn_implementation).to(args.master_dtype)
-    quantized_model_src = get_model(
-        args.base_model, args.quantized_model, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
-        attn_implementation=args.attn_implementation
-    )
-    for module in quantized_model_src.modules():
-        if isinstance(module, QuantizedWeight) and not hasattr(module, 'codes_storage'):
-            module.codes_storage = None  # backwards compatibility with older pickled snapshots
-
-    lut = {}
-    for name, module in quantized_model_src.named_modules():
-        for child_name, child_module in module.named_children():
-            if isinstance(child_module, QuantizedWeight):
-                lut[name + '.' + child_name] = child_module
-    print(f"found {len(lut)} quantized weight matrices")
-    for name, module in quantized_model.named_modules():
-        for child_name, child_module in module.named_children():
-            if name + '.' + child_name + '.quantized_weight' in lut:
-                quantized_weight = lut.pop(name + '.' + child_name + '.quantized_weight')
-                assert isinstance(child_module, nn.Linear)
-                setattr(module, child_name, QuantizedLinear(quantized_weight, bias=child_module.bias))
-    assert not lut, list(lut.keys())
-    quantized_model.to(args.master_dtype)
-    quantized_model.load_state_dict(quantized_model_src.state_dict())
-    import warnings
-    warnings.warn("You should be ashamed of yourself.")
-    return quantized_model
 
 
 def compute_loss_on_batch(
