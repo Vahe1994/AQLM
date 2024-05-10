@@ -70,7 +70,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
                 memory_format=torch.preserve_format,
                 device=group["exp_avg_sq_device"],
                 pin_memory=pin_memory)
-        if group["betas"] and "v_hat_max" not in state:
+        if group["amsgrad"] and "v_hat_max" not in state:
             pin_memory = group["v_hat_max_device"] == torch.device("cpu")
             state["v_hat_max"] = torch.zeros_like(
                 param, dtype=group['v_hat_max_dtype'],
