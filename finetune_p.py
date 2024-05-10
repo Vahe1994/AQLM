@@ -1,5 +1,5 @@
 """
-Fine-tune an LLM that was previously quantized with AQLM;
+Fine-tune an LLM that was previously quantized with AQLM; update only continuous parameters
 based on https://github.com/huggingface/transformers/blob/main/examples/pytorch/language-modeling/run_clm.py
 """
 import argparse
@@ -7,7 +7,7 @@ import os
 from contextlib import nullcontext
 from copy import deepcopy
 from functools import partial
-from typing import Optional, Tuple
+from typing import Tuple, Optional
 
 import transformers
 import datasets
@@ -23,9 +23,7 @@ from tqdm.auto import tqdm
 from src.aq import QuantizedWeight, QuantizedLinear
 from src.aq_ops import IntCodes, master_rank_first, one_rank_at_a_time, is_signed
 from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
-from src.modelutils import get_model, infer_block_classes, create_dequantized_model, \
-    get_original_named_parameters_from_fsdp_module
-from src.pv_optimizer import StraightThroughAdamW
+from src.modelutils import get_model
 
 try:
     import wandb
@@ -46,12 +44,6 @@ def add_model_args(parser: argparse.ArgumentParser):
         type=str,
         required=True,
         help="path to quantized model",
-    )
-    parser.add_argument(
-        "--load_quantized_state_dict",
-        type=str,
-        default=None,
-        help="if specified, load quantized model state dict from this path",
     )
     parser.add_argument(
         '--monkeypatch_old_pickle',
@@ -97,12 +89,6 @@ def add_model_args(parser: argparse.ArgumentParser):
         "--attn_implementation", type=str, default=None,
         help="Attention implementation for both teacher and student models: eager, sdpa, or flash_attention_2"
     )
-    parser.add_argument(
-        "--limit_parallel_inits",
-        type=int,
-        default=1,
-        help="this many ranks (per host) initialize their model in parallel. This parameter is meant to save host RAM.",
-    )
 
 
 def add_finetuning_args(parser: argparse.ArgumentParser):
@@ -110,75 +96,19 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         "--lr",
         type=float,
         default=1e-5,
-        help="finetuning learning rate for continuous params",
+        help="finetuning learning rate",
     )
     parser.add_argument(
         "--adam_beta1",
         type=float,
         default=0.90,
-        help="Adam beta1 for continuous params",
+        help="Adam beta1",
     )
     parser.add_argument(
         "--adam_beta2",
         type=float,
         default=0.98,
-        help="Adam beta2 for continuous params",
-    )
-
-    parser.add_argument(
-        "--code_lr",
-        type=float,
-        default=1e-2,
-        help="finetuning learning rate for discrete codes",
-    )
-    parser.add_argument(
-        "--code_beta1",
-        type=float,
-        default=0.0,
-        help="Adam beta1 for discrete params",
-    )
-    parser.add_argument(
-        "--code_beta2",
-        type=float,
-        default=0.98,
-        help="Adam beta2 for discrete params",
-    )
-    parser.add_argument(
-        "--max_code_change_per_step",
-        type=float,
-        default=1e-3,
-        help="Maximum number of code groups that can be changed during one update to codes. "
-             "This constraint is enforced on a per-tensor level. If the weight is represented with multiple codes, "
-             "changing any of the codes will count towards the limit. If more than this many code groups have changed, "
-             "the algorithm will rollback the changes with least update norm until the constraint is satisfied.",
-    )
-    parser.add_argument(
-        "--beam_size",
-        type=int,
-        default=1,
-        help="Beam size when updating codes; higher is slower but more accurate. For single codebook, use beam_size=1",
-    )
-    parser.add_argument(
-        "--delta_decay",
-        type=float,
-        default=0,
-        help="If not zero, every straight-through buffer will decay to the quantized weight with moving average. "
-             "straight_through_buffer = (1 - delta_decay) * straight_through_buffer + delta_decay * quantized_weight.",
-    )
-    parser.add_argument(
-        '--code_adam_16bit',
-        action="store_true",
-        help="If set, adam statistics for codes will be stored as float16 (exp_avg and v_hat) or bfloat16(exp_avg_sq)",
-    )
-    parser.add_argument(
-        '--lamb',
-        action="store_true",
-        help="If set, use Lamb (adam with trust ratio) for both continuous and discrete parameters",
-    )
-    parser.add_argument(
-        '--verbose_optimizer',
-        action="store_true",
-        help="If set, the optimizer will print beam search results, tensors norms, etc",
+        help="Adam beta2",
     )
     parser.add_argument(
         "--batch_size",
@@ -331,7 +261,6 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     if is_tokenized(dataset):
         if torch.distributed.get_rank() == 0:
             print("Dataset already tokenized")
-            assert len(dataset[0]['input_ids']) == args.model_seqlen
         return dataset
 
     text_column_name = 'text' if 'text' in dataset.column_names else next(iter(dataset.column_names))
@@ -365,6 +294,19 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     return lm_dataset
 
 
+def infer_block_classes(model: nn.Module, block_type: str) -> Tuple[type, ...]:
+    """find transformer block classes that should be wrapped with inner FullyShardedDataParallel (auto_wrap_policy)"""
+    transformer_block_types = []
+    for module in model.modules():
+        if module.__class__.__name__ == block_type:
+            transformer_block_types.append(type(module))
+    if not transformer_block_types:
+        raise ValueError(f"Could not find {block_type} among model layers")
+    transformer_block_types = tuple(transformer_block_types)
+    assert any(isinstance(module, transformer_block_types) for module in model.modules())
+    return transformer_block_types
+
+
 def load_base_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
     base_model = get_model(
         args.base_model, load_quantized=None, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
@@ -383,7 +325,7 @@ def load_base_model(args: argparse.Namespace, device: torch.device) -> FullyShar
     )
 
 
-def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> Tuple[FullyShardedDataParallel, dict]:
+def load_quantized_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
     if not args.monkeypatch_old_pickle:
         quantized_model = get_model(
             args.base_model, args.quantized_model, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
@@ -399,6 +341,8 @@ def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> Tu
         quantized_model.gradient_checkpointing_enable()
         quantized_model.enable_input_require_grads()
 
+    transformer_block_types = infer_block_classes(quantized_model, args.block_type)
+
     # convert QuantizedModel state dict to make it compatible with FSDP
     for name, module in quantized_model.named_modules():
         if isinstance(module, QuantizedWeight):
@@ -410,33 +354,21 @@ def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> Tu
             assert module.codes is None and isinstance(module.codes_storage, IntCodes)
     assert any(isinstance(module, IntCodes) for module in quantized_model.modules())
 
-    if args.load_quanized_state_dict is not None:
-        print(f"Loading previously finetuned state dict from {args.load_quanized_state_dict}")
-        state_dict = torch.load(args.load_quanized_state_dict, map_location='cpu')
-        quantized_model.load_state_dict(state_dict, strict=True)
-        del state_dict
-
-    dequantized_model, named_quantized_params = create_dequantized_model(
-        quantized_model, dequantized_dtype=args.amp_dtype, reuse_non_quantized=True)
-    del quantized_model
-
-    transformer_block_types = infer_block_classes(dequantized_model, args.block_type)
-
+    blocks_to_wrap = (IntCodes,) + transformer_block_types
     mixed_precision = None
     if args.amp_dtype is not None:
         mixed_precision = MixedPrecision(
             param_dtype=args.amp_dtype,
             reduce_dtype=args.amp_dtype,
-            _module_classes_to_ignore=transformer_block_types + tuple(transformers.pytorch_utils.ALL_LAYERNORM_LAYERS)
+            _module_classes_to_ignore=(IntCodes,) + tuple(transformers.pytorch_utils.ALL_LAYERNORM_LAYERS)
         )
-    fsdp_model = FullyShardedDataParallel(
-        dequantized_model,
-        auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, transformer_block_types),
+    return FullyShardedDataParallel(
+        quantized_model,
+        auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, blocks_to_wrap),
         mixed_precision=mixed_precision,
         use_orig_params=True,
         device_id=device,
     )
-    return fsdp_model, named_quantized_params
 
 
 def _scary_load_quantized_model(args: argparse.Namespace):
@@ -503,8 +435,8 @@ def compute_validation_perplexities(args: argparse.Namespace, model: nn.Module, 
         if rank == 0:
             print(f"Evaluating perplexity on {dataset_name} ...")
         device = next(model.parameters()).device
-        original_dtype = args.load_dtype if args.load_dtype != 'auto' else None
-        amp_dtype = args.amp_dtype if args.amp_dtype is not None else original_dtype
+        default_dtype = args.load_dtype if args.load_dtype != 'auto' else None
+        amp_dtype = args.amp_dtype if args.amp_dtype is not None else default_dtype
         ppl = evaluate_perplexity(model, eval_dataset, args.model_seqlen, device=device, amp_dtype=amp_dtype)
         if rank == 0:
             print(f"{dataset_name} perplexity: {ppl:.9f}")
@@ -512,14 +444,13 @@ def compute_validation_perplexities(args: argparse.Namespace, model: nn.Module, 
     return perplexities
 
 
-def _load_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Module, optimizer: StraightThroughAdamW):
+def _load_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Module, optimizer: torch.optim.Optimizer):
     rank = torch.distributed.get_rank()
     if args.save is None or not os.path.exists(args.save):
         if args.save is not None and rank == 0:
             print(f"No checkpoint found at {args.save}")
     else:
         with FullyShardedDataParallel.state_dict_type(quantized_model, StateDictType.LOCAL_STATE_DICT):
-            # this loads non-quantized weights and de-quantized versions of QuantizedWeight instances
             state_dict_ptr = quantized_model.state_dict()
             loaded_state_dict = torch.load(os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'))
             with torch.no_grad():
@@ -528,7 +459,6 @@ def _load_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Mo
                 assert len(loaded_state_dict) == 0, f"Unused keys:, {tuple(loaded_state_dict.keys())}"
             del state_dict_ptr, loaded_state_dict
 
-        # v-- loading optimizer state dict also loads all QuantizedWeights and straight-through buffers
         optimizer.load_state_dict(torch.load(
             os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'),
             map_location='cpu'))
@@ -543,7 +473,7 @@ def _load_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Mo
             print(f"Loaded training state from {args.save}: {metadata}")
 
 
-def _save_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Module, optimizer: StraightThroughAdamW):
+def _save_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Module, optimizer: torch.optim.Optimizer):
     if args.save is None:
         return
     rank = torch.distributed.get_rank()
@@ -553,51 +483,28 @@ def _save_state(args: argparse.Namespace, metadata: dict, quantized_model: nn.Mo
         torch.save(metadata, os.path.join(args.save, 'metadata.pt'))
     with FullyShardedDataParallel.state_dict_type(quantized_model, StateDictType.LOCAL_STATE_DICT):
         torch.save(quantized_model.state_dict(), os.path.join(args.save, f'quantized_model_state_dict_rank{rank}.pt'))
-        # model saves non-quantized weights and dequantized versions of QuantizedWeight; the latter is not necessary
     torch.save(optimizer.state_dict(), os.path.join(args.save, f'optimizer_state_dict_rank{rank}.pt'))
-    # optimizer state dict saves statistics QuantizedWeight instances and straight-through buffers
     if args.on_save:
         exec(args.on_save)
 
 
-def _save_model(args: argparse.Namespace, dequantized_model: FullyShardedDataParallel, optimizer: StraightThroughAdamW):
+
+def _save_model(args: argparse.Namespace, quantized_model: nn.Module):
     """Save consolidated model state dict"""
-    output_path = os.path.join(args.save, "best_model")
-    os.makedirs(output_path, exist_ok=True)
+    os.makedirs(args.save, exist_ok=True)
     rank = torch.distributed.get_rank()
-    world_size = torch.distributed.get_world_size()
-
-    local_quantized_weight_names = set()
-    for name, quantized_weight in optimizer.iterate_local_quantized_weights():
-        torch.save(quantized_weight, os.path.join(output_path, f"{name}.pth"))
-        local_quantized_weight_names.add(name)
-
-    quantized_weight_names_by_rank = [None for _ in range(world_size)] if rank == 0 else None
-    torch.distributed.gather_object(local_quantized_weight_names, quantized_weight_names_by_rank, dst=0)
-
     with FullyShardedDataParallel.state_dict_type(
-            dequantized_model,
+            quantized_model,
             StateDictType.FULL_STATE_DICT,
             state_dict_config=FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
     ):
-        model_state_dict = dequantized_model.state_dict()
+        model_state_dict = quantized_model.state_dict()
         if rank == 0:
-            all_quantized_weight_names = set()
-            for local_quantized_weight_names in quantized_weight_names_by_rank:
-                all_quantized_weight_names |= set(local_quantized_weight_names)
-
-            non_quantized_state_dict = dict()
-            for name, tensor in model_state_dict.items():
-                if name in all_quantized_weight_names:
-                    all_quantized_weight_names.remove(name)  # do not save de-quantized versions of quantized weights
-                else:
-                    non_quantized_state_dict[name] = tensor
-            assert len(all_quantized_weight_names) == 0, f"mismatched names: {all_quantized_weight_names}"
-            torch.save(non_quantized_state_dict, os.path.join(output_path, "non_quantized_state_dict.pth"))
-            print(f"Saved best model to {output_path}")
+            torch.save(model_state_dict, os.path.join(args.save, f'best_model_state_dict.pt'))
+            print(f"Saved {os.path.join(args.save, f'best_model_state_dict.pt')}")
 
 
-def main():
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(add_help=True)
     add_model_args(parser)
     add_data_args(parser)
@@ -612,9 +519,9 @@ def main():
     torch.cuda.set_device(device)
 
     assert args.batch_size is not None, "please specify batch size"
-    assert args.batch_size % world_size == 0
     if args.microbatch_size is None:
         args.microbatch_size = args.batch_size // world_size
+    assert args.batch_size % world_size == 0
     assert args.batch_size % (world_size * args.microbatch_size) == 0
     grad_accumulation_steps = args.batch_size // (world_size * args.microbatch_size)
     args.load_dtype = getattr(torch, args.load_dtype) if args.load_dtype != 'auto' else 'auto'
@@ -629,7 +536,7 @@ def main():
         assert args.eval_datasets is not None, f"--keep_best_model requires --eval_datasets"
     if args.wandb and rank == 0:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
-        wandb.init(config={a: getattr(args, a) for a in dir(args) if not a.startswith("_")})
+        wandb.init(config=args)
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(args.base_model)
     assert tokenizer.eos_token_id is not None
@@ -654,47 +561,16 @@ def main():
         ) for dataset_name in args.eval_datasets
     }
 
-    with one_rank_at_a_time(local=True, group_size=args.limit_parallel_inits):
+    with one_rank_at_a_time(local=True):
         base_model = load_base_model(args, device)
-        dequantized_model, named_quantized_params = load_dequantized_model(args, device)
-        if rank == 0:
-            print("Wrapped model:")
-            print(dequantized_model)
-            for name, param in dequantized_model.named_parameters():
-                print(name, param.shape, param.dtype)
-        named_dequantized_params = get_original_named_parameters_from_fsdp_module(dequantized_model)
-        assert all(name in named_dequantized_params for name in named_quantized_params)
+        quantized_model = load_quantized_model(args, device)
+    if rank == 0:
+        print("Wrapped model:")
+        print(quantized_model)
+        for name, param in quantized_model.named_parameters():
+            print(name, param.shape, param.dtype)
 
-        for quantized_weight in named_quantized_params.values():
-            quantized_weight.to(device)
-
-    optimizer = StraightThroughAdamW(
-        named_dequantized_params=named_dequantized_params,
-        named_quantized_params=named_quantized_params,
-        update_codes=dict(
-            lr=args.code_lr, betas=(args.code_beta1, args.code_beta2), lamb=args.lamb, debias=True, amsgrad=False,
-            compute_dtype=args.master_dtype,
-            exp_avg_dtype=torch.float16 if args.code_adam_16bit else args.master_dtype,
-            v_hat_max_dtype=torch.float16 if args.code_adam_16bit else args.master_dtype,
-            exp_avg_sq_dtype=torch.bfloat16 if args.code_adam_16bit else args.master_dtype,
-        ),
-        update_codebooks_and_scales=dict(
-            lr=args.lr, betas=(args.adam_beta1, args.adam_beta2), lamb=args.lamb, debias=True, amsgrad=False,
-            compute_dtype=args.master_dtype,
-        ),
-        update_non_quantized_parameters=dict(
-            lr=args.lr, betas=(args.adam_beta1, args.adam_beta2), lamb=args.lamb, debias=True, amsgrad=False,
-            compute_dtype=args.master_dtype,
-        ),
-        max_code_change_per_step=args.max_code_change_per_step,
-        delta_decay=args.delta_decay,
-        beam_size=args.beam_size,
-        dequantized_dtype=args.amp_dtype,
-        sharded=(world_size > 1),
-        verbose=args.verbose_optimizer,
-    )
-    del named_quantized_params
-
+    optimizer = torch.optim.Adam(quantized_model.parameters(), lr=args.lr, betas=(args.adam_beta1, args.adam_beta2))
     metadata = dict(
         current_epoch=0,
         microbatches_since_epoch_start=0,
@@ -709,7 +585,7 @@ def main():
         best_step=0,
     )
 
-    _load_state(args, metadata, dequantized_model, optimizer)
+    _load_state(args, metadata, quantized_model, optimizer)
     torch.distributed.barrier()
 
     for current_epoch in range(args.max_epochs):
@@ -725,13 +601,13 @@ def main():
             metadata['total_microbatches'] += 1
 
             batch = {k: v.to(device) for k, v in batch.items()}
-            loss = compute_loss_on_batch(batch, base_model, dequantized_model, amp_dtype=args.amp_dtype)
+            loss = compute_loss_on_batch(batch, base_model, quantized_model, amp_dtype=args.amp_dtype)
 
             metadata['loss_numerator'] += loss.item()
             metadata['loss_denominator'] += 1
             metadata['grad_steps_accumulated'] += 1
             if metadata['grad_steps_accumulated'] < grad_accumulation_steps:
-                with dequantized_model.no_sync() if args.minimize_sync else nullcontext():
+                with quantized_model.no_sync() if args.minimize_sync else nullcontext():
                     (loss / grad_accumulation_steps).backward()
             else:
                 (loss / grad_accumulation_steps).backward()
@@ -741,12 +617,11 @@ def main():
                 metadata['total_optimizer_steps'] += 1
 
                 if args.print_every_steps and metadata['total_optimizer_steps'] % args.print_every_steps == 0:
-                    loss_numerator_and_denominator = torch.tensor(
-                        [metadata['loss_numerator'], metadata['loss_denominator']], dtype=torch.float64, device=device)
-
-                    torch.distributed.all_reduce(loss_numerator_and_denominator, op=torch.distributed.ReduceOp.SUM)
-                    loss_numerator, loss_denominator = loss_numerator_and_denominator.tolist()
-                    metadata['aggregated_loss'] = loss_numerator / loss_denominator
+                    loss_numerator = torch.tensor([metadata['loss_numerator']], dtype=torch.float64, device=device)
+                    loss_denominator = torch.tensor([metadata['loss_denominator']], dtype=torch.float64, device=device)
+                    torch.distributed.all_reduce_coalesced(
+                        [loss_numerator, loss_denominator], op=torch.distributed.ReduceOp.SUM)
+                    metadata['aggregated_loss'] = loss_numerator.item() / loss_denominator.item()
                     metadata['loss_numerator'] = metadata['loss_denominator'] = 0
                     if rank == 0:
                         print(f"epoch {metadata['current_epoch']}\tbatch {batch_index}",
@@ -754,7 +629,7 @@ def main():
                               f"\tloss = {metadata['aggregated_loss']:.9f}")
 
                 if args.eval_every_steps and metadata['total_optimizer_steps'] % args.eval_every_steps == 0:
-                    perplexity_scores = compute_validation_perplexities(args, dequantized_model, eval_datasets)
+                    perplexity_scores = compute_validation_perplexities(args, quantized_model, eval_datasets)
                     for dataset_name, perplexity in perplexity_scores.items():
                         metadata[f'perplexity_{dataset_name}'] = perplexity
                     metric_name = metadata['early_stop_on']
@@ -764,17 +639,13 @@ def main():
                         metadata['best_eval_perplexity'] = perplexity_scores[args.eval_datasets[0]]
                         metadata['best_step'] = metadata['total_optimizer_steps']
                         if args.keep_best_model:
-                            _save_model(args, dequantized_model, optimizer)
+                            _save_model(args, quantized_model)
                 if args.wandb and rank == 0:
                     wandb.log(metadata, step=metadata['total_microbatches'])
                 if args.save_every_steps and metadata['total_optimizer_steps'] % args.save_every_steps == 0:
-                    _save_state(args, metadata, dequantized_model, optimizer)
+                    _save_state(args, metadata, quantized_model, optimizer)
 
         metadata['microbatches_since_epoch_start'] = 0
         metadata['current_epoch'] += 1
 
-    _save_state(args, metadata, dequantized_model, optimizer)
-
-
-if __name__ == "__main__":
-    main()
+    _save_state(args, metadata, quantized_model, optimizer)
