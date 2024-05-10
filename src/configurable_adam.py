@@ -6,7 +6,9 @@ from typing import Tuple, Iterable, Union, Optional
 
 from src.aq_ops import maybe_script
 
+
 NO_DATA = torch.empty(0)
+
 
 class ConfigurableAdamW(torch.optim.Optimizer):
     r"""
@@ -158,10 +160,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
             _commit_state_updates(active_state, active_state_fetched)
 
             active_group, active_param, active_state, active_state_fetched = (
-                next_group,
-                next_param,
-                next_state,
-                next_state_fetched,
+                next_group, next_param, next_state, next_state_fetched,
             )
 
 
@@ -173,7 +172,7 @@ def _inner_adam_step_and_update_statistics(
     grad = grad.to(compute_dtype, copy=True)
     stored_exp_avg, stored_exp_avg_sq, stored_v_hat_max = exp_avg, exp_avg_sq, v_hat_max
     if beta1 != 0:
-        exp_avg = exp_avg.to(compute_dtype).lerp_(grad, 1 - beta1)
+        exp_avg = exp_avg.to(compute_dtype).lerp(grad, 1 - beta1)
         stored_exp_avg.copy_(exp_avg, non_blocking=True)
         update = exp_avg
     else:
@@ -185,9 +184,8 @@ def _inner_adam_step_and_update_statistics(
         if beta2 == 0:
             exp_avg_sq = grad.square()
         else:
-            exp_avg_sq = exp_avg_sq.to(compute_dtype) * beta2 + grad.square() * (1 - beta2)
+            exp_avg_sq = exp_avg_sq.to(compute_dtype).lerp(grad.square(), (1 - beta2))
             stored_exp_avg_sq.copy_(exp_avg_sq, non_blocking=True)
-
         if amsgrad:
             exp_avg_sq = torch.maximum(exp_avg_sq, v_hat_max, out=exp_avg_sq)
             stored_v_hat_max.copy_(exp_avg_sq, non_blocking=True)
