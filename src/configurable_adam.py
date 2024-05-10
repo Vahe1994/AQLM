@@ -90,10 +90,10 @@ class ConfigurableAdamW(torch.optim.Optimizer):
             loss = closure()
 
         for group, p, state in self.iterate_groups_with_prefetch():
-            assert p.grad is not None
-            
+            assert p.grad is not None            
+            assert not p.grad.is_sparse, f"{self} does not support sparse gradients"
             grad = p.grad.data
-            assert not grad.is_sparse, f"{self} does not support sparse gradients"
+
 
             state["step"] += 1
             beta1, beta2 = group["betas"]
