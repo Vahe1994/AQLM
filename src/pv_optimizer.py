@@ -271,7 +271,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         if self.max_code_change_per_step is not None:
                             maybe_limit_msg = f"(limit {self.max_code_change_per_step})"
                         maybe_individual_msg = ""
-                        if quantized_weight.num_codebooks > 0:
+                        if quantized_weight.num_codebooks > 1:
                             subcode_change = torch.not_equal(prev_codes, new_codes).float().mean().item()
                             maybe_individual_msg = f" | individual code change {subcode_change}\n"
                         maybe_delta_msg = ""
