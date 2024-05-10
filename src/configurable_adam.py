@@ -86,8 +86,8 @@ class ConfigurableAdamW(torch.optim.Optimizer):
             loss = closure()
 
         for group, p, state in self.iterate_groups_with_prefetch():
-            if p.grad is None:
-                continue  # can this break shit?
+            assert p.grad is not None
+            
             grad = p.grad.data
             assert not grad.is_sparse, f"{self} does not support sparse gradients"
 
@@ -218,9 +218,9 @@ def _fetch_state_to_device(state, device):
     return state | fetched_states
 
 def _commit_state_updates(offloaded_states, fetched_states):
-    fetched_keys = {"exp_avg", "exp_avg_sq", "v_hat_max"}.intersection(offloaded_states.keys())
+    fetched_keys = {"exp_avg", "exp_avg_sq", "v_hat_max"}
     for state_key in offloaded_states:
         if state_key not in fetched_keys:
             offloaded_states[state_key] = fetched_states[state_key]
-            continue
-        offloaded_states[state_key].copy_(fetched_states[state_key], non_blocking=True)
+        elif offloaded_states[state_key] is not fetched_states[state_key]:
+            offloaded_states[state_key].copy_(fetched_states[state_key], non_blocking=True)
