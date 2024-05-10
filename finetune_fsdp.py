@@ -553,11 +553,15 @@ def _save_model(args: argparse.Namespace, dequantized_model: FullyShardedDataPar
     output_path = os.path.join(args.save, "best_model")
     os.makedirs(output_path, exist_ok=True)
     rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
 
-    quantized_weight_names = set()
+    local_quantized_weight_names = set()
     for name, quantized_weight in optimizer.iterate_local_quantized_weights():
         torch.save(quantized_weight, os.path.join(output_path, f"{name}.pth"))
-        quantized_weight_names.add(name)
+        local_quantized_weight_names.add(name)
+
+    quantized_weight_names_by_rank = [None for _ in range(world_size)] if rank == 0 else None
+    torch.distributed.gather_object(local_quantized_weight_names, quantized_weight_names_by_rank, dst=0)
 
     with FullyShardedDataParallel.state_dict_type(
             dequantized_model,
@@ -566,13 +570,17 @@ def _save_model(args: argparse.Namespace, dequantized_model: FullyShardedDataPar
     ):
         model_state_dict = dequantized_model.state_dict()
         if rank == 0:
+            all_quantized_weight_names = set()
+            for local_quantized_weight_names in quantized_weight_names_by_rank:
+                all_quantized_weight_names |= set(local_quantized_weight_names)
+
             non_quantized_state_dict = dict()
             for name, tensor in model_state_dict.items():
-                if name in quantized_weight_names:
-                    quantized_weight_names.remove(name)  # do not save de-quantized versions of quantized weights
+                if name in all_quantized_weight_names:
+                    all_quantized_weight_names.remove(name)  # do not save de-quantized versions of quantized weights
                 else:
                     non_quantized_state_dict[name] = tensor
-            assert len(quantized_weight_names) == 0, f"mismatched names: {quantized_weight_names}"
+            assert len(all_quantized_weight_names) == 0, f"mismatched names: {all_quantized_weight_names}"
             torch.save(non_quantized_state_dict, os.path.join(output_path, "non_quantized_state_dict.pth"))
             print(f"Saved best model to {output_path}")
 
