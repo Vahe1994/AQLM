@@ -23,7 +23,8 @@ from tqdm.auto import tqdm
 from src.aq import QuantizedWeight, QuantizedLinear
 from src.aq_ops import IntCodes, master_rank_first, one_rank_at_a_time, is_signed
 from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
-from src.modelutils import get_model, infer_block_classes, create_dequantized_model, \
+from src.modelutils import get_model
+from finetuning_utils import infer_block_classes, create_dequantized_model, \
     get_original_named_parameters_from_fsdp_module
 from src.pv_optimizer import StraightThroughAdamW
 
