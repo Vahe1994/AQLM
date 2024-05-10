@@ -572,6 +572,7 @@ def _save_model(args: argparse.Namespace, dequantized_model: FullyShardedDataPar
                     quantized_weight_names.remove(name)  # do not save de-quantized versions of quantized weights
                 else:
                     non_quantized_state_dict[name] = tensor
+            assert len(quantized_weight_names) == 0, f"mismatched names: {quantized_weight_names}"
             torch.save(non_quantized_state_dict, os.path.join(output_path, "non_quantized_state_dict.pth"))
             print(f"Saved best model to {output_path}")
 
