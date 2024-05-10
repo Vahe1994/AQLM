@@ -91,7 +91,6 @@ class ConfigurableAdamW(torch.optim.Optimizer):
             grad = p.grad.data
             assert not grad.is_sparse, f"{self} does not support sparse gradients"
 
-#             state = self._maybe_init_state(p, group)
             state["step"] += 1
             beta1, beta2 = group["betas"]
             compute_dtype = group.get("compute_dtype") or p.dtype
@@ -135,7 +134,11 @@ class ConfigurableAdamW(torch.optim.Optimizer):
  
     
     def iterate_groups_with_prefetch(self):
-        flat_params = _get_flat_param_groups(self.param_groups)
+        flat_params = [
+            (group, param)
+            for group, param in _get_flat_param_groups(self.param_groups)
+            if param.grad is not None
+        ]
 
         active_group, active_param = flat_params[0]
         active_state = self._maybe_init_state(active_param, active_group)
