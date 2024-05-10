@@ -16,7 +16,11 @@ class ConfigurableAdamW(torch.optim.Optimizer):
     This was tested to match Adam and Lamb exactly for torch 2.3.0 (when compute_dtypes are all None)
     :param exp_avg_dtype: dtype for storing first moments; only created if betas[0] != 0; defaults to param dtype
     :param exp_avg_sq_dtype: dtype for storing second moments; only created if betas[0] != 0; defaults to param dtype
-    :param v_hat_max_dtype: dtype for storing maximum v_hat; only created amsgrad=True; defaults to param dtype
+    :param v_hat_max_dtype: dtype for storing maximum v_hat; only created if amsgrad=True; defaults to param dtype
+    :param exp_avg_device: device for storing exp_avg buffers; only created if betas[0]!=0; defaults to param.device
+    :param exp_avg_sq_device: device for storing exp_avg_sq only created if betas[1]!=0; defaults to param.device
+    :param v_hat_max_device: device for storing v_hat buffers; only created if amsgrad=True; defaults to param.device
+    :note: if any of these devices are CPU, they will be prefetched for optimizer step using pinned memory
     :param compute_dtype: dtype for optimizer step computation; defaults to param dtype
     """
 
