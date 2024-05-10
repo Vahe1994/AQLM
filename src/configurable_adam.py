@@ -158,10 +158,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
             _commit_state_updates(active_state, active_state_fetched)
 
             active_group, active_param, active_state, active_state_fetched = (
-                next_group,
-                next_param,
-                next_state,
-                next_state_fetched,
+                next_group, next_param, next_state, next_state_fetched,
             )
 
 
