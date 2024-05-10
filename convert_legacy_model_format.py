@@ -103,6 +103,7 @@ def main():
     args = parser.parse_args()
     assert args.p_finetuned_state_dict is not None, "for now, this converter only accepts state dicts from P step"
     args.load_dtype = getattr(torch, args.load_dtype) if args.load_dtype != 'auto' else 'auto'
+    args.code_dtype = getattr(torch, args.code_dtype) if args.code_dtype is not None else None
 
     if not args.monkeypatch_old_pickle:
         quantized_model = get_model(
