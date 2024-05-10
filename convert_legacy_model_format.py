@@ -66,6 +66,13 @@ def main():
         help="path to quantized model",
     )
     parser.add_argument(
+        "--load_dtype",
+        type=str,
+        default="auto",
+        choices=["auto", "float16", "float32", "bfloat16"],
+        help="dtype to load the model in",
+    )
+    parser.add_argument(
         "--code_dtype",
         type=str,
         default=None,
@@ -82,13 +89,31 @@ def main():
         action="store_true",
         help="If set, load quantized_model in a hacky way that allows pickled models with older transformers/torch.",
     )
-
+    parser.add_argument(
+        "--attn_implementation", type=str, default=None,
+        help="Attention implementation for both teacher and student models: eager, sdpa, or flash_attention_2"
+    )
+    parser.add_argument(
+        "--trust_remote_code",
+        action="store_true",
+        help="Whether to trust remote code when loading base model.",
+    )
     parser.add_argument("--save", type=str, required=True, help="Save the converted quantized model here")
-    args = parser.parse_args()
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    assert args.p_finetuned_state_dict is not None, "for now, this converter only accepts state dicts from P step"
 
-    quantized_model = get_model(args.base_model, load_quantized=args.quantized_model, trust_remote_code=True)
+    args = parser.parse_args()
+    assert args.p_finetuned_state_dict is not None, "for now, this converter only accepts state dicts from P step"
+    args.load_dtype = getattr(torch, args.load_dtype) if args.load_dtype != 'auto' else 'auto'
+
+    if not args.monkeypatch_old_pickle:
+        quantized_model = get_model(
+            args.base_model, args.quantized_model, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
+            attn_implementation=args.attn_implementation
+        )
+    else:
+        quantized_model = load_quantized_model_with_old_pickle(
+            args.base_model, args.quantized_model, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
+            attn_implementation=args.attn_implementation
+        )
     for module in quantized_model.modules():
         if isinstance(module, QuantizedWeight):
             if not hasattr(module, 'codes_storage'):

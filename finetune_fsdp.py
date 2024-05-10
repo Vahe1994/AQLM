@@ -299,7 +299,7 @@ def add_data_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--trust_remote_code",
         action="store_true",
-        help="Whether to trust remote code.",
+        help="Whether to trust remote code when loading base model.",
     )
     parser.add_argument(
         "--save_dataset_and_exit",
