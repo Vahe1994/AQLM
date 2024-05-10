@@ -153,6 +153,13 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         help="Beam size when updating codes; higher is slower but more accurate. For single codebook, use beam_size=1",
     )
     parser.add_argument(
+        "--delta_decay",
+        type=float,
+        default=0,
+        help="If not zero, every straight-through buffer will decay to the quantized weight with moving average. "
+             "straight_through_buffer = (1 - delta_decay) * straight_through_buffer + delta_decay * quantized_weight.",
+    )
+    parser.add_argument(
         '--code_adam_16bit',
         action="store_true",
         help="If set, adam statistics for codes will be stored as float16 (exp_avg and v_hat) or bfloat16(exp_avg_sq)",
@@ -659,6 +666,7 @@ def main():
             compute_dtype=args.master_dtype,
         ),
         max_code_change_per_step=args.max_code_change_per_step,
+        delta_decay=args.delta_decay,
         beam_size=args.beam_size,
         dequantized_dtype=args.amp_dtype,
         sharded=(world_size > 1),
