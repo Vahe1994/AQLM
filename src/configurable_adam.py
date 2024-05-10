@@ -165,7 +165,16 @@ def _inner_adam_step_and_update_statistics(
     grad = grad.to(compute_dtype, copy=True)
     stored_exp_avg, stored_exp_avg_sq, stored_v_hat_max = exp_avg, exp_avg_sq, v_hat_max
     if beta1 != 0:
+        
+        print("orig", (exp_avg.to(compute_dtype) * beta1 + grad * (1 - beta1)).norm().item())
+        exp_avg = exp_avg.to(compute_dtype)
+        exp_avg.lerp_(grad, 1 - beta1)
+        
+        print("lerp", exp_avg.norm().item())
+        print()
+
         exp_avg = exp_avg.to(compute_dtype) * beta1 + grad * (1 - beta1)
+    
         stored_exp_avg.copy_(exp_avg, non_blocking=True)
         update = exp_avg
     else:
@@ -177,7 +186,12 @@ def _inner_adam_step_and_update_statistics(
         if beta2 == 0:
             exp_avg_sq = grad.square()
         else:
-            exp_avg_sq = exp_avg_sq.to(compute_dtype) * beta2 + grad.square() * (1 - beta2)
+            # we're in this branch
+            # we aslo fuck up somewhere over here
+                        
+            exp_avg_sq = exp_avg_sq.to(compute_dtype)
+            exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+                        
             stored_exp_avg_sq.copy_(exp_avg_sq, non_blocking=True)
 
         if amsgrad:
@@ -193,15 +207,15 @@ def _get_flat_param_groups(param_groups):
     return [(group, param) for group in param_groups for param in group["params"]]
 
 def _fetch_state_to_device(state, device):
+    fetchable_state_keys = {"exp_avg", "exp_avg_sq", "v_hat_max"}.intersection(state.keys()) 
     fetched_states = {
-        "exp_avg": state["exp_avg"].to(device, non_blocking=True),
-        "exp_avg_sq": state["exp_avg_sq"].to(device, non_blocking=True),
-        "v_hat_max": state["v_hat_max"].to(device, non_blocking=True),
+        state_key: state[state_key].to(device, non_blocking=True)
+        for state_key in fetchable_state_keys
     }
     return state | fetched_states
 
 def _commit_state_updates(offloaded_states, fetched_states):
-    fetched_keys = {"exp_avg", "exp_avg_sq", "v_hat_max"}
+    fetched_keys = {"exp_avg", "exp_avg_sq", "v_hat_max"}.intersection(offloaded_states.keys())
     for state_key in offloaded_states:
         if state_key not in fetched_keys:
             offloaded_states[state_key] = fetched_states[state_key]
