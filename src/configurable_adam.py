@@ -96,7 +96,6 @@ class ConfigurableAdamW(torch.optim.Optimizer):
             assert not p.grad.is_sparse, f"{self} does not support sparse gradients"
             grad = p.grad.data
 
-
             state["step"] += 1
             beta1, beta2 = group["betas"]
             compute_dtype = group.get("compute_dtype") or p.dtype

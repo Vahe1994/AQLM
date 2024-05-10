@@ -35,7 +35,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
     :param max_code_change_per_step: max portion of discrete code groups that can be updated; only affects codes
     :param beam_size: beam search width used only when updating codes. See beam_size in aq.py
     :param stochastic_rounding_tau: if above 0, use stochastic rounding with this temperature. See aq.py
-    :param dequantized_dtype: use this dtype when accumulating updates to de-quantized weight matrices
+    :param straight_through_buffer_dtype: use this dtype when accumulating updates to de-quantized weight matrices
 
     :param sharded: if set, split all QuantizedWeights and their corresponding states between ranks (distributed only)
        Note: unlike FSDP, every QuantizedWeight is assigned fully to one rank (and not split into smaller parts)
@@ -62,7 +62,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                  max_code_change_per_step: float,
                  stochastic_rounding_tau: float = 0,
                  delta_decay: float = 0,
-                 dequantized_dtype: Optional[torch.dtype] = None,
+                 straight_through_buffer_dtype: Optional[torch.dtype] = None,
                  sharded: bool = False,
                  verbose: bool = False,
                  **kwargs):
@@ -78,7 +78,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
             update_non_quantized_parameters=update_non_quantized_parameters,
             update_codebooks_and_scales=update_codebooks_and_scales,
             update_codes=update_codes,
-            dequantized_dtype=dequantized_dtype)
+            straight_through_buffer_dtype=straight_through_buffer_dtype)
 
         super().__init__(param_groups, **kwargs)
         self.ordered_quantized_weight_names = tuple(sorted(named_quantized_params.keys()))
@@ -103,7 +103,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
         self.verbose = verbose
 
     def _select_optimized_parameters(
-            self, named_dequantized_params, named_quantized_params, dequantized_dtype,
+            self, named_dequantized_params, named_quantized_params, straight_through_buffer_dtype,
             update_non_quantized_parameters: Optional[dict], update_codebooks_and_scales: Optional[dict],
             update_codes: Optional[dict]) -> Tuple[List[Dict[str, Any]], Dict[str, nn.Parameter]]:
         """Choose which version of parameter to optimize: the parameter itself or a straight-through buffer"""
@@ -115,7 +115,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                 quantized_weight = named_quantized_params[name]
                 with torch.no_grad():
                     dequantized_weight = quantized_weight()
-                dequantized_weight = nn.Parameter(dequantized_weight.to(dtype=dequantized_dtype),
+                dequantized_weight = nn.Parameter(dequantized_weight.to(dtype=straight_through_buffer_dtype),
                                                   requires_grad=dequantized_weight.requires_grad)
                 quantized_params[name] = dequantized_weight  # accumulator for optimizer updates; sharded alongside FSDP
                 for subparam_name, subparam in quantized_weight.named_parameters():

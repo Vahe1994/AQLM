@@ -79,6 +79,12 @@ def add_model_args(parser: argparse.ArgumentParser):
         help="data type for storing master parameters and computing optimizer updates",
     )
     parser.add_argument(
+        "--straight_through_buffer_dtype",
+        type=str,
+        default=None,
+        help="data type for storing optimized straight through buffers, defaults to master_dtype",
+    )
+    parser.add_argument(
         "--code_dtype",
         type=str,
         default=None,
@@ -166,9 +172,17 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         help="If set, adam statistics for codes will be stored as float16 (exp_avg and v_hat) or bfloat16(exp_avg_sq)",
     )
     parser.add_argument(
-        '--lamb',
-        action="store_true",
-        help="If set, use Lamb (adam with trust ratio) for both continuous and discrete parameters",
+        '--lamb', action='store_true', help="If set, use Lamb (aka Adam with trust ratio)",
+    )
+    parser.add_argument(
+        '--amsgrad', action='store_true', help="if True, use the AMSGrad variant of adam/lamb",
+    )
+    parser.add_argument(
+        '--debias', action='store_true', default=None,
+        help="Whether or not to debias optimizer statistics; defaults to True for adam and False for Lamb",
+    )
+    parser.add_argument(
+        '--no_debias', action='store_false', dest='debias', help="Disable optimizer debiasing (see above)",
     )
     parser.add_argument(
         '--verbose_optimizer',
@@ -572,15 +586,24 @@ def main():
     args.amp_dtype = getattr(torch, args.amp_dtype) if args.amp_dtype is not None else None
     args.code_dtype = getattr(torch, args.code_dtype) if args.code_dtype is not None else None
     args.master_dtype = getattr(torch, args.master_dtype)
+    if args.straight_through_buffer_dtype is not None:
+        args.straight_through_buffer_dtype = getattr(torch, args.straight_through_buffer_dtype)
+    else:
+        args.straight_through_buffer_dtype = args.master_dtype
+
     if args.save_every_steps is not None:
         assert args.save is not None, f"save_every_steps={args.save_every_steps}, but --save path not specified"
     if args.keep_best_model:
         assert args.save is not None, f"--keep_best_model requires --save path"
         assert args.eval_every_steps is not None, f"--keep_best_model requires --eval_every_steps"
         assert args.eval_datasets is not None, f"--keep_best_model requires --eval_datasets"
+
     if args.wandb and rank == 0:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
         wandb.init(config={a: getattr(args, a) for a in dir(args) if not a.startswith("_")})
+
+    if rank == 0:
+        print(args)
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(args.base_model)
     assert tokenizer.eos_token_id is not None
@@ -623,24 +646,26 @@ def main():
         named_dequantized_params=named_dequantized_params,
         named_quantized_params=named_quantized_params,
         update_codes=dict(
-            lr=args.code_lr, betas=(args.code_beta1, args.code_beta2), lamb=args.lamb, debias=True, amsgrad=False,
-            compute_dtype=args.master_dtype,
+            lr=args.code_lr, betas=(args.code_beta1, args.code_beta2),
+            lamb=args.lamb, debias=args.debias, amsgrad=args.amsgrad, compute_dtype=args.master_dtype,
             exp_avg_dtype=torch.float16 if args.code_adam_16bit else args.master_dtype,
-            v_hat_max_dtype=torch.float16 if args.code_adam_16bit else args.master_dtype,
             exp_avg_sq_dtype=torch.bfloat16 if args.code_adam_16bit else args.master_dtype,
+            v_hat_max_dtype=torch.float16 if args.code_adam_16bit else args.master_dtype,
         ),
         update_codebooks_and_scales=dict(
-            lr=args.lr, betas=(args.adam_beta1, args.adam_beta2), lamb=args.lamb, debias=True, amsgrad=False,
-            compute_dtype=args.master_dtype,
+            lr=args.lr, betas=(args.adam_beta1, args.adam_beta2),
+            lamb=args.lamb, debias=args.debias, amsgrad=args.amsgrad, compute_dtype=args.master_dtype,
+            exp_avg_dtype=args.master_dtype, exp_avg_sq_dtype=args.master_dtype, v_hat_max_dtype=args.master_dtype,
         ),
         update_non_quantized_parameters=dict(
-            lr=args.lr, betas=(args.adam_beta1, args.adam_beta2), lamb=args.lamb, debias=True, amsgrad=False,
-            compute_dtype=args.master_dtype,
+            lr=args.lr, betas=(args.adam_beta1, args.adam_beta2),
+            lamb=args.lamb, debias=args.debias, amsgrad=args.amsgrad, compute_dtype=args.master_dtype,
+            exp_avg_dtype=args.master_dtype, exp_avg_sq_dtype=args.master_dtype, v_hat_max_dtype=args.master_dtype,
         ),
         max_code_change_per_step=args.max_code_change_per_step,
         delta_decay=args.delta_decay,
         beam_size=args.beam_size,
-        dequantized_dtype=args.amp_dtype,
+        straight_through_buffer_dtype=args.straight_through_buffer_dtype,
         sharded=(world_size > 1),
         verbose=args.verbose_optimizer,
     )
