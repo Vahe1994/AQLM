@@ -45,7 +45,6 @@ class ConfigurableAdamW(torch.optim.Optimizer):
             exp_avg_sq_device: torch.device = None,
             v_hat_max_device: torch.device = None,
     ) -> None:
-        debias = debias if debias is not None else not lamb
         defaults = dict(
             lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, debias=debias, amsgrad=amsgrad, lamb=lamb,
             clamp_value=clamp_value, compute_dtype=compute_dtype, exp_avg_dtype=exp_avg_dtype,
@@ -116,7 +115,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
 
             update_scale = -group["lr"]
             # below: to save compute, we update scalar coefficient to account for debias/lamb/.. and multiply once
-            if group["debias"]:
+            if group.get("debias", not group["lamb"]):  # if not specified, default to True for Adam, False for Lamb
                 mt_debias = 1. / (1 - beta1 ** state["step"]) if beta1 != 0 else 1
                 vt_debias = 1. / math.sqrt(1 - beta2 ** state["step"]) if beta2 != 0 else 1
                 bias_correction = mt_debias / vt_debias
