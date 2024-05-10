@@ -51,8 +51,7 @@ def add_model_args(parser: argparse.ArgumentParser):
         "--load_quantized_state_dict",
         type=str,
         default=None,
-        help="if specified, load quantized model state dict from this path
-             ",
+        help="if specified, load quantized model state dict from this path",
     )
     parser.add_argument(
         '--monkeypatch_old_pickle',
