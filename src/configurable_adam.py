@@ -6,7 +6,6 @@ from typing import Tuple, Iterable, Union, Optional
 
 from src.aq_ops import maybe_script
 
-
 NO_DATA = torch.empty(0)
 
 
@@ -91,7 +90,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
             loss = closure()
 
         for group, p, state in self.iterate_groups_with_prefetch():
-            assert p.grad is not None            
+            assert p.grad is not None
             assert not p.grad.is_sparse, f"{self} does not support sparse gradients"
             grad = p.grad.data
 
@@ -115,7 +114,8 @@ class ConfigurableAdamW(torch.optim.Optimizer):
 
             update_scale = -group["lr"]
             # below: to save compute, we update scalar coefficient to account for debias/lamb/.. and multiply once
-            if group.get("debias", not group["lamb"]):  # if not specified, default to True for Adam, False for Lamb
+            if group["debias"] if group["debias"] is not None else (not group["lamb"]):
+                # if not specified, default to True for Adam, False for Lamb
                 mt_debias = 1. / (1 - beta1 ** state["step"]) if beta1 != 0 else 1
                 vt_debias = 1. / math.sqrt(1 - beta2 ** state["step"]) if beta2 != 0 else 1
                 bias_correction = mt_debias / vt_debias
@@ -135,8 +135,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
 
             p.data.add_(update, alpha=update_scale)
         return loss
- 
-    
+
     def iterate_groups_with_prefetch(self):
         """Iterate parameters and optimizer states; skip parameters that do not require grad"""
         flat_params = [
@@ -196,13 +195,15 @@ def _inner_adam_step_and_update_statistics(
 def _get_flat_param_groups(param_groups):
     return [(group, param) for group in param_groups for param in group["params"]]
 
+
 def _fetch_state_to_device(state, device):
-    fetchable_state_keys = {"exp_avg", "exp_avg_sq", "v_hat_max"}.intersection(state.keys()) 
+    fetchable_state_keys = {"exp_avg", "exp_avg_sq", "v_hat_max"}.intersection(state.keys())
     fetched_states = {
         state_key: state[state_key].to(device, non_blocking=True)
         for state_key in fetchable_state_keys
     }
     return state | fetched_states
+
 
 def _commit_state_updates(offloaded_states, fetched_states):
     fetched_keys = {"exp_avg", "exp_avg_sq", "v_hat_max"}
