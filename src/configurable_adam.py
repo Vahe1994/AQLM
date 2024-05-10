@@ -134,6 +134,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
  
     
     def iterate_groups_with_prefetch(self):
+        """Iterate parameters and optimizer states; skip parameters that do not require grad"""
         flat_params = [
             (group, param)
             for group, param in _get_flat_param_groups(self.param_groups)
