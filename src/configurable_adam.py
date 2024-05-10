@@ -15,7 +15,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
     Lamb flag based on https://github.com/cybertronai/pytorch-lamb/blob/master/pytorch_lamb/lamb.py
     This was tested to match Adam and Lamb exactly for torch 2.3.0 (when compute_dtypes are all None)
     :param exp_avg_dtype: dtype for storing first moments; only created if betas[0] != 0; defaults to param dtype
-    :param exp_avg_sq_dtype: dtype for storing second moments; only created if betas[0] != 0; defaults to param dtype
+    :param exp_avg_sq_dtype: dtype for storing second moments; only created if betas[1] != 0; defaults to param dtype
     :param v_hat_max_dtype: dtype for storing maximum v_hat; only created if amsgrad=True; defaults to param dtype
     :param exp_avg_device: device for storing exp_avg buffers; only created if betas[0]!=0; defaults to param.device
     :param exp_avg_sq_device: device for storing exp_avg_sq only created if betas[1]!=0; defaults to param.device
