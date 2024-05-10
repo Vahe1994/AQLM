@@ -129,7 +129,7 @@ def main():
         status = quantized_model.load_state_dict(state_dict, strict=False)
         assert all(key.endswith('codes') for key in status.missing_keys)
         assert not status.unexpected_keys
-        del state_dict, status
+        del state_dict, status  # note: in this case, it is okay not to load codes since P step does not change them
 
     save_quantized_model(quantized_model, args.save)
 
