@@ -339,6 +339,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
             split=args.split,
             cache_dir=args.cache_dir,
             trust_remote_code=args.trust_remote_code,
+            num_proc=args.preprocessing_num_workers if args.preprocessing_num_workers is not None else args.num_workers,
             streaming=False,
         )
 
