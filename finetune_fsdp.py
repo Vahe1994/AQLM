@@ -296,7 +296,7 @@ def add_data_args(parser: argparse.ArgumentParser):
         "--download_num_workers",
         type=int,
         default=None,
-        help="Number of CPU workers for downloading the trianing dataset; overrides num_workers",
+        help="Number of CPU workers for downloading the training dataset; overrides num_workers",
     )
     parser.add_argument(
         "--preprocessing_num_workers",
