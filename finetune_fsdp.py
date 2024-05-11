@@ -293,6 +293,12 @@ def add_data_args(parser: argparse.ArgumentParser):
         help="Number of CPU workers for preprocessing and data loading",
     )
     parser.add_argument(
+        "--download_num_workers",
+        type=int,
+        default=None,
+        help="Number of CPU workers for downloading the trianing dataset; overrides num_workers",
+    )
+    parser.add_argument(
         "--preprocessing_num_workers",
         type=int,
         default=None,
@@ -339,7 +345,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
             split=args.split,
             cache_dir=args.cache_dir,
             trust_remote_code=args.trust_remote_code,
-            num_proc=args.preprocessing_num_workers if args.preprocessing_num_workers is not None else args.num_workers,
+            num_proc=args.download_num_workers if args.download_num_workers is not None else args.num_workers,
             streaming=False,
         )
 
