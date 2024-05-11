@@ -264,6 +264,12 @@ def add_data_args(parser: argparse.ArgumentParser):
         help="Training dataset name (from HF datasets) or path to data where to extract calibration data from",
     )
     parser.add_argument(
+        "--dataset_config_name",
+        type=str,
+        default=None,
+        help="The configuration name of the dataset to use (via the datasets library).",
+    )
+    parser.add_argument(
         "--split",
         type=str,
         default="train",
@@ -329,6 +335,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     else:
         dataset = datasets.load_dataset(
             args.dataset_name,
+            args.dataset_config_name,
             split=args.split,
             cache_dir=args.cache_dir,
             trust_remote_code=args.trust_remote_code,
