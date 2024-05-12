@@ -122,6 +122,11 @@ class QuantizedWeight(nn.Module):
             codes = codes.to(torch.int32)  # cast to int32 to allow indexing if codes are int16 or uint8
         return codes
 
+    def set_codes(self, new_codes: torch.Tensor, selection: Union[slice, ellipsis, torch.Tensor] = ..., **kwargs):
+        assert (self.codes is None) != (self.codes_storage is None), "must have either .codes or storage, but not both"
+        codes_ptr = self.codes if self.codes is not None else self.codes_storage()
+        codes_ptr[selection].copy_(new_codes, **kwargs)
+
     def wrap_codes_for_fsdp_(self, **kwargs):
         """Make this module compatible with FullyShardedDataParallel; modifies state dict in-place"""
         assert self.codes is not None and self.codes_storage is None
@@ -266,7 +271,7 @@ class QuantizedWeight(nn.Module):
             max_updates = max(int(max_change_fraction * new_codes.shape[0] * new_codes.shape[1]), 1)
             new_codes = _select_updates_with_highest_priority(
                 prev_codes, new_codes, priorities=groupwise_update_norms, max_updates=max_updates)
-        self.get_codes()[selection] = new_codes
+        self.set_codes(new_codes, selection)
         return new_codes
 
     def estimate_nbits_per_parameter(self) -> float:

@@ -256,7 +256,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         stochastic_rounding_tau=self.stochastic_rounding_tau,
                         max_change_fraction=self.max_code_change_per_step,
                         dim_rng=random.Random(None),
-                    )  # note: this updates quantized_weight.get_codes()[...] in-place
+                    )  # note: this updates quantized_weight codes in-place
                     if self.delta_decay != 0:
                         reference_weight[...] = (
                             self.delta_decay * quantized_weight() + (1 - self.delta_decay) * reference_weight
