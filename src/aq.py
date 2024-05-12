@@ -115,7 +115,7 @@ class QuantizedWeight(nn.Module):
         self.codes_storage: Optional[IntCodes] = None  # storage for FSDP compatibility
 
     def get_codes(self) -> torch.IntTensor:
-        """Get a writable view to codes, regardless of how codes are stored"""
+        """Get a non view to codes, regardless of how codes are stored"""
         assert (self.codes is None) != (self.codes_storage is None), "must have either .codes or storage, but not both"
         codes = self.codes if self.codes is not None else self.codes_storage()
         if torch.iinfo(codes.dtype).bits < 32:
@@ -123,6 +123,7 @@ class QuantizedWeight(nn.Module):
         return codes
 
     def set_codes(self, new_codes: torch.Tensor, selection: Union[slice, ellipsis, torch.Tensor] = ..., **kwargs):
+        """Update codes[selection] to new_codes, regardless of their dtype and whether they are wrapped as storage"""
         assert (self.codes is None) != (self.codes_storage is None), "must have either .codes or storage, but not both"
         codes_ptr = self.codes if self.codes is not None else self.codes_storage()
         codes_ptr[selection].copy_(new_codes, **kwargs)
