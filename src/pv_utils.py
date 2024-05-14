@@ -1,3 +1,5 @@
+import contextlib
+import time
 from copy import deepcopy
 from itertools import chain
 from typing import Tuple, Optional, Dict
@@ -107,3 +109,21 @@ def verify_dequantized_model(dequantized_model: nn.Module, master_parameters: di
 
 def get_original_named_parameters_from_fsdp_module(dequantized_model) -> Dict[str, nn.Parameter]:
     return {name.replace('_fsdp_wrapped_module.', ''): param for name, param in dequantized_model.named_parameters()}
+
+
+@contextlib.contextmanager
+def print_runtime_stats(operation_name: str, enabled: bool = True, device: Optional[torch.device] = None):
+    if not enabled:
+        yield
+        return
+
+    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    if device is None:
+        device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
+    if torch.device.type == 'cuda':
+        torch.cuda.synchronize(device)
+    start_time = time.perf_counter()
+    yield
+    if torch.device.type == 'cuda':
+        torch.cuda.synchronize(device)
+    print(end=f"rank{rank} {operation_name} took {time.perf_counter() - start_time}\n")

@@ -1,8 +1,6 @@
 """Module containing utilities for straight-through fine-tuning of language models"""
-import contextlib
 import dataclasses
 import random
-import time
 from collections import defaultdict
 from enum import Enum, auto
 from typing import Optional, Dict, Tuple, List, Any, Sequence, Iterator
@@ -14,6 +12,7 @@ from torch.optim.optimizer import StateDict
 
 from src.aq import QuantizedWeight
 from src.configurable_adam import ConfigurableAdamW
+from src.pv_utils import print_runtime_stats
 
 
 class ParameterRole(Enum):
@@ -424,22 +423,3 @@ def _split_quantized_weights_between_ranks(quantized_weights: Dict[str, Quantize
 class YourQuantizedWeightIsInAnotherRank:
     """This replaces quantized weights that are not held on this rank"""
     rank: int
-
-
-@contextlib.contextmanager
-def print_runtime_stats(operation_name: str, enabled: bool = True):
-    if not enabled:
-        yield
-        return
-
-    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
-    device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
-    if torch.device.type == 'cuda':
-        torch.cuda.synchronize(device)
-    start_time = time.perf_counter()
-    yield
-    if torch.device.type == 'cuda':
-        torch.cuda.synchronize(device)
-    print(end=f"rank{rank} {operation_name} took {time.perf_counter() - start_time}\n")
-
-
