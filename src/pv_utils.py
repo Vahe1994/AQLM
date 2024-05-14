@@ -130,7 +130,8 @@ def print_runtime_stats(operation_name: str, enabled: bool = True, device: Optio
     yield
     if torch.device.type == 'cuda':
         torch.cuda.synchronize(device)
-    print(end=f"rank{rank} {operation_name} took {time.perf_counter() - start_time}\n")
+    maybe_distributed_msg = f"rank {rank} " if torch.distributed.is_initialized() else ""
+    print(end=f"{maybe_distributed_msg}{operation_name} took {time.perf_counter() - start_time}\n")
 
 
 def split_quantized_weights_between_ranks(quantized_weights: Dict[str, QuantizedWeight], verify_checksums: bool):

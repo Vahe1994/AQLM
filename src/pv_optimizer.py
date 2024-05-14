@@ -89,7 +89,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
         self.sharded = not all(isinstance(qw, QuantizedWeight) for qw in named_quantized_params.values())
         self.is_straight_through = delta_decay != 1
         if verbose:
-            print(end=f"PV optimizer init: quantized weights are {('not sharded', 'sharded')[self.sharded]}\n")
+            print(end=f"PV optimizer init:\n\tAre quantized weights sharded? : {self.sharded}.\n")
             print(end=f"\tOptimizing {('without', 'with')[self.is_straight_through]} straight-through buffers\n")
         param_groups, all_optimized_params = self._select_optimized_parameters(
             named_dequantized_params=named_dequantized_params,
