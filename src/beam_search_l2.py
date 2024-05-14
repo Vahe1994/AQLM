@@ -107,7 +107,7 @@ def beam_search_optimal_codes(
     if max_update_fraction < 1 or trust_ratio is not None:
         # precompute ordered code indices to be used for constraints on the number of updates
         prev_dequantized_weight = _dequantize_weight(prev_codes, codebooks, scales)
-        num_codes_to_update = int(math.ceil(max_update_fraction * num_output_groups, num_input_groups))
+        num_codes_to_update = int(math.ceil(max_update_fraction * num_output_groups * num_input_groups))
         difference_with_reference_squared_norms = _groupwise_squared_norms(reference_weight - prev_dequantized_weight)
         # ^-- [num_output_groups, num_input_groups]
         if code_selection_temperature > 0:
