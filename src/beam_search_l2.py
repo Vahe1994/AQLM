@@ -123,7 +123,7 @@ def beam_search_optimal_codes(
         flat_new_codes = _update_flat_codes(flat_unscaled_reference, flat_prev_codes)
     else:
         flat_new_codes = flat_prev_codes.index_put(  # note: this is an out-of-place op that does not modify prev codes
-            (flat_indices_to_update, torch.arange(num_codebooks, device=codebooks.device)),
+            (flat_indices_to_update[:, None], torch.arange(num_codebooks, device=codebooks.device)[None, :]),
             _update_flat_codes(flat_unscaled_reference[flat_indices_to_update], flat_prev_codes[flat_indices_to_update])
         )
 
@@ -142,7 +142,7 @@ def beam_search_optimal_codes(
         )
         truncated_flat_indices_to_update = flat_indices_to_update[:num_codes_selected]  # sorted most to least important
         flat_new_codes = flat_prev_codes.index_put(  # <-- note: this is an out-of-place operation
-            (truncated_flat_indices_to_update, torch.arange(num_codebooks, device=codebooks.device)),
+            (truncated_flat_indices_to_update[:, None], torch.arange(num_codebooks, device=codebooks.device)[None, :]),
             flat_new_codes[truncated_flat_indices_to_update]
         )
     return flat_new_codes.view_as(prev_codes)
