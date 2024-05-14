@@ -306,7 +306,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         maybe_individual_msg = ""
                         if quantized_weight.num_codebooks > 1:
                             subcode_change = torch.not_equal(prev_codes, new_codes).float().mean().item()
-                            maybe_individual_msg = f" | individual code change {subcode_change}"
+                            maybe_individual_msg = f" | overall change {subcode_change:.8f}"
                         maybe_delta_msg = ""
                         if self.delta_decay != 1:
                             _dequantized_weight = quantized_weight()
@@ -315,8 +315,8 @@ class StraightThroughAdamW(ConfigurableAdamW):
                             maybe_delta_msg = (f"\t||quantized_weight - optimized_weight|| / ||quantized_weight||"
                                                f" = {relative_error}\n")
                         print(end=f"Updated codes for {name}{maybe_distributed_msg}:\n\tFraction of weights with at "
-                                  f"least one code change: {code_change_rate} {maybe_limit_msg}{maybe_individual_msg}\n"
-                                  f"{maybe_delta_msg}\n")
+                                  f"least one code change: {code_change_rate:.8f} "
+                                  f"{maybe_limit_msg}{maybe_individual_msg}\n{maybe_delta_msg}\n")
         assert len(remaining_quantized_weights) == 0
 
     @torch.no_grad()
