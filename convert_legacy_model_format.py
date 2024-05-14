@@ -158,7 +158,7 @@ def main():
     args = parser.parse_args()
     assert args.p_finetuned_state_dict or args.pv_fsdp_dir, "either one of those must be specified"
     print(f"{args.p_finetuned_state_dict=}, {args.pv_fsdp_dir=}")
-    assert args.p_finetuned_state_dict is not None != args.pv_fsdp_dir is not None
+    assert (args.p_finetuned_state_dict is not None) != (args.pv_fsdp_dir is not None)
 
     args.load_dtype = getattr(torch, args.load_dtype) if args.load_dtype != 'auto' else 'auto'
     args.code_dtype = getattr(torch, args.code_dtype) if args.code_dtype is not None else None
