@@ -230,13 +230,8 @@ class QuantizedWeight(nn.Module):
             The indices / slices must correspond to output channels (if out_group_size==1) or groups (if > 1).
             Formally, the indices must be in range [ 0 , self.out_features // self.out_group_size )
         :param beam_size: consider up to this many best encoding combinations (this param is passed through via kwargs)
-        :param max_change_fraction: if specified, limits the number of weights that can be updated after beam search;
-            for each quantized weight codes, only this fraction of code groups are allowed to change.
-            if more than this portion of codes can be changed, changes with the lowest update norm are dropped
-            Note: if there are multiple codebooks, this is the maximum fraction of groups where *any* code changed
-
         :param kwargs: any additional keyword arguments are forwarded to beam_search_optimal_codes function
-        :returns: the updated codes
+        :returns: the updated codes, in the same shape as self.get_codes()[selection]
         """
         codebooks = self.get_codebooks()
         prev_codes = self.get_codes()[selection]
@@ -244,7 +239,7 @@ class QuantizedWeight(nn.Module):
         if XTX is not None:
              new_codes = beam_search_minimize_activation_mse(
                 XTX=XTX,
-                 reference_weight=reference_weight,
+                reference_weight=reference_weight,
                 codebooks=codebooks,
                 prev_codes=prev_codes,
                 scales=scales,

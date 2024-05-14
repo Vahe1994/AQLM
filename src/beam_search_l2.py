@@ -112,8 +112,8 @@ def beam_search_optimal_codes(
         # ^-- [num_output_groups, num_input_groups]
         if code_selection_temperature > 0:
             flat_indices_to_update = torch.pow(
-                difference_with_reference_squared_norms.flatten(), code_selection_temperature / 2,
-                # note: temperature is divided by 2 because sampling is proportional to norms without square
+                difference_with_reference_squared_norms.flatten(), 0.5 / code_selection_temperature,
+                # note: temperature is multuplied by 0.5 because sampling is proportional to norms without square
             ).multinomial(num_samples=num_codes_to_update, replacement=False)
         else:
             flat_indices_to_update = torch.topk(difference_with_reference_squared_norms.flatten(),

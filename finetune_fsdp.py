@@ -25,7 +25,8 @@ from src.aq_ops import IntCodes, master_rank_first, one_rank_at_a_time, is_signe
 from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
 from src.modelutils import get_model
 from src.pv_utils import infer_block_classes, create_dequantized_model, \
-    get_original_named_parameters_from_fsdp_module
+    get_original_named_parameters_from_fsdp_module, split_quantized_weights_between_ranks, \
+    YourQuantizedWeightIsInAnotherRank
 from src.pv_optimizer import StraightThroughAdamW
 
 try:
@@ -145,6 +146,15 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         help="Adam beta2 for discrete params",
     )
     parser.add_argument(
+        "--delta_decay",
+        type=float,
+        help="Determines whether to use direct training, straight-throughe stimation or a mixture thereof. "
+             "If delta_decay is 0, use straight-through estimation. If delta_decay is 1, do not use it at all. "
+             "If between 0 and 1, every straight-through buffer will decay to the quantized weight with moving average."
+             " straight_through_buffer = (1 - delta_decay) * straight_through_buffer + delta_decay * quantized_weight."
+             " Please refer to the docstring of StraightThroughAdam for details.",
+    )
+    parser.add_argument(
         "--max_code_change_per_step",
         type=float,
         default=1e-3,
@@ -154,17 +164,33 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
              "the algorithm will rollback the changes with least update norm until the constraint is satisfied.",
     )
     parser.add_argument(
+        "--code_trust_ratio",
+        type=float,
+        default=None,
+        help="By default, the optimizer can make arbitrary changes to quantized weights. If this parameter is set,"
+             "the optimizer ensures that the change to quantized weights is not too large by undoing some of the change"
+             "until ||new_quantized_weights - prev_quantized_weights|| / ||prev_quantized_weight|| <= code_trust_ratio."
+             " See StraightThroughAdam docstring for details.",
+    )
+    parser.add_argument(
+        '--force_directional_code_update',
+        action="store_true",
+        help="If set, force discrete codes to change in the direction of optimizer update, even if previous codes"
+             "were optimal in terms of MSE. See StraightThroughAdam docstring for details. Use when delta_decay==1.",
+    )
+    parser.add_argument(
+        "--code_selection_temperature",
+        type=float,
+        default=0,
+        help="If max_code_change_per_step or code_trust_ratio is set and code_selection_temperature=0, beam search will"
+             " prioritize updating codes that have the largest continuosu update norm. If code_selection_temperature is"
+             " not 0, sample a subset of codes for update stochastically. See StraightThroughAdam for details."
+    )
+    parser.add_argument(
         "--beam_size",
         type=int,
         default=1,
         help="Beam size when updating codes; higher is slower but more accurate. For single codebook, use beam_size=1",
-    )
-    parser.add_argument(
-        "--delta_decay",
-        type=float,
-        default=0,
-        help="If not zero, every straight-through buffer will decay to the quantized weight with moving average. "
-             "straight_through_buffer = (1 - delta_decay) * straight_through_buffer + delta_decay * quantized_weight.",
     )
     parser.add_argument(
         '--code_adam_16bit',
@@ -661,8 +687,15 @@ def main():
         named_dequantized_params = get_original_named_parameters_from_fsdp_module(dequantized_model)
         assert all(name in named_dequantized_params for name in named_quantized_params)
 
+        if world_size > 1:
+            # distributed pv: each rank holds a subset of all quantized weights; the rest are replaced with pointers
+            named_quantized_params = split_quantized_weights_between_ranks(
+                named_quantized_params, verify_checksums=False)
         for quantized_weight in named_quantized_params.values():
-            quantized_weight.to(device)
+            if isinstance(quantized_weight, QuantizedWeight):
+                quantized_weight.to(device)
+            else:
+                assert isinstance(quantized_weight, YourQuantizedWeightIsInAnotherRank)
 
     optimizer = StraightThroughAdamW(
         named_dequantized_params=named_dequantized_params,
@@ -684,11 +717,12 @@ def main():
             lamb=args.lamb, debias=args.debias, amsgrad=args.amsgrad, compute_dtype=args.master_dtype,
             exp_avg_dtype=args.master_dtype, exp_avg_sq_dtype=args.master_dtype, v_hat_max_dtype=args.master_dtype,
         ),
-        max_code_change_per_step=args.max_code_change_per_step,
         delta_decay=args.delta_decay,
+        max_code_change_per_step=args.max_code_change_per_step,
+        force_directional_code_update=args.force_directional_code_update,
+        code_trust_ratio=code_trust_ratio,
         beam_size=args.beam_size,
         straight_through_buffer_dtype=args.straight_through_buffer_dtype,
-        sharded=(world_size > 1),
         verbose=args.verbose_optimizer,
     )
     del named_quantized_params

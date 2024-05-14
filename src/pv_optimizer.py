@@ -1,9 +1,7 @@
 """Module containing utilities for straight-through fine-tuning of language models"""
-import dataclasses
 import random
-from collections import defaultdict
 from enum import Enum, auto
-from typing import Optional, Dict, Tuple, List, Any, Sequence, Iterator
+from typing import Optional, Dict, Tuple, List, Any, Sequence, Iterator, Union
 
 import torch
 import torch.nn as nn
@@ -12,7 +10,7 @@ from torch.optim.optimizer import StateDict
 
 from src.aq import QuantizedWeight
 from src.configurable_adam import ConfigurableAdamW
-from src.pv_utils import print_runtime_stats
+from src.pv_utils import print_runtime_stats, YourQuantizedWeightIsInAnotherRank
 
 
 class ParameterRole(Enum):
@@ -26,51 +24,73 @@ class StraightThroughAdamW(ConfigurableAdamW):
     A wrapper for a PyTorch optimizer that can perform updates on quantized and/or de-quantized parameters
     :param update_non_quantized_params: how to update parameters that are not directly linked to a QuantizedWeight.
         This may include biases, embeddings/heads, normalization layers or parts of the model that were not quantized.
+        This should be either None (do not update) or a dictionary of optimizer kwargs. In the latter case, these
+        keyword arguments will be used when configuring optimizer for this specific parameter group.
     :param update_codebooks_and_scales: how to update continuous params of QuantizedWeight: codebooks and scales.
-        This should be a dictionary of optimizer kwargs. In the latter case, these
-            keyword arguments will be used when configuring optimizer for this specific parameter group
+        This should be either None (do not update) or a dictionary of optimizer kwargs. In the latter case, these
+        keyword arguments will be used when configuring optimizer for this specific parameter group.
     :param update_codes: how to update codes in each QuantizedWeight with beam search and straight-through grad.
-        This should be a dictionary of configurations, similar to
+        This should be either None (do not update codes) or a dictionary of hyperparameter, similarly to above.
+    :param delta_decay: determines whether to use straight-through estimation, direct optimization or a mixture thereof
+        - if delta_decay == 1, do not use straight-through estimation. In this regime, the optimizer first updates
+         de-quantized weights as though they were continuous, then uses modified weights to update codes, codebooks and
+         scales; at the end of each step, the optimizer overwrites de-quantized weights to a de-quantization of the
+         possibly updated quantized representations (codes, codebooks, scales).
+        - if delta_decay == 0, use standard straight-through estimation. In this regime, the optimizer creates
+        an internal set of straight-through buffers in the shape of de-quantized weights. The optimizer trains these
+        buffers as though they were continuous; the quantized weights are then updated to minimize the L2 distance to
+        these straight-through buffers; finally, the optimizer updates de-quantized weights from the quantized versions.
+        - if delta_decay is between 0 and 1, use penalized straight-through estimation. The optimizer acts as though
+        using standard straight-through estimation (see delta_decay == 0), but after every step, the straight-through
+        buffers are set to (1 - delta_decay) * straight_through_buffer + delta_decay * quantized_weight.
+
     :param max_code_change_per_step: max portion of discrete code groups that can be updated; only affects codes
-    :param beam_size: beam search width used only when updating codes. See beam_size in aq.py
+    :param code_trust_ratio: the maximum relative change to quantized weights per step, as a fraction of weight norm;
+        see details in src/beam_search_l2.py, and in particular, beam_search_optimal_codes docstring.
+    :param code_selection_temperature: if max_code_change or code_trust_ratio is set, the optimizer will by default
+        prioritize updating codes with the largest delta = ||dequantized_weight_after_sgd_step - quantized_weight||_2 .
+        If code_selection_temperature is above 0, it will instead sample codes randomly in proportion to the same
+        delta ^ (1 / temperature). If temperature is very high, the optimizer will choose codes uniformly at random.
+    :param force_directional_code_update: if True, beam search will force codes to change even if code is optimal in
+        terms of mean squared error. Formally, this is a constraint <reference - prev_weight, new_weight - prev_weight > 0
+        By default, the algorithm forces *all* weights to update this way, which may change weights too much.
+        To limit the numer of updated weights, set max_code_change and trust_ratio.
     :param stochastic_rounding_tau: if above 0, use stochastic rounding with this temperature. See aq.py
+
+    :param beam_size: beam search width used only when updating codes. See beam_size in aq.py
+
     :param straight_through_buffer_dtype: use this dtype when accumulating updates to de-quantized weight matrices
+        Used only if delta_decay != 1.
 
-    :param sharded: if set, split all QuantizedWeights and their corresponding states between ranks (distributed only)
-       Note: unlike FSDP, every QuantizedWeight is assigned fully to one rank (and not split into smaller parts)
-
-    If sharded, the full list of directly optimized parameters for one rank is:
-      - non-quantized weights from named_dequantized_weights
-      - straight-through buffers for the assigned subset of quantized weights
-      - continuous representation parameters for the assigned subset of quantized weights (codebooks and scales)
-
-    The straight-through buffers are used to update the discrete representation parameters (codes) for QuantizedWeights
-
-    The de-quantized versions of quantized weights in named_dequantzied_weights are *not* optimized directly.
-    Instead, after each step updates codes, codebooks and scales, they are set to the latest dequantized weight.
     """
 
     def __init__(self,
                  named_dequantized_params: Dict[str, nn.Parameter],
-                 named_quantized_params: Dict[str, QuantizedWeight],
+                 named_quantized_params: Dict[str, Union[QuantizedWeight, YourQuantizedWeightIsInAnotherRank]],
                  *,
                  update_non_quantized_parameters: Optional[dict] = None,
                  update_codebooks_and_scales: Optional[dict] = None,
                  update_codes: Optional[dict] = None,
                  beam_size: int,
+                 delta_decay: float = 1,
                  max_code_change_per_step: float,
+                 code_trust_ratio: Optional[float] = None,
+                 code_selection_temperature: float = 0,
+                 force_directional_code_update: bool = False,
                  stochastic_rounding_tau: float = 0,
-                 delta_decay: float = 0,
                  straight_through_buffer_dtype: Optional[torch.dtype] = None,
-                 sharded: bool = False,
                  verbose: bool = False,
                  **kwargs):
-        self.sharded = sharded
+        assert 0 <= delta_decay <= 1
+        assert all(isinstance(qw, (QuantizedWeight, YourQuantizedWeightIsInAnotherRank))
+                   for qw in named_quantized_params.values())
         assert all(name in named_dequantized_params for name in named_quantized_params), "param names mismatch"
-        assert all(isinstance(qw, QuantizedWeight) for qw in named_quantized_params.values())
-        if sharded:
-            # distributed pv: each rank holds a subset of all quantized weights; the rest are replaced with pointers
-            named_quantized_params = _split_quantized_weights_between_ranks(named_quantized_params)
+
+        self.sharded = not all(isinstance(qw, QuantizedWeight) for qw in named_quantized_params.values())
+        self.is_straight_through = delta_decay != 1
+        if verbose:
+            print(end=f"PV optimizer init: quantized weights are {('not sharded', 'sharded')[self.sharded]}\n")
+            print(end=f"\tOptimizing {('without', 'with')[self.is_straight_through]} straight-through buffers\n")
         param_groups, all_optimized_params = self._select_optimized_parameters(
             named_dequantized_params=named_dequantized_params,
             named_quantized_params=named_quantized_params,
@@ -84,21 +104,25 @@ class StraightThroughAdamW(ConfigurableAdamW):
         self.optimized_param_to_name = {param: name for name, param in all_optimized_params.items()}
         self.quantized_weights_by_name = {name: qw for name, qw in named_quantized_params.items()
                                           if isinstance(qw, (QuantizedWeight, YourQuantizedWeightIsInAnotherRank))}
-        self.straight_through_buffer_by_name = {name: all_optimized_params[name]
-                                                for name in self.quantized_weights_by_name.keys()
-                                                if name in all_optimized_params}
+        self.straight_through_buffer_by_name = {
+            name: all_optimized_params[name] for name in self.quantized_weights_by_name.keys()
+            if name in all_optimized_params} if self.is_straight_through else {}
         self.dequantized_weights_by_name = {name: param for name, param in named_dequantized_params.items()
                                             if name in named_quantized_params}
-        if sharded:
+        if self.sharded:
             self.sharded_param_sizes_by_rank = _get_sharded_param_sizes_by_rank(named_dequantized_params)
 
         self.should_update_non_quantized_parameters = update_non_quantized_parameters is not None
         self.should_update_codebooks_and_scales = update_codebooks_and_scales is not None
         self.should_update_codes = update_codes is not None
-        self.beam_size = beam_size
-        self.max_code_change_per_step = max_code_change_per_step
-        self.stochastic_rounding_tau = stochastic_rounding_tau
+
         self.delta_decay = delta_decay
+        self.max_code_change_per_step = max_code_change_per_step
+        self.code_trust_ratio = code_trust_ratio
+        self.force_directional_code_update = force_directional_code_update
+        self.code_selection_temperature = code_selection_temperature
+        self.stochastic_rounding_tau = stochastic_rounding_tau
+        self.beam_size = beam_size
         self.verbose = verbose
 
     def _select_optimized_parameters(
@@ -112,11 +136,14 @@ class StraightThroughAdamW(ConfigurableAdamW):
                 non_quantized_params[name] = param
             elif isinstance(named_quantized_params[name], QuantizedWeight):
                 quantized_weight = named_quantized_params[name]
-                with torch.no_grad():
-                    dequantized_weight = quantized_weight()
-                dequantized_weight = nn.Parameter(dequantized_weight.to(dtype=straight_through_buffer_dtype),
-                                                  requires_grad=dequantized_weight.requires_grad)
-                quantized_params[name] = dequantized_weight  # accumulator for optimizer updates; sharded alongside FSDP
+                if self.is_straight_through:   # create an accumulator for optimizer updates; sharded alongside FSDP
+                    with torch.no_grad():
+                        dequantized_weight = quantized_weight()
+                    dequantized_weight = nn.Parameter(dequantized_weight.to(dtype=straight_through_buffer_dtype),
+                                                      requires_grad=dequantized_weight.requires_grad)
+                else:
+                    dequantized_weight = param
+                quantized_params[name] = dequantized_weight
                 for subparam_name, subparam in quantized_weight.named_parameters():
                     full_name = f'{name}.{subparam_name}'
                     assert full_name not in quantized_representation_params, full_name
@@ -211,12 +238,15 @@ class StraightThroughAdamW(ConfigurableAdamW):
             for param in param_group['params']:
                 name = self.optimized_param_to_name[param]
                 if param_group['role'] == ParameterRole.QUANTIZED_PARAMETER:
-                    assert param is self.straight_through_buffer_by_name[name]
-                    # pass gradients to straight-through update buffer or (possibly offloaded) quantized parameter
-                    grad_wrt_dequantized_parameter = aggregated_grads_by_name[name]
-                    assert grad_wrt_dequantized_parameter.shape == param.shape
-                    param.grad = grad_wrt_dequantized_parameter.to(dtype=param.dtype, device=param.device)
-
+                    if self.is_straight_through:
+                        assert param is self.straight_through_buffer_by_name[name]
+                        # pass gradients to straight-through update buffer or (possibly offloaded) quantized parameter
+                        grad_wrt_dequantized_parameter = aggregated_grads_by_name[name]
+                        assert grad_wrt_dequantized_parameter.shape == param.shape
+                        param.grad = grad_wrt_dequantized_parameter.to(dtype=param.dtype, device=param.device)
+                    else:
+                        assert len(self.straight_through_buffer_by_name) == 0
+                        assert param.grad is not None
                 elif param_group['role'] == ParameterRole.NON_QUANTIZED_PARAMETER:
                     assert name not in self.dequantized_weights_by_name and name not in self.quantized_weights_by_name
                 elif param_group['role'] == ParameterRole.QUANTIZED_REPRESENTATION_PARAMETER:
@@ -232,19 +262,21 @@ class StraightThroughAdamW(ConfigurableAdamW):
             with torch.enable_grad():
                 for name, quantized_weight in self.quantized_weights_by_name.items():
                     if isinstance(quantized_weight, QuantizedWeight):
-                        grad = aggregated_grads_by_name[name]
-                        quantized_weight.forward().backward(grad)
+                        quantized_weight.forward().backward(aggregated_grads_by_name[name])
 
     @torch.no_grad()
     def _optimize_quantized_weights(self):
         """Update discrete state representations to approximate straight through buffers"""
         # note: if sharded, this only updates the subset of quantized weights that are assigned to local rank
-
+        remaining_quantized_weights = {
+            name: qw for name, qw in self.quantized_weights_by_name.items() if isinstance(qw, QuantizedWeight)
+        }
         for param_group in self.param_groups:
             if param_group['role'] == ParameterRole.QUANTIZED_PARAMETER:
                 for param in param_group['params']:
+                    # param is either a dequantized weight or a special straight-through buffer (if is_straight_through)
                     name = self.optimized_param_to_name[param]
-                    quantized_weight = self.quantized_weights_by_name[name]
+                    quantized_weight = remaining_quantized_weights.pop(name)
                     reference_weight = param    # dequantized weight after optimizer updates
                     assert isinstance(quantized_weight, QuantizedWeight)
 
@@ -253,13 +285,15 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         reference_weight=reference_weight,
                         beam_size=self.beam_size,
                         stochastic_rounding_tau=self.stochastic_rounding_tau,
-                        max_change_fraction=self.max_code_change_per_step,
+                        max_update_fraction=self.max_code_change_per_step,
+                        force_directional_update=self.force_directional_code_update,
+                        code_selection_temperature=self.code_selection_temperature,
+                        trust_ratio=self.code_trust_ratio,
                         dim_rng=random.Random(None),
                     )  # note: this updates quantized_weight codes in-place
-                    if self.delta_decay != 0:
-                        reference_weight[...] = (
-                            self.delta_decay * quantized_weight() + (1 - self.delta_decay) * reference_weight
-                        )
+                    if self.delta_decay != 0 and not self.is_straight_through:
+                        param[...] = self.delta_decay * quantized_weight() + (1 - self.delta_decay) * reference_weight
+                        # if not is_straight_throuh, param will be properly updated in _update_dequantized_weights
 
                     if self.verbose:
                         code_change_rate = torch.not_equal(prev_codes, new_codes).any(-1).float().mean().item()
@@ -283,6 +317,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         print(end=f"Updated codes for {name}{maybe_distributed_msg}:\n\tFraction of weights with at "
                                   f"least one code change: {code_change_rate} {maybe_limit_msg}{maybe_individual_msg}\n"
                                   f"{maybe_delta_msg}\n")
+        assert len(remaining_quantized_weights) == 0
 
     @torch.no_grad()
     def _update_dequantized_weights(self):
@@ -338,7 +373,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
         state_dict["quantized_weight_state_dicts"] = {
             name: quantized_weight.state_dict() for name, quantized_weight in self.iterate_local_quantized_weights()
         }
-        state_dict["straight_through_buffers"] = dict(self.straight_through_buffer_by_name)
+        state_dict["straight_through_buffers"] = dict(self.straight_through_buffer_by_name)  # may be empty
         # note: the de-quantized params are not saved here; instead, they are saved with model.state_dict
         return state_dict
 
@@ -367,59 +402,3 @@ def _get_sharded_param_sizes_by_rank(named_dequantized_params: Dict[str, torch.T
     for name in named_dequantized_params.keys():
         dequantized_param_sizes_by_rank[name] = [gathered_list[rank][name] for rank in range(world_size)]
     return dequantized_param_sizes_by_rank
-
-
-def _split_quantized_weights_between_ranks(quantized_weights: Dict[str, QuantizedWeight]):
-    """
-    Split all quantized weights between ranks in a distributed setup; uses greedy knapsack heuristic.
-    Note that unlike FSDP, this heuristic will always assign the entire quantized weight to one rank.
-
-    :param quantized_weights: a dictionary [parameter_name] -> QuantizedWeight
-    :returns: a dictionary similar to quantized weights or pointers to different ranks.
-        If your rank stores this quantized weight for [name], then returned_dict[name] is quantized_weights[name]
-        Otherwise, returned_dict[name] = YourQuantizedWeightIsInAnotherRank(rank=where_it_is_stored)
-    """
-    assert torch.distributed.is_initialized()
-    own_rank = torch.distributed.get_rank()
-    world_size = torch.distributed.get_world_size()
-    all_quantized_weights: Dict[QuantizedWeight, List[str]] = defaultdict(list)
-    for name, quantized_weight in quantized_weights.items():
-        all_quantized_weights[quantized_weight].append(name)
-
-    # order quantized weights in a rank-agnostic way: order by (param size desc, linked param name asc)
-    def _compute_size(qw: QuantizedWeight) -> float:
-        return qw.out_features * qw.in_features * qw.estimate_nbits_per_parameter()
-    ordered_quantized_weights = sorted(
-        all_quantized_weights, key=lambda qw: (-_compute_size(qw), min(all_quantized_weights[qw]))
-    )
-    assert len(ordered_quantized_weights) > 0, "internal error: could not find any linked QuantizedWeight in state"
-
-    # split between ranks
-    quantized_weight_to_rank = dict()
-    total_size_by_rank = [0 for _ in range(world_size)]
-    for quantized_weight in ordered_quantized_weights:
-        least_busy_rank = min(range(world_size), key=lambda rank: total_size_by_rank[rank])
-        total_size_by_rank[least_busy_rank] += _compute_size(quantized_weight)
-        quantized_weight_to_rank[quantized_weight] = least_busy_rank
-
-    checksum = tuple((min(all_quantized_weights[qw]), quantized_weight_to_rank[qw], _compute_size(qw))
-                     for qw in ordered_quantized_weights)
-    checksums = [() for _ in range(world_size)]
-    torch.distributed.all_gather_object(checksums, checksum)
-    assert checksums[own_rank] == checksum, (checksums, own_rank, checksum)
-    assert all(other_checksum == checksum for other_checksum in checksums), checksums
-
-    sharded_quantized_weights = dict()
-    for name, quantized_weight in list(quantized_weights.items()):
-        target_rank = quantized_weight_to_rank[quantized_weight]
-        if target_rank == own_rank:
-            sharded_quantized_weights[name] = quantized_weight
-        else:
-            sharded_quantized_weights[name] = YourQuantizedWeightIsInAnotherRank(target_rank)
-    return sharded_quantized_weights
-
-
-@dataclasses.dataclass(init=True, frozen=True)
-class YourQuantizedWeightIsInAnotherRank:
-    """This replaces quantized weights that are not held on this rank"""
-    rank: int
