@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 from tqdm.auto import trange
 
-from src.aq_ops import _dequantize_weight, ellipsis, IntCodes, is_signed, _select_updates_with_highest_priority
+from src.aq_ops import _dequantize_weight, ellipsis, IntCodes, is_signed
 from src.beam_search_xtx import beam_search_optimal_codes as beam_search_minimize_activation_mse
 from src.beam_search_l2 import beam_search_optimal_codes as beam_search_minimize_weight_mse
 from src.kmeans import find_nearest_cluster, fit_faiss_kmeans, fit_kmeans, fit_kmeans_1d
@@ -215,7 +215,6 @@ class QuantizedWeight(nn.Module):
         XTX: Optional[torch.Tensor] = None,
         reference_weight: torch.Tensor,
         selection: Union[slice, ellipsis, torch.LongTensor] = ...,
-        max_change_fraction: Optional[float] = None,
         **kwargs,
     ) -> torch:
         """
@@ -242,9 +241,6 @@ class QuantizedWeight(nn.Module):
         codebooks = self.get_codebooks()
         prev_codes = self.get_codes()[selection]
         scales = self.get_scales()[selection]
-        dequantized_weight = None
-        if max_change_fraction is not None:
-            dequantized_weight = self()
         if XTX is not None:
              new_codes = beam_search_minimize_activation_mse(
                 XTX=XTX,
@@ -262,16 +258,6 @@ class QuantizedWeight(nn.Module):
                 scales=scales,
                 **kwargs
             )
-
-        if max_change_fraction is not None:
-            num_output_groups = self.out_features // self.out_group_size
-            num_input_groups = self.in_features // self.in_group_size
-            groupwise_update_norms = (reference_weight - dequantized_weight).view(
-                num_output_groups, self.out_group_size, num_input_groups, self.in_group_size
-            ).square().sum(dim=(1, 3))
-            max_updates = max(int(max_change_fraction * new_codes.shape[0] * new_codes.shape[1]), 1)
-            new_codes = _select_updates_with_highest_priority(
-                prev_codes, new_codes, priorities=groupwise_update_norms, max_updates=max_updates)
         self.set_codes(new_codes, selection)
         return new_codes
 
