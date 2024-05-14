@@ -123,7 +123,7 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--adam_beta2",
         type=float,
-        default=0.98,
+        default=0.95,
         help="Adam beta2 for continuous params",
     )
 
@@ -142,7 +142,7 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--code_beta2",
         type=float,
-        default=0.98,
+        default=0.95,
         help="Adam beta2 for discrete params",
     )
     parser.add_argument(
