@@ -235,9 +235,9 @@ def _beam_search_update_codes_groupwise(
                 scores = scores + is_banned * 9999  # ban changes that run against the update direction
 
             flat_best_losses_chunk, flat_best_indices_chunk = torch.topk(
-                scores.flatten(1, 2), largest=False, sorted=is_last_step or beam_size > 1 or stochastic_rounding_tau > 0,
-                k=target_num_candidates,
-            )  # [num_groups_chunk, beam_size (+1 if stochastic rounding)]
+                scores.flatten(1, 2), k=target_num_candidates, largest=False,
+                sorted=is_last_step or beam_size > 1 or stochastic_rounding_tau > 0
+            )  # [num_groups_chunk, target_num_candidates]
 
             if stochastic_rounding_tau > 0:
                 errors = flat_best_losses_chunk.relu().sqrt()  # non-squared errors
