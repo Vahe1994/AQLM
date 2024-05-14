@@ -198,7 +198,12 @@ def _beam_search_update_codes_groupwise(
             residue_norms_sq = residue.square().sum(-1).unsqueeze(-1)  # [num_groups, current beam size, 1]
         else:
             residue_norms_sq = torch.empty(0, device=device)  # when doing greedy search, these are const
-        flat_best_indices = torch.empty(num_groups, beam_size, device=device, dtype=codes.dtype)
+
+        if not is_last_step:
+            target_num_candidates = beam_size + int(stochastic_rounding_tau > 0)
+        else:
+            target_num_candidates = 2 if stochastic_rounding_tau > 0 or force_directional_update else 1
+        flat_best_indices = torch.empty(num_groups, target_num_candidates, device=device, dtype=codes.dtype)
 
         chunk_size_rows = chunk_size_values // (codebook_size * current_beam_size)
         for chunk_start in range(0, num_groups, chunk_size_rows):
@@ -214,13 +219,12 @@ def _beam_search_update_codes_groupwise(
                 # this checks that <reference - prev_weight,  new_weight - prev_weight> > 0; the next lines simplify:
                 # <direction, new_weight> - <direction,  prev_weight> > 0   | since direction = reference - prev_weight
                 # <direction, current_codebook + new_weight_without_current_codebook> - <direction, prev_weight> > 0
-                # <direction, current_codebook> + <direction, new_weight_without_current_codebook> - <direction, prev_weight> > 0
-                # <direction, current_codebook> - <direction, prev_weight - new_weight_without_current_codebook> > 0
-                # <direction, current_codebook> - <direction, residue - direction> > 0
-                # b/c residue = reference - new_weight_without_current_codebook and direction = reference - prev_weight
+                # <direction, current_codebook> + <direction, new_weight_without_current_codebook - prev_weight> > 0
+                # <direction, current_codebook> + <direction, direction - residue> > 0
+                # b/c direction = reference - prev_weight and residue = reference - new_weight_without_current_codebook
 
-                proj = torch.matmul(direction[chunk_start: chunk_end], codebooks[codebook_index].T).unsqueeze(1).sub(
-                    torch.einsum('ng,nbg->nb', direction[chunk_start: chunk_end], residue - direction[:, None, :]).unsqueeze(-1)
+                proj = torch.matmul(direction[chunk_start: chunk_end], codebooks[codebook_index].T).unsqueeze(1).add(
+                    torch.einsum('ng,nbg->nb', direction[chunk_start: chunk_end], direction[:, None, :] - residue).unsqueeze(-1)
                 )  # [group_size, beam_size, codebook_size]
                 is_banned = (proj <= 0)
                 for hypo_index in range(beam_codes.shape[1]):
@@ -231,8 +235,8 @@ def _beam_search_update_codes_groupwise(
                 scores = scores + is_banned * 9999  # ban changes that run against the update direction
 
             flat_best_losses_chunk, flat_best_indices_chunk = torch.topk(
-                scores.flatten(1, 2), k=beam_size + int(stochastic_rounding_tau > 0),
-                largest=False, sorted=is_last_step or beam_size > 1 or stochastic_rounding_tau > 0
+                scores.flatten(1, 2), largest=False, sorted=is_last_step or beam_size > 1 or stochastic_rounding_tau > 0,
+                k=target_num_candidates,
             )  # [num_groups_chunk, beam_size (+1 if stochastic rounding)]
 
             if stochastic_rounding_tau > 0:
@@ -257,7 +261,8 @@ def _beam_search_update_codes_groupwise(
         if not is_last_step:
             residue = residue - F.embedding(beam_codes[..., codebook_index], codebooks[codebook_index, ...])
 
-    if force_directional_change:
+    if force_directional_update:
+        assert beam_codes.shape[1] == 2
         best_codes = beam_codes[:, 0, :]
         second_best_codes = beam_codes[:, 1, :]
         best_code_changed = (best_codes != prev_codes).any(dim=-1, keepdim=True)
