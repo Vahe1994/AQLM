@@ -8,7 +8,6 @@ import torch
 import torch.nn.functional as F
 
 from src.aq_ops import maybe_script, _dequantize_weight
-from src.pv_optimizer import print_runtime_stats
 
 
 @torch.inference_mode
@@ -120,21 +119,19 @@ def beam_search_optimal_codes(
             flat_indices_to_update = torch.topk(difference_with_reference_squared_norms.flatten(),
                                                 k=num_codes_to_update, largest=True, sorted=True).indices
 
-
     if max_update_fraction == 1:
         flat_new_codes = _update_flat_codes(flat_unscaled_reference, flat_prev_codes)
     else:
-        flat_new_codes = flat_prev_codes.clone()#TODO index_put
-        flat_new_codes[flat_indices_to_update] = _update_flat_codes(flat_unscaled_reference[flat_indices_to_update],
-                                                                    flat_prev_codes[flat_indices_to_update])
-
+        flat_new_codes = flat_prev_codes.index_put(  # note: this is an out-of-place op that does not modify prev codes
+            (flat_indices_to_update, torch.arange(num_codebooks, device=codebooks.device)),
+            _update_flat_codes(flat_unscaled_reference[flat_indices_to_update], flat_prev_codes[flat_indices_to_update])
+        )
 
     if trust_ratio is not None:
         assert isinstance(flat_indices_to_update, torch.Tensor) and isinstance(prev_dequantized_weight, torch.Tensor)
         new_dequantized_weight = _dequantize_weight(flat_new_codes.view_as(prev_codes), codebooks, scales)
         weight_change_squared_norms = _groupwise_squared_norms(new_dequantized_weight - prev_dequantized_weight)
         # ^-- shape: [num_output_groups, num_input_groups]
-
 
         flat_ordered_weight_change_squared_norms = weight_change_squared_norms.flatten()[flat_indices_to_update]
         flat_ordered_cumulative_norms = flat_ordered_weight_change_squared_norms.cumsum(0).sqrt()
@@ -143,15 +140,12 @@ def beam_search_optimal_codes(
         num_codes_selected = 1 + torch.searchsorted(
             flat_ordered_cumulative_norms, trust_ratio * prev_dequantized_weight.norm(), side='left'
         )
-        truncated_flat_indices_to_update = flat_indices_to_update[:num_codes_selected]
-        NEWER_flat_new_codes = flat_prev_codes.clone()
-        NEWER_flat_new_codes[truncated_flat_indices_to_update] = NEWER_flat_new_codes[truncated_flat_indices_to_update]
-        #TODO index_put
-
-        return truncated_new_codes.view_as(prev_codes)
-
-
-    return new_codes_groupwise
+        truncated_flat_indices_to_update = flat_indices_to_update[:num_codes_selected]  # sorted most to least important
+        flat_new_codes = flat_prev_codes.index_put(  # <-- note: this is an out-of-place operation
+            (truncated_flat_indices_to_update, torch.arange(num_codebooks, device=codebooks.device)),
+            flat_new_codes[truncated_flat_indices_to_update]
+        )
+    return flat_new_codes.view_as(prev_codes)
 
 
 @maybe_script
