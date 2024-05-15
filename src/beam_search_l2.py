@@ -224,7 +224,10 @@ def _beam_search_update_codes_groupwise(
                 # b/c direction = reference - prev_weight and residue = reference - new_weight_without_current_codebook
 
                 proj = torch.matmul(direction[chunk_start: chunk_end], codebooks[codebook_index].T).unsqueeze(1).add(
-                    torch.einsum('ng,nbg->nb', direction[chunk_start: chunk_end], direction[:, None, :] - residue).unsqueeze(-1)
+                    torch.einsum(
+                        'ng,nbg->nb', direction[chunk_start: chunk_end],
+                        direction[chunk_start: chunk_end, None, :] - residue[chunk_start: chunk_end]
+                    ).unsqueeze(-1)
                 )  # [group_size, beam_size, codebook_size]
                 is_banned = (proj <= 0)
                 for hypo_index in range(beam_codes.shape[1]):
