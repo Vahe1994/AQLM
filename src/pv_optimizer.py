@@ -228,7 +228,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
             dequantized_flat_param_shards, self.sharded_param_sizes_by_rank, self.target_rank_by_name,
             name_order=self.ordered_quantized_weight_names,
         )
-        aggregated_params_by_name = {name: param.to(self.quantized_weights_by_name[name].shape)
+        aggregated_params_by_name = {name: param.view(self.quantized_weights_by_name[name].shape)
                                      for name, param in flat_aggregated_params_by_name.items()}
         return aggregated_params_by_name
 
