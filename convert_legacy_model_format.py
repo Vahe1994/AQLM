@@ -156,7 +156,7 @@ def main():
     parser.add_argument("--save", type=str, required=True, help="Save the converted quantized model here")
 
     args = parser.parse_args()
-    assert args.p_finetuned_state_dict or args.pv_fsdp_dir, "either one of those must be specified"
+    assert (args.p_finetuned_state_dict is None) != (args.pv_fsdp_dir is None), "either one of those must be specified"
     print(f"{args.p_finetuned_state_dict=}, {args.pv_fsdp_dir=}")
     assert (args.p_finetuned_state_dict is not None) != (args.pv_fsdp_dir is not None)
 
