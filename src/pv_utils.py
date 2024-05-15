@@ -179,7 +179,7 @@ def split_quantized_weights_between_ranks(quantized_weights: Dict[str, Quantized
     else:
         hashing = hashlib.sha256()
         hashing.update(json.dumps(checksum).encode())
-        print(end=f"Splitting quantized weights, rank {own_rank} checksum hash: {hashing.hexdigest()}")
+        print(end=f"Splitting quantized weights, rank {own_rank} checksum hash: {hashing.hexdigest()}\n")
 
     sharded_quantized_weights = dict()
     for name, quantized_weight in list(quantized_weights.items()):
