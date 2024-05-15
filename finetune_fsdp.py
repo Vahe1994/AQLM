@@ -109,6 +109,17 @@ def add_model_args(parser: argparse.ArgumentParser):
 
 def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
+        '--update_codes', action='store_true', help="If set, train discrete codes; if not, freeze them",
+    )
+    parser.add_argument(
+        '--update_codebooks_and_scales', action='store_true',
+        help="If set, train continuous parameters of quantized representations; if not, freeze them",
+    )
+    parser.add_argument(
+        '--update_non_quantized_parameters', action='store_true',
+        help="If set, train the non-quantized model parameters (layernorm scales, biases, logits); if not, freeze them",
+    )
+    parser.add_argument(
         "--lr",
         type=float,
         default=1e-5,
@@ -706,17 +717,17 @@ def main():
             exp_avg_dtype=torch.float16 if args.code_adam_16bit else args.master_dtype,
             exp_avg_sq_dtype=torch.bfloat16 if args.code_adam_16bit else args.master_dtype,
             v_hat_max_dtype=torch.float16 if args.code_adam_16bit else args.master_dtype,
-        ),
+        ) if args.update_codes else None,
         update_codebooks_and_scales=dict(
             lr=args.lr, betas=(args.adam_beta1, args.adam_beta2),
             lamb=args.lamb, debias=args.debias, amsgrad=args.amsgrad, compute_dtype=args.master_dtype,
             exp_avg_dtype=args.master_dtype, exp_avg_sq_dtype=args.master_dtype, v_hat_max_dtype=args.master_dtype,
-        ),
+        ) if args.update_codebooks_and_scales else None,
         update_non_quantized_parameters=dict(
             lr=args.lr, betas=(args.adam_beta1, args.adam_beta2),
             lamb=args.lamb, debias=args.debias, amsgrad=args.amsgrad, compute_dtype=args.master_dtype,
             exp_avg_dtype=args.master_dtype, exp_avg_sq_dtype=args.master_dtype, v_hat_max_dtype=args.master_dtype,
-        ),
+        ) if args.update_non_quantized_parameters else None,
         delta_decay=args.delta_decay,
         max_code_change_per_step=args.max_code_change_per_step,
         force_directional_code_update=args.force_directional_code_update,
