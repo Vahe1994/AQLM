@@ -111,6 +111,9 @@ class StraightThroughAdamW(ConfigurableAdamW):
                                             if name in named_quantized_params}
         if self.sharded:
             self.sharded_param_sizes_by_rank = _get_sharded_param_sizes_by_rank(named_dequantized_params)
+            self.target_rank_by_name = {
+                name: qw.rank if isinstance(qw, YourQuantizedWeightIsInAnotherRank) else torch.distributed.get_rank()
+                for name, qw in self.quantized_weights_by_name.items()}
 
         self.should_update_non_quantized_parameters = update_non_quantized_parameters is not None
         self.should_update_codebooks_and_scales = update_codebooks_and_scales is not None
@@ -188,48 +191,47 @@ class StraightThroughAdamW(ConfigurableAdamW):
         return original_output
 
     def _aggregate_gradients_for_dequantized_weights(self):
-        """move gradients from dequantized params to straight-through buffers. If sharded, gather grads across ranks"""
-        async_ops = list()
-        aggregated_grads_by_name = dict()
+        """collect full parameter gradients from fsdp-sharded parameters, return dict[name -> grad]"""
+        grad_shards_by_name = dict()
+
         for name in self.ordered_quantized_weight_names:
             if self.dequantized_weights_by_name[name].grad is None:
                 assert self.dequantized_weights_by_name[name].numel() == 0
                 self.dequantized_weights_by_name[name].grad = torch.zeros_like(self.dequantized_weights_by_name[name])
             grad = self.dequantized_weights_by_name[name].grad
             assert grad is not None, name
+            grad_shards_by_name[name] = grad
 
-            if not self.sharded:
-                aggregated_grads_by_name[name] = grad
-            else:
-                quantized_weight = self.quantized_weights_by_name[name]
-                own_rank = torch.distributed.get_rank()
-                world_size = torch.distributed.get_world_size()
-                if isinstance(quantized_weight, QuantizedWeight):
-                    shard_sizes: Sequence[int] = self.sharded_param_sizes_by_rank[name]
-                    combined_grad_buffer = torch.full(
-                        [quantized_weight.out_features, quantized_weight.in_features], fill_value=torch.nan,
-                        dtype=grad.dtype, device=grad.device)
-                    assert sum(shard_sizes) == combined_grad_buffer.numel()
-                    gather_buffers = list(combined_grad_buffer.view(-1).split_with_sizes(shard_sizes))
-                    assert all(part.untyped_storage().data_ptr() == combined_grad_buffer.untyped_storage().data_ptr()
-                               for part in gather_buffers)
-                    for i in range(world_size):
-                        if i != own_rank:
-                            async_ops.append(torch.distributed.irecv(gather_buffers[i], src=i))
-                        else:
-                            gather_buffers[i].copy_(grad)
-                    aggregated_grads_by_name[name] = combined_grad_buffer
-                else:
-                    assert isinstance(quantized_weight, YourQuantizedWeightIsInAnotherRank)
-                    destination_rank = self.quantized_weights_by_name[name].rank
-                    async_ops.append(torch.distributed.isend(grad.flatten(), destination_rank))
+        if self.sharded:
+            aggregated_grads_by_name = _aggregate_tensors_by_name(
+                grad_shards_by_name, self.sharded_param_sizes_by_rank, self.target_rank_by_name,
+                name_order=self.ordered_quantized_weight_names
+            )
+        else:
+            aggregated_grads_by_name = grad_shards_by_name
 
-        for handle in async_ops:
-            handle.wait()
+        aggregated_grads_by_name = {
+            name: grad.view_as(self.dequantized_weights_by_name[name]) for name, grad in aggregated_grads_by_name
+        }
         if self.verbose:
             for name, grad in aggregated_grads_by_name.items():
                 print(end=f'aggregated grad norm for {name}: {grad.norm().item()}\n')
         return aggregated_grads_by_name
+
+    def _aggregate_dequantized_weights(self):
+        """collect full (possibly optimizer-updated) dequantized weights"""
+        if not self.sharded:
+            return self.dequantized_weights_by_name
+        dequantized_flat_param_shards = {
+            name: param.data.flatten() for name, param in self.dequantized_weights_by_name.items()
+        }
+        flat_aggregated_params_by_name = _aggregate_tensors_by_name(
+            dequantized_flat_param_shards, self.sharded_param_sizes_by_rank, self.target_rank_by_name,
+            name_order=self.ordered_quantized_weight_names,
+        )
+        aggregated_params_by_name = {name: param.to(self.dequantized_weights_by_name[name].shape)
+                                     for name, param in flat_aggregated_params_by_name.items()}
+        return aggregated_params_by_name
 
     @torch.no_grad()
     def _propagate_grads_to_optimized_parameters(self):
@@ -272,13 +274,18 @@ class StraightThroughAdamW(ConfigurableAdamW):
         remaining_quantized_weights = {
             name: qw for name, qw in self.quantized_weights_by_name.items() if isinstance(qw, QuantizedWeight)
         }
+        if self.is_straight_through:
+            reference_weights_by_name = self.straight_through_buffer_by_name
+        else:
+            reference_weights_by_name = self._aggregate_dequantized_weights()
+
         for param_group in self.param_groups:
             if param_group['role'] == ParameterRole.QUANTIZED_PARAMETER:
                 for param in param_group['params']:
                     # param is either a dequantized weight or a special straight-through buffer (if is_straight_through)
                     name = self.optimized_param_to_name[param]
                     quantized_weight = remaining_quantized_weights.pop(name)
-                    reference_weight = param    # dequantized weight after optimizer updates
+                    reference_weight = reference_weights_by_name[name]
                     assert isinstance(quantized_weight, QuantizedWeight)
 
                     prev_codes = quantized_weight.get_codes().clone()  # [num_output_groups, num_input_groups]
@@ -293,7 +300,9 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         dim_rng=random.Random(None),
                     )  # note: this updates quantized_weight codes in-place
                     if self.delta_decay != 0 and not self.is_straight_through:
-                        param[...] = self.delta_decay * quantized_weight() + (1 - self.delta_decay) * reference_weight
+                        self.straight_through_buffer_by_name[name] = (
+                                self.delta_decay * quantized_weight() + (1 - self.delta_decay) * reference_weight
+                        )
                         # if not is_straight_throuh, param will be properly updated in _update_dequantized_weights
 
                     if self.verbose:
@@ -403,3 +412,50 @@ def _get_sharded_param_sizes_by_rank(named_dequantized_params: Dict[str, torch.T
     for name in named_dequantized_params.keys():
         dequantized_param_sizes_by_rank[name] = [gathered_list[rank][name] for rank in range(world_size)]
     return dequantized_param_sizes_by_rank
+
+
+def _aggregate_tensors_by_name(sharded_tensors_by_name: Dict[str, torch.Tensor],
+                               shard_sizes_by_name: Dict[str, Sequence[int]],
+                               target_rank_by_name: Dict[str, int],
+                               name_order: Optional[Sequence[str]] = None
+                               ) -> Dict[str, torch.Tensor]:
+    """
+    :param sharded_tensors_by_name: a dictionary from string to flat (1d) tensors available on the current shard
+    :note: the keys should be the same across ranks and go in the same order; if not, use ordered_names
+    :param shard_sizes_by_name: a dictionary from name to a list of sizes (numel) for this key across ranks
+    :param target_rank_by_name: a dictionary from name to a rank that this name should be aggregated to
+    :param name_order: if specified, this defines the order in which devices go over named shards
+    """
+    assert torch.distributed.is_initialized()
+    own_rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
+    aggregated_tensors_by_name = dict()
+    async_ops = list()
+
+    for name in (sorted(sharded_tensors_by_name.keys()) if name_order is None else name_order):
+        shard = sharded_tensors_by_name[name]
+        assert shard.ndim == 1
+        destination_rank = target_rank_by_name[name]
+        shard_sizes: Sequence[int] = shard_sizes_by_name[name]
+        if destination_rank == own_rank:
+            total_numel = sum(shard_sizes)
+            combined_buffer = torch.full((total_numel,), fill_value=torch.nan, dtype=shard.dtype, device=shard.device)
+            gather_buffers = list(combined_buffer.split_with_sizes(shard_sizes))
+            assert all(part.untyped_storage().data_ptr() == combined_buffer.untyped_storage().data_ptr()
+                       for part in gather_buffers)
+            for i in range(world_size):
+                if shard_sizes[i] == 0:
+                    continue  # optimization: this handles FSDP where some param/grad shards are empty
+                elif i != own_rank:
+                    async_ops.append(torch.distributed.irecv(gather_buffers[i], src=i))
+                else:
+                    gather_buffers[i].copy_(shard)
+            aggregated_tensors_by_name[name] = combined_buffer
+        else:
+            if shard_sizes[own_rank] == 0:
+                continue
+            async_ops.append(torch.distributed.isend(shard, destination_rank))
+
+    for handle in async_ops:
+        handle.wait()
+    return aggregated_tensors_by_name
