@@ -285,6 +285,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                     name = self.optimized_param_to_name[param]
                     quantized_weight = remaining_quantized_weights.pop(name)
                     reference_weight = reference_weights_by_name[name]
+                    assert reference_weight.shape == quantized_weight.shape, (reference_weight.shape, quantized_weight.shape)
                     assert isinstance(quantized_weight, QuantizedWeight)
 
                     prev_codes = quantized_weight.get_codes().clone()  # [num_output_groups, num_input_groups]
