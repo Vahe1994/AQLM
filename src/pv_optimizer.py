@@ -299,7 +299,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         trust_ratio=self.code_trust_ratio,
                         dim_rng=random.Random(None),
                     )  # note: this updates quantized_weight codes in-place
-                    if self.delta_decay != 0 and not self.is_straight_through:
+                    if self.delta_decay != 0 and self.is_straight_through:
                         self.straight_through_buffer_by_name[name][...] = (
                                 self.delta_decay * quantized_weight() + (1 - self.delta_decay) * reference_weight
                         )
