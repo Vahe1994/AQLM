@@ -88,7 +88,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
 
         self.sharded = not all(isinstance(qw, QuantizedWeight) for qw in named_quantized_params.values())
         self.is_straight_through = delta_decay != 1
-        if verbose:
+        if verbose and (not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0):
             print(end=f"PV optimizer init:\n\tAre quantized weights sharded? : {self.sharded}.\n")
             print(end=f"\tOptimizing {('without', 'with')[self.is_straight_through]} straight-through buffers\n")
         param_groups, all_optimized_params = self._select_optimized_parameters(
