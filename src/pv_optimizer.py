@@ -247,7 +247,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         assert grad_wrt_dequantized_parameter.shape == param.shape
                         param.grad = grad_wrt_dequantized_parameter.to(dtype=param.dtype, device=param.device)
                     else:
-                        assert len(self.straight_through_buffer_by_name) == 0
+                        assert len(self.straight_through_buffer_by_name) == 0, self.straight_through_buffer_by_name
                         assert param.grad is not None
                 elif param_group['role'] == ParameterRole.NON_QUANTIZED_PARAMETER:
                     assert name not in self.dequantized_weights_by_name and name not in self.quantized_weights_by_name
@@ -300,7 +300,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         dim_rng=random.Random(None),
                     )  # note: this updates quantized_weight codes in-place
                     if self.delta_decay != 0 and not self.is_straight_through:
-                        self.straight_through_buffer_by_name[name] = (
+                        self.straight_through_buffer_by_name[name][...] = (
                                 self.delta_decay * quantized_weight() + (1 - self.delta_decay) * reference_weight
                         )
                         # if not is_straight_throuh, param will be properly updated in _update_dequantized_weights
