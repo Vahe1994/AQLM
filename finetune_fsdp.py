@@ -720,7 +720,7 @@ def main():
         delta_decay=args.delta_decay,
         max_code_change_per_step=args.max_code_change_per_step,
         force_directional_code_update=args.force_directional_code_update,
-        code_trust_ratio=code_trust_ratio,
+        code_trust_ratio=args.code_trust_ratio,
         beam_size=args.beam_size,
         straight_through_buffer_dtype=args.straight_through_buffer_dtype,
         verbose=args.verbose_optimizer,
