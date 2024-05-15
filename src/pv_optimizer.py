@@ -210,9 +210,8 @@ class StraightThroughAdamW(ConfigurableAdamW):
         else:
             aggregated_grads_by_name = grad_shards_by_name
 
-        aggregated_grads_by_name = {
-            name: grad.view_as(self.dequantized_weights_by_name[name]) for name, grad in aggregated_grads_by_name
-        }
+        aggregated_grads_by_name = {name: grad.view_as(self.dequantized_weights_by_name[name])
+                                    for name, grad in aggregated_grads_by_name.items()}
         if self.verbose:
             for name, grad in aggregated_grads_by_name.items():
                 print(end=f'aggregated grad norm for {name}: {grad.norm().item()}\n')
