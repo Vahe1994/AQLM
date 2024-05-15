@@ -192,11 +192,12 @@ class StraightThroughAdamW(ConfigurableAdamW):
         async_ops = list()
         aggregated_grads_by_name = dict()
         for name in self.ordered_quantized_weight_names:
-            grad = self.dequantized_weights_by_name[name].grad
-            if grad is None:
+            if self.dequantized_weights_by_name[name].grad is None:
                 assert self.dequantized_weights_by_name[name].numel() == 0
-                grad = torch.zeros_like(self.dequantized_weights_by_name[name])
+                self.dequantized_weights_by_name[name].grad = torch.zeros_like(self.dequantized_weights_by_name[name])
+            grad = self.dequantized_weights_by_name[name].grad
             assert grad is not None, name
+
             if not self.sharded:
                 aggregated_grads_by_name[name] = grad
             else:
