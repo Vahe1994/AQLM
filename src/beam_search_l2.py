@@ -148,7 +148,7 @@ def beam_search_optimal_codes(
     return flat_new_codes.view_as(prev_codes)
 
 
-@maybe_script
+# @maybe_script
 def _beam_search_update_codes_groupwise(
         reference: torch.Tensor,
         codebooks: torch.Tensor,
@@ -276,8 +276,8 @@ def _beam_search_update_codes_groupwise(
         best_codes = beam_codes[:, 0, :]
         second_best_codes = beam_codes[:, 1, :]
         best_code_changed = torch.ne(best_codes, prev_codes).any(dim=-1)
-        keep_best_code = torch.logical_or(best_code_changed, found_no_alternative_codes)
-        best_alternative_codes = torch.where(keep_best_code.unsqueeze(-1), best_codes, second_best_codes)
+        best_alternative_codes = torch.where(best_code_changed.unsqueeze(-1), best_codes, second_best_codes)
+        best_alternative_codes = torch.where(found_no_alternative_codes.unsqueeze(-1), prev_codes, best_alternative_codes)
         return best_alternative_codes
     else:
         return beam_codes[:, 0, :]
