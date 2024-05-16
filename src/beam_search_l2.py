@@ -173,19 +173,16 @@ def _beam_search_update_codes_groupwise(
     device = reference.device
     num_groups, group_size = reference.shape
     num_codebooks, codebook_size, group_size = codebooks.shape
-    codebook_offsets = torch.arange(
-        0, num_codebooks * codebook_size, codebook_size, device=device
-    )  # shape: [num_codebooks]
+    codebook_offsets = torch.arange(0, num_codebooks * codebook_size, codebook_size, device=device)  # [num_codebooks]
+    original_dequantized_vectors = F.embedding_bag(
+        codes + codebook_offsets, codebooks.flatten(0, 1), mode='sum'
+    )  # [num_groups, group_size]
     if dim_order is None:
         dim_order = list(range(num_codebooks))
 
     code_norms_sq = codebooks.square().sum(-1)  # [num_codebooks, codebook_size]
     beam_codes = codes.clone().unsqueeze(1)  # [num_groups, current_beam_size, num_codebooks]
-
-    original_dequantized_vectors = F.embedding_bag(
-        beam_codes.flatten(0, 1) + codebook_offsets, codebooks.flatten(0, 1), mode='sum'
-    )
-    residue = reference[:, None, :] - original_dequantized_vectors.view(num_groups, 1, group_size)
+    residue = (reference - original_dequantized_vectors).view(num_groups, 1, group_size)
     # shape: [num_groups, current_beam_size, group_size]
     direction = residue.clone().view(num_groups, group_size) if force_directional_update else torch.empty(0)
 
@@ -228,13 +225,12 @@ def _beam_search_update_codes_groupwise(
                 # <direction, current_codebook> + <direction, direction - residue> > 0
                 # b/c direction = reference - prev_weight and residue = reference - new_weight_without_current_codebook
 
-                proj = torch.matmul(direction[chunk_start: chunk_end], codebooks[codebook_index].T).unsqueeze(1).add(
+                is_banned = torch.matmul(direction[chunk_start: chunk_end], codebooks[codebook_index].T).unsqueeze(1).add(
                     torch.einsum(
                         'ng,nbg->nb', direction[chunk_start: chunk_end],
                         direction[chunk_start: chunk_end, None, :] - residue[chunk_start: chunk_end]
                     ).unsqueeze(-1)
-                )  # [group_size, beam_size, codebook_size]
-                is_banned = (proj <= 0)
+                ) > 0 # [group_size, beam_size, codebook_size]
                 found_no_alternative_codes[chunk_start: chunk_end] = is_banned.all(-1).all(-1)
                 scores = scores + is_banned * float('inf')  # ban changes that run against the update direction
                 # note: if all codes are banned this way, the algorithm will rollback to prev_codes below
