@@ -189,6 +189,11 @@ def _beam_search_update_codes_groupwise(
     # shape: [num_groups, current_beam_size, group_size]
     direction = residue.clone().view(num_groups, group_size) if force_directional_update else torch.empty(0)
 
+    if force_directional_update:  # True if beam search found a code that satisfies directional constraint
+        found_suitable_code = torch.zeros(num_groups, device=device, dtype=torch.bool)
+    else:
+        found_suitable_code = torch.empty(0)
+
     for i, codebook_index in enumerate(dim_order):
         current_beam_size = residue.shape[1]
         is_last_step = i == len(dim_order) - 1
@@ -203,8 +208,8 @@ def _beam_search_update_codes_groupwise(
             target_num_candidates = beam_size + int(stochastic_rounding_tau > 0)
         else:
             target_num_candidates = 2 if stochastic_rounding_tau > 0 or force_directional_update else 1
-        flat_best_indices = torch.empty(num_groups, target_num_candidates, device=device, dtype=codes.dtype)
 
+        flat_best_indices = torch.empty(num_groups, target_num_candidates, device=device, dtype=codes.dtype)
         chunk_size_rows = chunk_size_values // (codebook_size * current_beam_size)
         for chunk_start in range(0, num_groups, chunk_size_rows):
             chunk_end = min(chunk_start + chunk_size_rows, num_groups)
@@ -230,12 +235,13 @@ def _beam_search_update_codes_groupwise(
                     ).unsqueeze(-1)
                 )  # [group_size, beam_size, codebook_size]
                 is_banned = (proj <= 0)
+                found_suitable_code[chunk_start: chunk_end] = torch.logical_not(is_banned.all(-1).all(-1))
                 for hypo_index in range(beam_codes.shape[1]):
                     is_banned[
                         torch.arange(chunk_end - chunk_start), hypo_index,
                         beam_codes[chunk_start: chunk_end, hypo_index, codebook_index]
-                    ] = False  # allow keeping prev codes  # TODO consider removing: if we cant find anything within constraint, self is still the best output
-                scores = scores + is_banned * 9999  # ban changes that run against the update direction
+                    ] = False  # allow keeping prev codes, e.g. if no other code was found
+                scores = scores + is_banned * float('inf')  # ban changes that run against the update direction
 
             flat_best_losses_chunk, flat_best_indices_chunk = torch.topk(
                 scores.flatten(1, 2), k=target_num_candidates, largest=False,
@@ -266,10 +272,12 @@ def _beam_search_update_codes_groupwise(
 
     if force_directional_update:
         assert beam_codes.shape[1] == 2
+        assert found_suitable_code.shape[0] == reference.shape[0]
         best_codes = beam_codes[:, 0, :]
         second_best_codes = beam_codes[:, 1, :]
-        best_code_changed = (best_codes != prev_codes).any(dim=-1, keepdim=True)
-        best_alternative_codes = torch.where(best_code_changed, best_codes, second_best_codes)
+        best_code_changed = torch.ne(best_codes, prev_codes).any(dim=-1)
+        should_take_second_best = torch.logical_or(best_code_changed, found_suitable_code)
+        best_alternative_codes = torch.where(should_take_second_best.unsqueeze(-1), best_codes, second_best_codes)
         return best_alternative_codes
     else:
         return beam_codes[:, 0, :]
