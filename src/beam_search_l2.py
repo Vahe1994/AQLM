@@ -190,9 +190,9 @@ def _beam_search_update_codes_groupwise(
     direction = residue.clone().view(num_groups, group_size) if force_directional_update else torch.empty(0)
 
     if force_directional_update:  # True if beam search found a code that satisfies directional constraint
-        found_no_directional_updates = torch.zeros(num_groups, device=device, dtype=torch.bool)
+        found_no_alternative_codes = torch.zeros(num_groups, device=device, dtype=torch.bool)
     else:
-        found_no_directional_updates = torch.empty(0)
+        found_no_alternative_codes = torch.empty(0)
 
     for i, codebook_index in enumerate(dim_order):
         current_beam_size = residue.shape[1]
@@ -235,7 +235,7 @@ def _beam_search_update_codes_groupwise(
                     ).unsqueeze(-1)
                 )  # [group_size, beam_size, codebook_size]
                 is_banned = (proj <= 0)
-                found_no_directional_updates[chunk_start: chunk_end] = is_banned.all(-1).all(-1)
+                found_no_alternative_codes[chunk_start: chunk_end] = is_banned.all(-1).all(-1)
                 for hypo_index in range(beam_codes.shape[1]):
                     is_banned[
                         torch.arange(chunk_end - chunk_start), hypo_index,
@@ -272,11 +272,11 @@ def _beam_search_update_codes_groupwise(
 
     if force_directional_update:
         assert beam_codes.shape[1] == 2
-        assert found_no_directional_updates.shape[0] == reference.shape[0]
+        assert found_no_alternative_codes.shape[0] == reference.shape[0]
         best_codes = beam_codes[:, 0, :]
         second_best_codes = beam_codes[:, 1, :]
         best_code_changed = torch.ne(best_codes, prev_codes).any(dim=-1)
-        keep_best_code = torch.logical_or(best_code_changed, found_no_directional_updates)
+        keep_best_code = torch.logical_or(best_code_changed, found_no_alternative_codes)
         best_alternative_codes = torch.where(keep_best_code.unsqueeze(-1), best_codes, second_best_codes)
         return best_alternative_codes
     else:
