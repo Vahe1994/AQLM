@@ -51,10 +51,9 @@ class StraightThroughAdamW(ConfigurableAdamW):
         prioritize updating codes with the largest delta = ||dequantized_weight_after_sgd_step - quantized_weight||_2 .
         If code_selection_temperature is above 0, it will instead sample codes randomly in proportion to the same
         delta ^ (1 / temperature). If temperature is very high, the optimizer will choose codes uniformly at random.
-    :param force_directional_code_update: if True, beam search will force codes to change even if code is optimal in
-        terms of mean squared error. Formally, this is a constraint <reference - prev_weight, new_weight - prev_weight > 0
-        By default, the algorithm forces *all* weights to update this way, which may change weights too much.
-        To limit the numer of updated weights, set max_code_change and trust_ratio.
+    :param force_code_update: if True, beam search will force codes to change even if code is optimal in
+        terms of mean squared error. By default, the algorithm forces *all* weights to update this way, which may change
+        weights too much. To limit the numer of updated weights, set max_code_change and trust_ratio.
     :param stochastic_rounding_tau: if above 0, use stochastic rounding with this temperature. See aq.py
 
     :param beam_size: beam search width used only when updating codes. See beam_size in aq.py
@@ -76,7 +75,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                  max_code_change_per_step: float,
                  code_trust_ratio: Optional[float] = None,
                  code_selection_temperature: float = 0,
-                 force_directional_code_update: bool = False,
+                 force_code_update: bool = False,
                  stochastic_rounding_tau: float = 0,
                  straight_through_buffer_dtype: Optional[torch.dtype] = None,
                  verbose: bool = False,
@@ -122,7 +121,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
         self.delta_decay = delta_decay
         self.max_code_change_per_step = max_code_change_per_step
         self.code_trust_ratio = code_trust_ratio
-        self.force_directional_code_update = force_directional_code_update
+        self.force_code_update = force_code_update
         self.code_selection_temperature = code_selection_temperature
         self.stochastic_rounding_tau = stochastic_rounding_tau
         self.beam_size = beam_size
@@ -294,7 +293,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         beam_size=self.beam_size,
                         stochastic_rounding_tau=self.stochastic_rounding_tau,
                         max_update_fraction=self.max_code_change_per_step,
-                        force_directional_update=self.force_directional_code_update,
+                        force_update=self.force_code_update,
                         code_selection_temperature=self.code_selection_temperature,
                         trust_ratio=self.code_trust_ratio,
                         dim_rng=random.Random(None),

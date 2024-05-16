@@ -20,7 +20,7 @@ def beam_search_optimal_codes(
         stochastic_rounding_tau: float = 0.0,
         chunk_size_bytes: int = 2 ** 32,
         dim_rng: Optional[random.Random] = None,
-        force_directional_update: bool = False,
+        force_update: bool = False,
         max_update_fraction: float = 1.0,
         code_selection_temperature: float = 0,
         trust_ratio: Optional[float] = None,
@@ -41,10 +41,9 @@ def beam_search_optimal_codes(
         then the probability of choosing each code is P_i = delta_i ^ -1/tau / (sum_j_in_choices delta_j ^ -1/tau).
         Note that if there is a code that has zero error, the algorithm will choose allways choose such a code
     :param chunk_size_bytes: process this many candidates at a time; reduce to save memory
-    :param force_directional_update: if True, the algorithm will force codes to change even if code is optimal in terms
-     of mean squared error. Formally, this imposes a constraint <reference - prev_weight, new_weight - prev_weight > 0 .
-     By default, the algorithm forces *all* weights to update this way, which may change weights too much.
-     To limit the numer of updated weights, set max_code_change and trust_ratio.
+    :param force_update: if True, the algorithm will force codes to change even if code is optimal in terms
+     of mean squared error. By default, the algorithm forces *all* weights to update this way, which may change weights
+     too much. To limit the numer of updated weights, set max_code_change and trust_ratio.
     :param max_update_fraction: the maximum portion of discrete code groups that *can* be updated;
         By default, all codes can be updated. If < 1, only this portion of all code groups is allowed to update.
         The algorithm selects the codes for update based on the difference between de-quantized and reference_weight.
@@ -92,7 +91,7 @@ def beam_search_optimal_codes(
         else:
             return _beam_search_update_codes_groupwise(
                 reference=_flat_reference, codebooks=flat_codebooks, codes=_flat_codes, beam_size=beam_size,
-                stochastic_rounding_tau=stochastic_rounding_tau, force_directional_update=force_directional_update,
+                stochastic_rounding_tau=stochastic_rounding_tau, force_update=force_update,
                 chunk_size_values=chunk_size_bytes // _flat_reference[0, 0].nbytes, dim_order=dim_order)
 
     def _groupwise_squared_norms(delta: torch.Tensor):
@@ -158,7 +157,7 @@ def _beam_search_update_codes_groupwise(
         stochastic_rounding_tau: float,
         chunk_size_values: int,
         dim_order: Optional[List[int]],
-        force_directional_update: bool
+        force_update: bool
 ) -> torch.Tensor:
     """
     :param reference: [num_groups, group_size]
@@ -184,12 +183,7 @@ def _beam_search_update_codes_groupwise(
     beam_codes = codes.clone().unsqueeze(1)  # [num_groups, current_beam_size, num_codebooks]
     residue = (reference - original_dequantized_vectors).view(num_groups, 1, group_size)
     # shape: [num_groups, current_beam_size, group_size]
-    direction = residue.clone().view(num_groups, group_size) if force_directional_update else torch.empty(0)
-
-    if force_directional_update:  # True if beam search found a code that satisfies directional constraint
-        found_no_alternative_codes = torch.zeros(num_groups, device=device, dtype=torch.bool)
-    else:
-        found_no_alternative_codes = torch.empty(0)
+    direction = residue.clone().view(num_groups, group_size) if force_update else torch.empty(0)
 
     for i, codebook_index in enumerate(dim_order):
         current_beam_size = residue.shape[1]
@@ -204,10 +198,10 @@ def _beam_search_update_codes_groupwise(
         if not is_last_step:
             target_num_candidates = beam_size + int(stochastic_rounding_tau > 0)
         else:
-            target_num_candidates = 2 if stochastic_rounding_tau > 0 or force_directional_update else 1
+            target_num_candidates = 2 if stochastic_rounding_tau > 0 or force_update else 1
 
         flat_best_indices = torch.empty(num_groups, target_num_candidates, device=device, dtype=codes.dtype)
-        chunk_size_rows = chunk_size_values // (codebook_size * current_beam_size)
+        chunk_size_rows = chunk_size_values // (codebook_size * current_beam_size) // 32
         for chunk_start in range(0, num_groups, chunk_size_rows):
             chunk_end = min(chunk_start + chunk_size_rows, num_groups)
             scores = torch.matmul(residue[chunk_start: chunk_end], codebooks[codebook_index].T)
@@ -216,29 +210,6 @@ def _beam_search_update_codes_groupwise(
             else:
                 scores = - 2 * scores + code_norms_sq[codebook_index]  # residue norms are const(j)
             # ^-- [num_groups_chunk, beam_size, codebook_size]
-
-            if is_last_step and force_directional_update:
-                # this checks that <reference - prev_weight,  new_weight - prev_weight> > 0; the next lines simplify:
-                # <direction, new_weight> - <direction,  prev_weight> > 0   | since direction = reference - prev_weight
-                # <direction, current_codebook + new_weight_without_current_codebook> - <direction, prev_weight> > 0
-                # <direction, current_codebook> + <direction, new_weight_without_current_codebook - prev_weight> > 0
-                # <direction, current_codebook> + <direction, direction - residue> > 0
-                # b/c direction = reference - prev_weight and residue = reference - new_weight_without_current_codebook
-
-                is_banned = torch.matmul(direction[chunk_start: chunk_end], codebooks[codebook_index].T).unsqueeze(1).add(
-                    torch.einsum(
-                        'ng,nbg->nb', direction[chunk_start: chunk_end],
-                        direction[chunk_start: chunk_end, None, :] - residue[chunk_start: chunk_end]
-                    ).unsqueeze(-1)
-                ) <= 0  # [group_size, beam_size, codebook_size]
-                found_no_alternative_codes[chunk_start: chunk_end] = is_banned.all(-1).all(-1)
-                for hypo_index in range(beam_codes.shape[1]):
-                    is_banned[
-                        torch.arange(chunk_end - chunk_start), hypo_index,
-                        beam_codes[chunk_start: chunk_end, hypo_index, codebook_index]
-                    ] = False  # allow keeping prev codes
-                scores = scores + is_banned * float('inf')  # ban changes that run against the update direction
-                # note: if all codes are banned this way, the algorithm will rollback to prev_codes below
 
             flat_best_losses_chunk, flat_best_indices_chunk = torch.topk(
                 scores.flatten(1, 2), k=target_num_candidates, largest=False,
@@ -267,15 +238,12 @@ def _beam_search_update_codes_groupwise(
         if not is_last_step:
             residue = residue - F.embedding(beam_codes[..., codebook_index], codebooks[codebook_index, ...])
 
-    if force_directional_update:
+    if force_update:
         assert beam_codes.shape[1] == 2
-        assert found_no_alternative_codes.shape[0] == reference.shape[0]
         best_codes = beam_codes[:, 0, :]
         second_best_codes = beam_codes[:, 1, :]
         best_code_changed = torch.ne(best_codes, prev_codes).any(dim=-1)
-        output_codes = torch.where(best_code_changed.unsqueeze(-1), best_codes, second_best_codes)
-        output_codes = torch.where(found_no_alternative_codes.unsqueeze(-1), prev_codes, output_codes)
-        return output_codes
+        return torch.where(best_code_changed.unsqueeze(-1), best_codes, second_best_codes)
     else:
         return beam_codes[:, 0, :]
 

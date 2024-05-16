@@ -184,7 +184,7 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
              " See StraightThroughAdam docstring for details.",
     )
     parser.add_argument(
-        '--force_directional_code_update',
+        '--force_code_update',
         action="store_true",
         help="If set, force discrete codes to change in the direction of optimizer update, even if previous codes"
              "were optimal in terms of MSE. See StraightThroughAdam docstring for details. Use when delta_decay==1.",
@@ -730,7 +730,7 @@ def main():
         ) if args.update_non_quantized_parameters else None,
         delta_decay=args.delta_decay,
         max_code_change_per_step=args.max_code_change_per_step,
-        force_directional_code_update=args.force_directional_code_update,
+        force_code_update=args.force_code_update,
         code_trust_ratio=args.code_trust_ratio,
         beam_size=args.beam_size,
         straight_through_buffer_dtype=args.straight_through_buffer_dtype,
