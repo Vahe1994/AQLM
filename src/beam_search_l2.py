@@ -279,7 +279,6 @@ def _beam_search_update_codes_groupwise(
         return beam_codes[:, 0, :]
 
 
-
 @maybe_script
 def _greedy_find_best_codes(
     reference: torch.Tensor,
