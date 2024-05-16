@@ -83,7 +83,7 @@ def beam_search_optimal_codes(
 
     def _update_flat_codes(_flat_reference, _flat_codes):
         """update _flat_codes [num_groups, num_codebooks] to approximate _flat_reference [num_groups, group_size]"""
-        if num_codebooks == 1 and beam_size == 1 and stochastic_rounding_tau == 0 and not force_directional_update:
+        if num_codebooks == 1 and beam_size == 1 and stochastic_rounding_tau == 0 and not force_update:
             # a faster algorithm for a special case of one codebook
             return _greedy_find_best_codes(reference=_flat_reference, codebook=flat_codebooks[0],
                                            chunk_size_values=chunk_size_bytes // _flat_reference[0, 0].nbytes,
