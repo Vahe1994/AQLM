@@ -230,8 +230,13 @@ def _beam_search_update_codes_groupwise(
                         'ng,nbg->nb', direction[chunk_start: chunk_end],
                         direction[chunk_start: chunk_end, None, :] - residue[chunk_start: chunk_end]
                     ).unsqueeze(-1)
-                ) > 0  # [group_size, beam_size, codebook_size]
+                ) <= 0  # [group_size, beam_size, codebook_size]
                 found_no_alternative_codes[chunk_start: chunk_end] = is_banned.all(-1).all(-1)
+                for hypo_index in range(beam_codes.shape[1]):
+                    is_banned[
+                        torch.arange(chunk_end - chunk_start), hypo_index,
+                        beam_codes[chunk_start: chunk_end, hypo_index, codebook_index]
+                    ] = False  # allow keeping prev codes
                 scores = scores + is_banned * float('inf')  # ban changes that run against the update direction
                 # note: if all codes are banned this way, the algorithm will rollback to prev_codes below
 
