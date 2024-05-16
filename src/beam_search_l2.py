@@ -276,9 +276,9 @@ def _beam_search_update_codes_groupwise(
         best_codes = beam_codes[:, 0, :]
         second_best_codes = beam_codes[:, 1, :]
         best_code_changed = torch.ne(best_codes, prev_codes).any(dim=-1)
-        best_alternative_codes = torch.where(best_code_changed.unsqueeze(-1), best_codes, second_best_codes)
-        best_alternative_codes = torch.where(found_no_alternative_codes.unsqueeze(-1), prev_codes, best_alternative_codes)
-        return best_alternative_codes
+        output_codes = torch.where(best_code_changed.unsqueeze(-1), best_codes, second_best_codes)
+        output_codes = torch.where(found_no_alternative_codes.unsqueeze(-1), prev_codes, output_codes)
+        return output_codes
     else:
         return beam_codes[:, 0, :]
 
