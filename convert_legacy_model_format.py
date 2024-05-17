@@ -4,6 +4,7 @@ This code exists because we failed to produce a single data format for quantized
 We should eventually switch to saving all models in the same data format. Once we do, this file should be deleted.
 """
 import argparse
+import os
 from copy import deepcopy
 import warnings
 
@@ -50,6 +51,54 @@ def load_quantized_model_with_old_pickle(base_model_name: str, quantized_model_n
     warnings.warn("You should be ashamed of yourself.")
     return quantized_model
 
+    
+import functools
+
+def rsetattr(obj, attr, val):
+    pre, _, post = attr.rpartition('.')
+    return setattr(rgetattr(obj, pre) if pre else obj, post, val)
+
+
+def rgetattr(obj, attr, *args):
+    def _getattr(obj, attr):
+        return getattr(obj, attr, *args)
+    return functools.reduce(_getattr, [obj] + attr.split('.'))
+
+
+def load_quantized_model_from_fdsp_checkpoint(base_model_name: str, fsdp_checkpoint_path: str, **kwargs):
+    original_model = get_model(base_model_name, None, **kwargs)
+
+    state_filenames = os.listdir(fsdp_checkpoint_path)
+    
+    non_quant_fname = "non_quantized_state_dict.pth"
+    non_quant_path = os.path.join(fsdp_checkpoint_path, non_quant_fname)
+    non_quant_states = torch.load(non_quant_path)
+    
+    incomp_keys = original_model.load_state_dict(
+        non_quant_states, strict=False
+    )
+    assert not incomp_keys.unexpected_keys
+    
+    
+    missing_keys = list()
+    for module_name, module in original_model.named_modules():
+        if not isinstance(module, nn.Linear):
+            continue
+
+        assert not module.bias
+        state_fname = f"{module_name}.weight.pth"
+
+        if state_fname not in state_filenames:
+            missing_keys.append(module_name)
+            continue
+
+        state_path = os.path.join(fsdp_checkpoint_path, state_fname)
+        quantized_weight = torch.load(state_path, map_location="cpu")
+        quantized_linear = QuantizedLinear(quantized_weight, bias=None)
+        rsetattr(original_model, module_name, quantized_linear)
+        
+    return original_model
+
 
 def main():
     parser = argparse.ArgumentParser(add_help=True)
@@ -85,6 +134,12 @@ def main():
         help="path to quantized model state dict saved by the old FSDP finetuning code",
     )
     parser.add_argument(
+        "--pv_fsdp_dir",
+        type=str,
+        default=None,
+        help="path to quantized model state dict saved by the old FSDP finetuning code",
+    )
+    parser.add_argument(
         '--monkeypatch_old_pickle',
         action="store_true",
         help="If set, load quantized_model in a hacky way that allows pickled models with older transformers/torch.",
@@ -101,7 +156,10 @@ def main():
     parser.add_argument("--save", type=str, required=True, help="Save the converted quantized model here")
 
     args = parser.parse_args()
-    assert args.p_finetuned_state_dict is not None, "for now, this converter only accepts state dicts from P step"
+    assert args.p_finetuned_state_dict or args.pv_fsdp_dir, "either one of those must be specified"
+    print(f"{args.p_finetuned_state_dict=}, {args.pv_fsdp_dir=}")
+    assert (args.p_finetuned_state_dict is not None) != (args.pv_fsdp_dir is not None)
+
     args.load_dtype = getattr(torch, args.load_dtype) if args.load_dtype != 'auto' else 'auto'
     args.code_dtype = getattr(torch, args.code_dtype) if args.code_dtype is not None else None
 
@@ -110,11 +168,16 @@ def main():
             args.base_model, args.quantized_model, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
             attn_implementation=args.attn_implementation
         )
-    else:
+    elif args.p_finetuned_state_dict:
         quantized_model = load_quantized_model_with_old_pickle(
             args.base_model, args.quantized_model, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
             attn_implementation=args.attn_implementation
         )
+    elif args.pv_fsdp_dir:
+        quantized_model = load_quantized_model_from_fdsp_checkpoint(
+            args.base_model, args.pv_fsdp_dir, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
+        )
+
     for module in quantized_model.modules():
         if isinstance(module, QuantizedWeight):
             if not hasattr(module, 'codes_storage'):
