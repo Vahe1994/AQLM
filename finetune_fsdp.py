@@ -24,7 +24,7 @@ from src.aq import QuantizedWeight
 from src.aq_ops import IntCodes, master_rank_first, one_rank_at_a_time, is_signed
 from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
 from src.modelutils import get_model
-from src.pv_utils import infer_block_classes, create_dequantized_model, \
+from src.pv_utils import infer_module_classes, create_dequantized_model, \
     get_original_named_parameters_from_fsdp_module, split_quantized_weights_between_ranks, \
     YourQuantizedWeightIsInAnotherRank
 from src.pv_optimizer import StraightThroughAdamW
@@ -443,7 +443,7 @@ def load_base_model(args: argparse.Namespace, device: torch.device) -> FullyShar
         param.requires_grad = False
 
     base_model.config.use_cache = False
-    transformer_block_types = infer_block_classes(base_model, args.block_type)
+    transformer_block_types = infer_module_classes(base_model, args.block_type)
     return FullyShardedDataParallel(
         base_model,
         auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, transformer_block_types),
@@ -485,18 +485,28 @@ def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> Tu
         quantized_model, dequantized_dtype=args.amp_dtype, reuse_non_quantized=True)
     del quantized_model
 
-    transformer_block_types = infer_block_classes(dequantized_model, args.block_type)
+    transformer_block_types = infer_module_classes(dequantized_model, args.block_type)
+    block_types_to_wrap = list(transformer_block_types) + list(transformers.pytorch_utils.ALL_LAYERNORM_LAYERS)
+    for extra_module_name in args.wrap_separately:
+        block_types_to_wrap.extend(infer_module_classes(dequantized_model, extra_module_name))
+    block_types_to_wrap = tuple(set(block_types_to_wrap))
+    if torch.distributed.get_rank() == 0:
+        print("wrapped block classes:", block_types_to_wrap)
+        for name, param in dequantized_model.named_parameters():
+            print(param.dtype, name, param.shape)
+    torch.distributed.barrier()
 
     mixed_precision = None
     if args.amp_dtype is not None:
         mixed_precision = MixedPrecision(
             param_dtype=args.amp_dtype,
             reduce_dtype=args.amp_dtype,
-            _module_classes_to_ignore=transformer_block_types + tuple(transformers.pytorch_utils.ALL_LAYERNORM_LAYERS)
+            _module_classes_to_ignore=block_types_to_wrap
         )
+
     fsdp_model = FullyShardedDataParallel(
         dequantized_model,
-        auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, transformer_block_types),
+        auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, block_types_to_wrap),
         mixed_precision=mixed_precision,
         use_orig_params=True,
         device_id=device,

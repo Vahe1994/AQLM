@@ -16,17 +16,17 @@ from torch import nn as nn
 from src.aq import QuantizedLinear, QuantizedWeight
 
 
-def infer_block_classes(model: nn.Module, block_type: str) -> Tuple[type[nn.Module], ...]:
+def infer_module_classes(model: nn.Module, class_name: str) -> Tuple[type[nn.Module], ...]:
     """find transformer block classes that should be wrapped with inner FullyShardedDataParallel (auto_wrap_policy)"""
-    transformer_block_types = []
+    found_module_types = []
     for module in model.modules():
-        if module.__class__.__name__ == block_type:
-            transformer_block_types.append(type(module))
-    if not transformer_block_types:
-        raise ValueError(f"Could not find {block_type} among model layers")
-    transformer_block_types = tuple(transformer_block_types)
-    assert any(isinstance(module, transformer_block_types) for module in model.modules())
-    return transformer_block_types
+        if module.__class__.__name__ == class_name:
+            found_module_types.append(type(module))
+    if not found_module_types:
+        raise ValueError(f"Could not find {class_name} among submodules of {model}")
+    found_module_types = tuple(found_module_types)
+    assert any(isinstance(module, found_module_types) for module in model.modules())
+    return found_module_types
 
 
 def create_dequantized_model(
