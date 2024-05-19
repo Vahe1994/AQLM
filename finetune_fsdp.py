@@ -498,13 +498,12 @@ def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> Tu
     block_types_to_wrap = tuple(set(transformer_block_types + layernorm_types + extra_block_types))
     if torch.distributed.get_rank() == 0:
         print(f"Blocks to be wrapped separately: {block_types_to_wrap}\n")
-        for name, param in dequantized_model.named_parameters():
-            print(end=f"{param.dtype}, {name}, {param.shape}\n")
 
     mixed_precision = None
     if args.amp_dtype is not None:
         block_types_for_amp_to_ignore = tuple(set(layernorm_types + extra_block_types))
-        print(f"Blocks excluded from AMP: {block_types_for_amp_to_ignore}\n")
+        if torch.distributed.get_rank() == 0:
+            print(f"Blocks excluded from AMP: {block_types_for_amp_to_ignore}\n")
         mixed_precision = MixedPrecision(
             param_dtype=args.amp_dtype,
             reduce_dtype=args.amp_dtype,
