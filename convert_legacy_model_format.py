@@ -182,6 +182,8 @@ def main():
         if isinstance(module, QuantizedWeight):
             if not hasattr(module, 'codes_storage'):
                 module.codes_storage = None
+            if module.codes is None:
+                module.unwrap_codes_()
             assert module.codes is not None
             if args.code_dtype is not None:
                 assert module.nbits_per_codebook <= torch.iinfo(args.code_dtype).bits - is_signed(args.code_dtype)
