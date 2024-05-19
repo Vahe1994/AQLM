@@ -96,6 +96,11 @@ def add_model_args(parser: argparse.ArgumentParser):
         help="string name of a transformer layer to wrap, e.g. LlamaDecoderLayer"
     )
     parser.add_argument(
+        '--wrap_separately', type=str, nargs='*',
+        help="module classes (by name, similar to block_type) that will be wrapped in a separate fsdp instance, "
+             "only applies to the 'student' de-quantized model, not the teacher model."
+    )
+    parser.add_argument(
         "--attn_implementation", type=str, default=None,
         help="Attention implementation for both teacher and student models: eager, sdpa, or flash_attention_2"
     )
@@ -485,23 +490,25 @@ def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> Tu
         quantized_model, dequantized_dtype=args.amp_dtype, reuse_non_quantized=True)
     del quantized_model
 
-    transformer_block_types = infer_module_classes(dequantized_model, args.block_type)
-    block_types_to_wrap = list(transformer_block_types) + list(transformers.pytorch_utils.ALL_LAYERNORM_LAYERS)
+    transformer_block_types = list(infer_module_classes(dequantized_model, args.block_type))
+    layernorm_types = list(transformers.pytorch_utils.ALL_LAYERNORM_LAYERS)
+    extra_block_types = list()
     for extra_module_name in args.wrap_separately:
-        block_types_to_wrap.extend(infer_module_classes(dequantized_model, extra_module_name))
-    block_types_to_wrap = tuple(set(block_types_to_wrap))
+        extra_block_types.extend(infer_module_classes(dequantized_model, extra_module_name))
+    block_types_to_wrap = tuple(set(transformer_block_types + layernorm_types + extra_block_types))
     if torch.distributed.get_rank() == 0:
-        print("wrapped block classes:", block_types_to_wrap)
+        print(f"Blocks to be wrapped separately: {block_types_to_wrap}\n")
         for name, param in dequantized_model.named_parameters():
-            print(param.dtype, name, param.shape)
-    torch.distributed.barrier()
+            print(end=f"{param.dtype}, {name}, {param.shape}\n")
 
     mixed_precision = None
     if args.amp_dtype is not None:
+        block_types_for_amp_to_ignore = tuple(set(layernorm_types + extra_block_types))
+        print(f"Blocks excluded from AMP: {block_types_for_amp_to_ignore}\n")
         mixed_precision = MixedPrecision(
             param_dtype=args.amp_dtype,
             reduce_dtype=args.amp_dtype,
-            _module_classes_to_ignore=block_types_to_wrap
+            _module_classes_to_ignore=block_types_for_amp_to_ignore
         )
 
     fsdp_model = FullyShardedDataParallel(
