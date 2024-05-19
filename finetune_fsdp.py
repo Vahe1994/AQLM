@@ -96,7 +96,7 @@ def add_model_args(parser: argparse.ArgumentParser):
         help="string name of a transformer layer to wrap, e.g. LlamaDecoderLayer"
     )
     parser.add_argument(
-        '--wrap_separately', type=str, nargs='*',
+        '--wrap_separately', type=str, nargs='*', default=[],
         help="module classes (by name, similar to block_type) that will be wrapped in a separate fsdp instance and do "
              "not participate in AMP (if used). Only applies to the student (de)quantized model, not the teacher model."
     )
