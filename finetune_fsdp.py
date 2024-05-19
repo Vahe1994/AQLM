@@ -98,7 +98,7 @@ def add_model_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         '--wrap_separately', type=str, nargs='*', default=[],
         help="module classes (by name, similar to block_type) that will be wrapped in a separate fsdp instance and do "
-             "not participate in AMP (if used). Only applies to the student (de)quantized model, not the teacher model."
+             "not participate in FSDP AMP (if used). Applies to the student (de)quantized model, not the teacher model."
     )
     parser.add_argument(
         "--attn_implementation", type=str, default=None,
@@ -164,7 +164,7 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--delta_decay",
         type=float,
-        help="Determines whether to use direct training, straight-throughe stimation or a mixture thereof. "
+        help="Determines whether to use direct training, straight-through estimation or a mixture thereof. "
              "If delta_decay is 0, use straight-through estimation. If delta_decay is 1, do not use it at all. "
              "If between 0 and 1, every straight-through buffer will decay to the quantized weight with moving average."
              " straight_through_buffer = (1 - delta_decay) * straight_through_buffer + delta_decay * quantized_weight."
@@ -247,6 +247,11 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         "--gradient_checkpointing",
         action="store_true",
         help="Whether to apply gradient checkpointing",
+    )
+    parser.add_argument(
+        "--use_fsdp_amp",
+        action="store_true",
+        help="Whether to use FSDP native mixed precision (excluding registered layernorms and --wrap_separately).",
     )
     parser.add_argument(
         "--minimize_sync",
@@ -500,7 +505,8 @@ def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> Tu
         print(f"Blocks to be wrapped separately: {block_types_to_wrap}\n")
 
     mixed_precision = None
-    if args.amp_dtype is not None:
+    if args.use_fsdp_amp:
+        assert args.amp_dtype is not None, "requested to use_fsdp_amp, but amp_dtype is not None"
         block_types_for_amp_to_ignore = tuple(set(layernorm_types + extra_block_types))
         if torch.distributed.get_rank() == 0:
             print(f"Blocks excluded from AMP: {block_types_for_amp_to_ignore}\n")
@@ -509,6 +515,9 @@ def load_dequantized_model(args: argparse.Namespace, device: torch.device) -> Tu
             reduce_dtype=args.amp_dtype,
             _module_classes_to_ignore=block_types_for_amp_to_ignore
         )
+    else:
+        if torch.distributed.get_rank() == 0:
+            print(f"Not using FSDP native MixedPrecision; Local amp_dtype={args.amp_dtype}.")
 
     fsdp_model = FullyShardedDataParallel(
         dequantized_model,
