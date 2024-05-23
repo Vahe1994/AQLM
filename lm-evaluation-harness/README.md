@@ -2,7 +2,7 @@
 
 ## Overview
 
-The code, utilities and assets located in this directory are adapted from [LM Evaluation Harness benchmark suite](https://github.com/EleutherAI/lm-evaluation-harness) and customized to support quantization. The LICENSE and CODEOWNERS files inside lm-evaluation-harness refer to the original authors of lm-eval-harness and not the anonymous authors of this paper.
+The code, utilities and assets located in this directory are adapted from [LM Evaluation Harness benchmark suite](https://github.com/EleutherAI/lm-evaluation-harness) and customized to support quantization. The LICENSE and CODEOWNERS files inside lm-evaluation-harness refer to the original authors of lm-eval-harness and not the authors of this paper.
 
 The workflow involves following steps:
 - Model quantization
