@@ -11,14 +11,12 @@ from typing import Union
 
 import numpy as np
 import torch
-from transformers import AutoModelForCausalLM
-from peft import PeftModel
-
 from lm_eval import evaluator, utils
 from lm_eval.api.registry import ALL_TASKS
 from lm_eval.tasks import include_path, initialize_tasks
 from lm_eval.utils import make_table
-
+from peft import PeftModel
+from transformers import AutoModelForCausalLM
 
 from src.modelutils import load_dequantized_model
 
@@ -147,9 +145,7 @@ def parse_eval_args() -> argparse.Namespace:
         metavar="CRITICAL|ERROR|WARNING|INFO|DEBUG",
         help="Controls the reported logging error level. Set to DEBUG when testing + adding new task configurations for comprehensive log output.",
     )
-    parser.add_argument(
-        "--aqlm_checkpoint_path", type=str, default=None, help="Path to drop AQLM checkpoint."
-    )
+    parser.add_argument("--aqlm_checkpoint_path", type=str, default=None, help="Path to drop AQLM checkpoint.")
     return parser.parse_args()
 
 
