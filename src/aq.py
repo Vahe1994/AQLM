@@ -243,7 +243,8 @@ class QuantizedWeight(nn.Module):
         :returns: the updated codes, in the same shape as self.get_codes()[selection]
         """
         if self.channelwise_input_scales is not None:
-            XTX = torch.addmm(XTX, self.channelwise_input_scales[:, None], self.channelwise_input_scales[None, :])
+            XTX = XTX.addmm(self.channelwise_input_scales[:, None].to(XTX.dtype),
+                            self.channelwise_input_scales[None, :].to(XTX.dtype))
             reference_weight = reference_weight / self.channelwise_input_scales[None, :]
         codebooks = self.get_codebooks()
         prev_codes = self.get_codes()[selection]
