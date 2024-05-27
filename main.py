@@ -601,6 +601,11 @@ if __name__ == "__main__":
         help="if this is set, evaluate on new (and slightly more realistic!) val dataset versions",
     )
     parser.add_argument(
+        "--channelwise_input_scales",
+        action="store_true",
+        help="if True, all QuantizedWeights will learn channel-wise input scales initialized as diag(X.T @ X).sqrt()",
+    )
+    parser.add_argument(
         "--nsamples",
         type=int,
         default=None,

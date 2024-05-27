@@ -49,6 +49,7 @@ class QuantizedWeight(nn.Module):
         scale_nbits: int = 0,
         straight_through_gradient: Optional[bool] = None,
         code_dtype: torch.dtype = torch.int32,
+        channelwise_input_scales: Optional[torch.Tensor] = None,
         **init_kwargs,
     ):
         super().__init__()
@@ -96,6 +97,12 @@ class QuantizedWeight(nn.Module):
 
             weight_for_init = (weight_groupwise / scales).swapaxes(1, 2).reshape_as(reference_weight)
             del weight_groupwise
+
+            self.channelwise_input_scales = None
+            if channelwise_input_scales is not None:
+                assert channelwise_input_scales.ndim == 1 and channelwise_input_scales.shape[0] == self.in_features
+                self.channelwise_input_scales = nn.Parameter(channelwise_input_scales, requires_grad=True)
+                weight_for_init /= self.channelwise_input_scales
 
         codes, codebooks = init_aq_kmeans(
             weight_for_init,
@@ -206,6 +213,8 @@ class QuantizedWeight(nn.Module):
 
         """
         weight = _dequantize_weight(self.get_codes()[selection], self.get_codebooks(), self.get_scales()[selection])
+        if self.channelwise_input_scales is not None:
+            weight = weight * self.channelwise_input_scales
         return weight
 
     @torch.no_grad()
@@ -233,6 +242,9 @@ class QuantizedWeight(nn.Module):
         :param kwargs: any additional keyword arguments are forwarded to beam_search_optimal_codes function
         :returns: the updated codes, in the same shape as self.get_codes()[selection]
         """
+        if self.channelwise_input_scales is not None:
+            XTX = torch.addmm(XTX, self.channelwise_input_scales[:, None], self.channelwise_input_scales[None, :])
+            reference_weight = reference_weight / self.channelwise_input_scales[None, :]
         codebooks = self.get_codebooks()
         prev_codes = self.get_codes()[selection]
         scales = self.get_scales()[selection]
