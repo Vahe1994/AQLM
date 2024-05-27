@@ -101,7 +101,9 @@ class QuantizedWeight(nn.Module):
             self.channelwise_input_scales = None
             if channelwise_input_scales is not None:
                 assert channelwise_input_scales.ndim == 1 and channelwise_input_scales.shape[0] == self.in_features
-                self.channelwise_input_scales = nn.Parameter(channelwise_input_scales, requires_grad=True)
+                self.channelwise_input_scales = nn.Parameter(
+                    channelwise_input_scales.to(dtype=weight_for_init.dtype, device=weight_for_init.device),
+                    requires_grad=True)
                 weight_for_init /= self.channelwise_input_scales
 
         codes, codebooks = init_aq_kmeans(
@@ -245,7 +247,7 @@ class QuantizedWeight(nn.Module):
         if self.channelwise_input_scales is not None:
             XTX = XTX.addmm(self.channelwise_input_scales[:, None].to(XTX.dtype),
                             self.channelwise_input_scales[None, :].to(XTX.dtype))
-            reference_weight = reference_weight / self.channelwise_input_scales[None, :]
+            reference_weight = reference_weight / self.channelwise_input_scales[None, :].to(reference_weight.dtype)
         codebooks = self.get_codebooks()
         prev_codes = self.get_codes()[selection]
         scales = self.get_scales()[selection]
