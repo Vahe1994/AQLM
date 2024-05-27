@@ -2,6 +2,8 @@
 
 Supplementary code for **PV-Tuning: Beyond Straight-Through Estimation for Extreme LLM Compression**.
 
+Will gradually publish models this week, stay tuned!
+
 # Installation
 
 ####
