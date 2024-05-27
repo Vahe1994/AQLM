@@ -601,11 +601,6 @@ if __name__ == "__main__":
         help="if this is set, evaluate on new (and slightly more realistic!) val dataset versions",
     )
     parser.add_argument(
-        "--channelwise_input_scales",
-        action="store_true",
-        help="if True, all QuantizedWeights will learn channel-wise input scales initialized as diag(X.T @ X).sqrt()",
-    )
-    parser.add_argument(
         "--nsamples",
         type=int,
         default=None,
@@ -702,6 +697,11 @@ if __name__ == "__main__":
         help="Number of bits dedicated to the learnable group-wise scale. 0 means do not use group-wise scales "
         "(still has row-wise scales), 1-15 means using per-group scales quantized to this many bits, "
         "16+ means use per-group scales but do not quantize them",
+    )
+    parser.add_argument(
+        "--channelwise_input_scales",
+        action="store_true",
+        help="if True, all QuantizedWeights will learn channel-wise input scales initialized as diag(X.T @ X).sqrt()",
     )
     parser.add_argument(
         "--codebook_value_nbits",
