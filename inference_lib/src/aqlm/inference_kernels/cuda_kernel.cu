@@ -31,7 +31,7 @@ __global__ void Code1x16MatVec(
     // We pad shared memory to avoid bank conflicts during reads
     __syncthreads();
     for (int i = threadIdx.x; i < 32 * group_size; i += blockDim.x) {
-      if (b_gl_rd + i < prob_k / group_size)
+      if (8 * (b_gl_rd + i) < prob_k)
         sh_b[(group_size + 1) * (i / group_size) + i % group_size] = B[b_gl_rd + i];
     }
     __syncthreads();
@@ -48,13 +48,13 @@ __global__ void Code1x16MatVec(
         asm volatile (
           "ld.cg.global.v4.u32 {%0, %1, %2, %3}, [%4];"
           : "=r"(dec[0]), "=r"(dec[1]), "=r"(dec[2]), "=r"(dec[3])
-          : "l"((void*) &codebook[enc[i]])
+          : "l"((void*) &codebook[(group_size / 8) * enc[i]])
         );
         if constexpr (group_size == 16) {
           asm volatile (
             "ld.cg.global.v4.u32 {%0, %1, %2, %3}, [%4];"
             : "=r"(dec[4]), "=r"(dec[5]), "=r"(dec[6]), "=r"(dec[7])
-            : "l"((void*) &codebook[enc[i]] + 4)
+            : "l"((void*) &codebook[(group_size / 8) * enc[i] + 1])
           );
         }
         if constexpr (use_bfloat16) {
@@ -327,7 +327,7 @@ void  code1x16_matvec_cuda(
   int blocks = ceildiv(prob_m, thread_m);
   int threads = 32 * thread_m;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
-  Code1x16MatVec<use_bfloat16, group_size><<<blocks, threads, 16*32*9, stream>>>(
+  Code1x16MatVec<use_bfloat16, group_size><<<blocks, threads, 16*32*(group_size + 1), stream>>>(
     (const int4*) A,
     (const int4*) B,
     (int4*) C,

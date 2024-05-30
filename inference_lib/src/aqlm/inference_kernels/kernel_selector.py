@@ -24,14 +24,13 @@ def get_forward_pass_kernel(
 ) -> Callable[[torch.Tensor, torch.IntTensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]], torch.Tensor]:
     num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
 
-    if (optimize_for_training, codebooks.device.type, num_codebooks, codebook_size, out_group_size, in_group_size) == (
+    if (optimize_for_training, codebooks.device.type, num_codebooks, codebook_size, out_group_size) == (
         False,
         "cuda",
         1,
         65536,
         1,
-        8,
-    ):
+    ) and in_group_size in [8, 16]:
         from .cuda_kernel import CUDA_FOLDER
 
         return torch.ops.aqlm.code1x16_matmat
