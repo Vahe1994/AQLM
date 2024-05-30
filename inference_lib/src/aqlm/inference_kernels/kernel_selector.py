@@ -34,13 +34,7 @@ def get_forward_pass_kernel(
         from .cuda_kernel import CUDA_FOLDER
 
         return torch.ops.aqlm.code1x16_matmat
-    elif (
-        optimize_for_training,
-        codebooks.device.type,
-        num_codebooks,
-        codebook_size,
-        out_group_size,
-    ) == (
+    elif (optimize_for_training, codebooks.device.type, num_codebooks, codebook_size, out_group_size,) == (
         True,
         "cuda",
         1,
