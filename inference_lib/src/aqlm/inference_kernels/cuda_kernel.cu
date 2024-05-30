@@ -97,6 +97,7 @@ __global__ void Code1x16MatVec(
 }
 
 
+template<size_t group_size>
 __global__ void Code1x16Dequant(
   const int4* __restrict__ A,
         int4* __restrict__ C,
@@ -104,33 +105,38 @@ __global__ void Code1x16Dequant(
   int prob_m,
   int prob_k
 ) {
-  int a_gl_stride = prob_k / 8 / 8;
+  int a_gl_stride = prob_k / 8 / group_size;
   int a_gl_rd = (blockDim.x / 32) * blockIdx.x + (threadIdx.x / 32);
   bool pred = a_gl_rd < prob_m;
   a_gl_rd = a_gl_stride * a_gl_rd + threadIdx.x % 32;
   int a_gl_end = a_gl_rd + a_gl_stride - threadIdx.x % 32;
 
-  int c_gl_stride = prob_k / 8;
-  int c_gl_wr = (blockDim.x / 32) * blockIdx.x + (threadIdx.x / 32);
-  c_gl_wr = c_gl_stride * c_gl_wr + (threadIdx.x % 32) * 8;
-
-  int iters = (prob_k / 8 - 1) / (8 * 32) + 1;
+  int iters = (prob_k / group_size + group_size * 32 - 1) / (group_size * 32);
   while (iters--) {
     if (pred && a_gl_rd < a_gl_end) {
       const uint16_t* enc = reinterpret_cast<const uint16_t*>(&A[a_gl_rd]);
       #pragma unroll
       for (int i = 0; i < 8; i++) {
-        int4 chunk;
-        auto dec = reinterpret_cast<uint32_t*>(&chunk);
+        uint32_t dec[group_size / 2];
         // We bypass the L1 cache to avoid massive amounts of memory streaming that doesn't
         // actually help us; this brings > 2x speedup.
         asm volatile (
           "ld.cg.global.v4.u32 {%0, %1, %2, %3}, [%4];"
           : "=r"(dec[0]), "=r"(dec[1]), "=r"(dec[2]), "=r"(dec[3])
-          : "l"((void*) &codebook[enc[i]])
+          : "l"((void*) &codebook[(group_size / 8) * enc[i]])
         );
+        if constexpr (group_size == 16) {
+          asm volatile (
+            "ld.cg.global.v4.u32 {%0, %1, %2, %3}, [%4];"
+            : "=r"(dec[4]), "=r"(dec[5]), "=r"(dec[6]), "=r"(dec[7])
+            : "l"((void*) &codebook[(group_size / 8) * enc[i] + 1])
+          );
+        }
 
-        C[a_gl_rd * 8 + i] = chunk;
+        C[a_gl_rd * group_size + (group_size / 8) * i] = reinterpret_cast<int4*>(&dec)[0];
+        if constexpr (group_size == 16) {
+          C[a_gl_rd * group_size + (group_size / 8) * i + 1] = reinterpret_cast<int4*>(&dec)[1];
+        }
       }
     }
     a_gl_rd += 32;
@@ -342,6 +348,7 @@ template void code1x16_matvec_cuda<true, 8>(const void*, const void*, void*, con
 template void code1x16_matvec_cuda<false, 16>(const void*, const void*, void*, const void*, int, int);
 template void code1x16_matvec_cuda<true, 16>(const void*, const void*, void*, const void*, int, int);
 
+template <size_t group_size>
 void  code1x16_dequant_cuda(
   const void* __restrict__ A,
         void* __restrict__ C,
@@ -361,7 +368,7 @@ void  code1x16_dequant_cuda(
   int blocks = ceildiv(prob_m, thread_m);
   int threads = 32 * thread_m;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
-  Code1x16Dequant<<<blocks, threads, 0, stream>>>(
+  Code1x16Dequant<group_size><<<blocks, threads, 0, stream>>>(
     (const int4*) A,
     (int4*) C,
     (const int4*) codebook,
@@ -369,6 +376,9 @@ void  code1x16_dequant_cuda(
     prob_k
   );
 }
+
+template void code1x16_dequant_cuda<8>(const void*, void*, const void*, int, int);
+template void code1x16_dequant_cuda<16>(const void*, void*, const void*, int, int);
 
 template <bool use_bfloat16>
 void  code2x8_matvec_cuda(
