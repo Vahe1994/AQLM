@@ -24,15 +24,20 @@ inline bool check_use_bfloat16(const torch::Tensor& input) {
   }
 }
 
-void code1x16_matvec_cuda(
+
+template <bool use_bfloat16, size_t group_size>
+void  code1x16_matvec_cuda(
   const void* A,
   const void* B,
         void* C,
   const void* codebook,
   int prob_m,
-  int prob_k,
-  bool use_bfloat16
+  int prob_k
 );
+extern template void code1x16_matvec_cuda<false, 8>(const void*, const void*, void*, const void*, int, int);
+extern template void code1x16_matvec_cuda<true, 8>(const void*, const void*, void*, const void*, int, int); 
+extern template void code1x16_matvec_cuda<false, 16>(const void*, const void*, void*, const void*, int, int);
+extern template void code1x16_matvec_cuda<true, 16>(const void*, const void*, void*, const void*, int, int);
 
 void code1x16_dequant_cuda(
   const void* A,
@@ -42,15 +47,17 @@ void code1x16_dequant_cuda(
   int prob_k
 );
 
+template <bool use_bfloat16>
 void code2x8_matvec_cuda(
   const void* A,
   const void* B,
         void* C,
   const void* codebook,
   int prob_m,
-  int prob_k,
-  bool use_bfloat16
+  int prob_k
 );
+extern template void code2x8_matvec_cuda<false>(const void*, const void*, void*, const void*, int, int);
+extern template void code2x8_matvec_cuda<true>(const void*, const void*, void*, const void*, int, int);
 
 void code2x8_dequant_cuda(
   const void* A,
@@ -89,15 +96,29 @@ void code1x16_matvec(
   const at::cuda::OptionalCUDAGuard device_guard(device_of(A));
   int prob_m = C.size(0);
   int prob_k = B.size(0);
-  code1x16_matvec_cuda(
-    A.data_ptr(),
-    B.data_ptr(),
-    C.data_ptr(),
-    codebook.data_ptr(),
-    prob_m,
-    prob_k,
-    use_bfloat16
-  );
+
+  if (codebook.size(3) == 8) {
+    if (use_bfloat16) {
+      code1x16_matvec_cuda<true, 8>(A.data_ptr(), B.data_ptr(), C.data_ptr(), codebook.data_ptr(), prob_m, prob_k);
+    } else {
+      code1x16_matvec_cuda<false, 8>(A.data_ptr(), B.data_ptr(), C.data_ptr(), codebook.data_ptr(), prob_m, prob_k);
+    }
+  } else if (codebook.size(3) == 16) {
+    if (use_bfloat16) {
+      code1x16_matvec_cuda<true, 16>(A.data_ptr(), B.data_ptr(), C.data_ptr(), codebook.data_ptr(), prob_m, prob_k);
+    } else {
+      code1x16_matvec_cuda<false, 16>(A.data_ptr(), B.data_ptr(), C.data_ptr(), codebook.data_ptr(), prob_m, prob_k);
+    }
+  } else {
+    throw c10::NotImplementedError(
+      {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},
+      c10::str(
+        "AQLM CUDA kernels only support codebooks with 8 or 16 features. Got ",
+        codebook.size(3),
+        "."
+      )
+    );
+  }
 }
 
 torch::Tensor code1x16_matmat(
@@ -261,15 +282,25 @@ void code2x8_matvec(
   const at::cuda::OptionalCUDAGuard device_guard(device_of(A));
   int prob_m = C.size(0);
   int prob_k = B.size(0);
-  code2x8_matvec_cuda(
-    A.data_ptr(),
-    B.data_ptr(),
-    C.data_ptr(),
-    codebook.data_ptr(),
-    prob_m,
-    prob_k,
-    use_bfloat16
-  );
+  if (use_bfloat16) {
+    code2x8_matvec_cuda<true>(
+      A.data_ptr(),
+      B.data_ptr(),
+      C.data_ptr(),
+      codebook.data_ptr(),
+      prob_m,
+      prob_k
+    );
+  } else {
+    code2x8_matvec_cuda<false>(
+      A.data_ptr(),
+      B.data_ptr(),
+      C.data_ptr(),
+      codebook.data_ptr(),
+      prob_m,
+      prob_k
+    );
+  }
 }
 
 torch::Tensor code2x8_matmat(
