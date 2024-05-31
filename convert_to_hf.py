@@ -33,7 +33,7 @@ def pack_int_data(data: torch.IntTensor, nbits: int) -> torch.IntTensor:
 
 def get_num_layers(config) -> int:
     match config.model_type:
-        case "llama" | "mistral" | "mixtral" | "gemma":
+        case "llama" | "mistral" | "mixtral" | "gemma" | "phi3":
             return config.num_hidden_layers
         case unknown_type:
             raise NotImplementedError(f"Can't get number of layers for {unknown_type}")
@@ -41,7 +41,7 @@ def get_num_layers(config) -> int:
 
 def get_layers_prefix(config) -> str:
     match config.model_type:
-        case "llama" | "mistral" | "mixtral" | "gemma":
+        case "llama" | "mistral" | "mixtral" | "gemma" | "phi3":
             return "model.layers"
         case unknown_type:
             raise NotImplementedError(f"Can't get layers prefix for {unknown_type}")
@@ -132,10 +132,26 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to save in safetensors format",
     )
+    parser.add_argument(
+        "--trust_remote_code",
+        action="store_true",
+        help="Whether to trust remote code",
+    )
+    parser.add_argument(
+        "--load_model",
+        action="store_true",
+        help="Whether to load model",
+    )
     args = parser.parse_args()
 
-    old_config = AutoConfig.from_pretrained(args.model)
+    old_config = AutoConfig.from_pretrained(args.model, trust_remote_code=args.trust_remote_code)
     metadata = get_metadata(args.in_path)
+
+    # load dummy model
+    if args.load_model:
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model, trust_remote_code=args.trust_remote_code, low_cpu_mem_usage=True, torch_dtype=torch.float16
+        )
 
     state_dict, linear_weights_not_to_quantize = get_converted_state_dict(
         old_config, metadata["nbits_per_codebook"], args.in_path
