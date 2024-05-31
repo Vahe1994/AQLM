@@ -150,10 +150,7 @@ if __name__ == "__main__":
     # load dummy model
     if args.load_model:
         model = AutoModelForCausalLM.from_pretrained(
-            args.model, 
-            trust_remote_code=args.trust_remote_code, 
-            low_cpu_mem_usage=True,
-            torch_dtype=torch.float16
+            args.model, trust_remote_code=args.trust_remote_code, low_cpu_mem_usage=True, torch_dtype=torch.float16
         )
 
     state_dict, linear_weights_not_to_quantize = get_converted_state_dict(
