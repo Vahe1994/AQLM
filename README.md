@@ -276,7 +276,7 @@ To convert a model into a _Hugging Face_ compatible format, use `convert_to_hf.p
 
 You may also specify flags such as `--save_safetensors` to control the saved model format (see `--help` for details).
 
-Example command: `python convert_to_hf.py meta-llama/Llama-2-7b-hf ./path/to/saved/quantization ./converted-llama2-7b-hf  --save_safetensors
+Example command: `python convert_to_hf.py meta-llama/Llama-2-7b-hf ./path/to/saved/quantization ./converted-llama2-7b-hf  --save_safetensors`
 
 ## Contributing
 
