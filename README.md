@@ -36,6 +36,7 @@ We provide a number of prequantized models:
 | Llama-2-7b | 2x8         | 6.69          | - | 2.2            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-2Bit-2x8-hf)  |
 | Llama-2-7b | 8x8         | 6.61          | - | 2.2            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-2Bit-8x8-hf)  |
 | Llama-2-13b| 1x16        | 5.22           | 0.55→0.49 | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-13b-AQLM-2Bit-1x16-hf)|
+| Llama-2-13b| 2x8        |  5.63          | - | 3.8            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-13b-AQLM-2Bit-2x8-hf)|
 | Llama-2-70b| 1x16        | 3.83           | 0.69→0.65 | 18.8           | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-70b-AQLM-2Bit-1x16-hf)|
 | Llama-2-70b| 2x8         | 4.21           | - | 18.2           | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-70b-AQLM-2Bit-2x8-hf) |
 | gemma-2b | 1x16      | -           | - | 1.7            | [Link](https://huggingface.co/ISTA-DASLab/gemma-2b-AQLM-2Bit-1x16-hf)|
