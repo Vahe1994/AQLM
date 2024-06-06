@@ -136,7 +136,7 @@ To load it, use:
 ```python
 from huggingface_hub import hf_hub_download
 
-hf_hub_download(repo_id="Vahe1994/AQLM", filename="data/name.pth",repo_type="dataset")
+hf_hub_download(repo_id="Vahe1994/AQLM", filename="data/name.pth", repo_type="dataset")
 ```
 
 To use downloaded data from HF, place it in data folder(optional) and set correct path to it in "--dataset" argument in main.py.
@@ -231,6 +231,8 @@ There are additional hyperparameters aviailable. Run `python main.py --help` for
 
 ### Finetuning
 
+**Note** this code will only fine-tune continuous parameters. To fine-tune both continuous and discrete parameters, please switch to [pv-tuning](https://github.com/Vahe1994/AQLM/tree/pv-tuning) branch and follow instructions in its readme.
+
 The accuracy of the quantized model can be further improved via block finetuning. First, the logits 
 of the float16/bfloat16 are cached in RAM. Then the differentiable parameters of the quantized model
 are optimized to minimize KL-divergence with teacher logits. Typically, we use the same calibration data that was used for model quantization.
@@ -265,7 +267,8 @@ Main CLI arguments:
 - `--finetune_dtype` - which dtype should be used on finetuning. By default `float32`. 
 - `--amp` - whether to use amp on finetuning. Requires `--finetune_dtype=float32`.
 
-**Note** for larger models one would need multi-GPU training. At the moment, FSDP training is not implemented and the model is finetuned on a single process with parameters sharded across available devices.
+For larger models one would need multi-GPU training. At the moment, FSDP training is not implemented and the model is finetuned on a single process with parameters sharded across available devices.
+
 
 ### Zero-shot benchmarks via LM Evaluation Harness
 
