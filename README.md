@@ -2,6 +2,8 @@
 
 Official PyTorch implementation for [Extreme Compression of Large Language Models via Additive Quantization](https://arxiv.org/pdf/2401.06118.pdf)
 
+**News! (2024.05-06)** there's a more effective way to tune quantized models (see [PV-tuning](https://arxiv.org/abs/2405.14852)). We're releasing PV-tuned AQLM models [**in this collection**](https://huggingface.co/collections/ISTA-DASLab/aqlmpv-66564dff5d84f00a893ba93f) and the code is in the [pv-tuning branch](https://github.com/Vahe1994/AQLM/tree/pv-tuning). We'll merge the pv-tuning code into main after several technical improvements.
+
 ## Inference
 
 ### Demo
@@ -294,6 +296,14 @@ If you found this work useful, please consider citing:
       author={Vage Egiazarian and Andrei Panferov and Denis Kuznedelev and Elias Frantar and Artem Babenko and Dan Alistarh},
       year={2024},
       eprint={2401.06118},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG}
+}
+@misc{malinovskii2024pvtuning,
+      title={PV-Tuning: Beyond Straight-Through Estimation for Extreme LLM Compression}, 
+      author={Vladimir Malinovskii and Denis Mazur and Ivan Ilin and Denis Kuznedelev and Konstantin Burlachenko and Kai Yi and Dan Alistarh and Peter Richtarik},
+      year={2024},
+      eprint={2405.14852},
       archivePrefix={arXiv},
       primaryClass={cs.LG}
 }
