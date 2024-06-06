@@ -2,7 +2,9 @@
 
 Official PyTorch implementation for [Extreme Compression of Large Language Models via Additive Quantization](https://arxiv.org/pdf/2401.06118.pdf)
 
-**News! (2024.05-06)** there's a more effective way to tune quantized models (see [PV-tuning](https://arxiv.org/abs/2405.14852)). We're releasing PV-tuned AQLM models [**in this collection**](https://huggingface.co/collections/ISTA-DASLab/aqlmpv-66564dff5d84f00a893ba93f) and the code is in the [pv-tuning branch](https://github.com/Vahe1994/AQLM/tree/pv-tuning). We'll merge the pv-tuning code into main after several technical improvements.
+**New! (2024.05)** AQLM was accepted to [ICML'2024](https://icml.cc/Conferences/2024)! If you're attending, meet us around [this poster](https://icml.cc/virtual/2024/poster/34964).
+
+**New! (2024.05-06)** there's a more effective way to tune quantized models (see [PV-tuning](https://arxiv.org/abs/2405.14852)). We're releasing PV-tuned AQLM models [**in this collection**](https://huggingface.co/collections/ISTA-DASLab/aqlmpv-66564dff5d84f00a893ba93f) and the code is in the [pv-tuning branch](https://github.com/Vahe1994/AQLM/tree/pv-tuning). We'll merge the pv-tuning code into main after several technical improvements.
 
 ## Inference
 
@@ -22,7 +24,7 @@ The models reported below use **full model fine-tuning** as described in appendi
 
 We provide a number of prequantized models:
 
-| Model      | AQLM scheme | WikiText 2 PPL | MMLU (5-shot) FP16→AQLM | Model size, Gb | Hub link                                                                 |
+| Model      | AQLM scheme | WikiText-2 PPL | MMLU (5-shot) FP16→AQLM | Model size, Gb | Hub link                                                                 |
 |------------|-------------|----------------|---------------|----------------|--------------------------------------------------------------------------|
 | Llama-3-8b | 1x16        | -          | 0.65→0.56 | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-8B-AQLM-2Bit-1x16) |
 | Llama-3-8b-Instruct | 1x16        | -          | 0.66→0.59 | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-8B-Instruct-AQLM-2Bit-1x16) |
@@ -44,9 +46,32 @@ We provide a number of prequantized models:
 | gemma-2b | 1x16      | -           | - | 1.7            | [Link](https://huggingface.co/ISTA-DASLab/gemma-2b-AQLM-2Bit-1x16-hf)|
 | gemma-2b | 2x8      | -           | - | 1.6            | [Link](https://huggingface.co/ISTA-DASLab/gemma-2b-AQLM-2Bit-2x8-hf)|
 
+You can also download AQLM models tuned via PV-tuning:
 
-Above perplexity is evaluated on **4k** context length for Llama-2 models and **8k** for Mistral/Mixtral. 
-Please see more evaluation results on the model pages.
+| Model      | AQLM scheme | WikiText-2 PPL | Model size, Gb | Hub link                                                                 |
+|------------|-------------|----------------|----------------|--------------------------------------------------------------------------|
+| Llama-2-7b | 1x16g8        | 5.68          | 2.4            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-PV-2Bit-1x16-hf) |
+| Llama-2-7b | 2x8g8         | 5.90          | 2.2            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-PV-2Bit-2x8-hf)  |
+| Llama-2-7b | 1x16g16     | 9.21          | 1.7            | [Link](https://huggingface.co/justheuristic/Llama-2-7b-AQLM-PV-1Bit-1x16-hf)  |
+| Llama-2-13b| 1x16g8        | 5.05           | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-13b-AQLM-PV-2Bit-1x16-hf)|
+| Llama-2-70b| 1x16g8        | 3.78           | 18.8           | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-70b-AQLM-PV-2Bit-1x16-hf)|
+| Meta-Llama-3-8B | 1x16g8        | 6.99          | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-8B-AQLM-PV-2Bit-1x16) |
+| Meta-Llama-3-8B  | 1x16g16        | 9.43          | 3.9            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-8B-AQLM-PV-1Bit-1x16) |
+| Meta-Llama-3-70B | 1x16g8        | 4.57           | 21.9           | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-AQLM-PV-2Bit-1x16)|
+| Meta-Llama-3-70B | 1x16g16        | 8.67           | 13           | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-AQLM-PV-2Bit-1x16)|
+| Meta-Llama-3-70B | 1x16g16        | 8.67           | 13           | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-AQLM-PV-2Bit-1x16)|
+| Mistral-7B-v0.1 | 1x16g8  | 5.22 | 2.51 | [Link](https://huggingface.co/ISTA-DASLab/Mistral-7B-v0.1-AQLM-PV-2Bit-1x16-hf) |
+| Phi-3-mini-4k-instruct | 1x16g8 | 6.63 | 1.4 | [Link](https://huggingface.co/ISTA-DASLab/Phi-3-mini-4k-instruct-AQLM-PV-2Bit-1x16-hf) |
+
+
+
+Note that models with "gs16" in their scheme require aqlm inference library v1.1.6 or newer: `pip install aqlm[gpu,cpu]>=1.1.6`
+
+Above perplexity is evaluated on **4k** context length for Llama 2 models and **8k** for Mistral/Mixtral and Llama 3. 
+Please also note that token-level perplexity can only be compared within the same model family, but should not be compared between models that use different vocabularies.
+While Mistral has a lower perplexity than Llama 3 8B but this does not mean that Mistral is better: Llama's perplexity is computed on a much larger dictionary and has higher per-token perplexity because of that.
+
+For more evaluation results and detailed explanations, please see our papers: [Egiazarian et al. (2024)](https://arxiv.org/abs/2401.06118) for pure AQLM and [Malinovskii et al. (2024)](https://arxiv.org/abs/2405.14852) for PV-Tuned models.
 
 ### Inference kernels
 
