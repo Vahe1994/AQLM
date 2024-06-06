@@ -2,9 +2,9 @@
 
 Official PyTorch implementation for [Extreme Compression of Large Language Models via Additive Quantization](https://arxiv.org/pdf/2401.06118.pdf)
 
-**New! (2024.05)** AQLM was accepted to [ICML'2024](https://icml.cc/Conferences/2024)! If you're attending, meet us around [this poster](https://icml.cc/virtual/2024/poster/34964).
+**[2024.05]** AQLM was accepted to [ICML'2024](https://icml.cc/Conferences/2024)! If you're attending, meet us around [this poster](https://icml.cc/virtual/2024/poster/34964).
 
-**New! (2024.05-06)** there's a more effective way to tune quantized models (see [PV-tuning](https://arxiv.org/abs/2405.14852)). We're releasing PV-tuned AQLM models [**in this collection**](https://huggingface.co/collections/ISTA-DASLab/aqlmpv-66564dff5d84f00a893ba93f) and the code is in the [pv-tuning branch](https://github.com/Vahe1994/AQLM/tree/pv-tuning). We'll merge the pv-tuning code into main after several technical improvements.
+**[2024.06]** there's a more effective way to tune quantized models with [PV-tuning](https://arxiv.org/abs/2405.14852)). We're releasing PV-tuned AQLM models [**in this collection**](https://huggingface.co/collections/ISTA-DASLab/aqlmpv-66564dff5d84f00a893ba93f) and the code is in the [pv-tuning branch](https://github.com/Vahe1994/AQLM/tree/pv-tuning). We'll merge the pv-tuning code into main after several technical improvements.
 
 ## Inference
 
