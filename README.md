@@ -22,7 +22,7 @@ Learn how to run the prequantized models using this Google Colab examples:
 This repository is currently designed to work with models of `LLaMA`, `Mistral` and `Mixtral` families.
 The models reported below use **full model fine-tuning** as described in appendix A, with cross-entropy objective with teacher logits.
 
-We provide a number of prequantized models:
+We provide a number of prequantized AQLM models without PV-Tuning (scroll down for PV-Tuned models):
 
 | Model      | AQLM scheme | WikiText-2 PPL | MMLU (5-shot) FP16→AQLM | Model size, Gb | Hub link                                                                 |
 |------------|-------------|----------------|---------------|----------------|--------------------------------------------------------------------------|
@@ -59,13 +59,15 @@ You can also download AQLM models tuned via PV-tuning:
 | Meta-Llama-3-8B  | 1x16g16        | 9.43          | 3.9            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-8B-AQLM-PV-1Bit-1x16) |
 | Meta-Llama-3-70B | 1x16g8        | 4.57           | 21.9           | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-AQLM-PV-2Bit-1x16)|
 | Meta-Llama-3-70B | 1x16g16        | 8.67           | 13           | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-AQLM-PV-2Bit-1x16)|
-| Meta-Llama-3-70B | 1x16g16        | 8.67           | 13           | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-AQLM-PV-2Bit-1x16)|
 | Mistral-7B-v0.1 | 1x16g8  | 5.22 | 2.51 | [Link](https://huggingface.co/ISTA-DASLab/Mistral-7B-v0.1-AQLM-PV-2Bit-1x16-hf) |
 | Phi-3-mini-4k-instruct | 1x16g8 | 6.63 | 1.4 | [Link](https://huggingface.co/ISTA-DASLab/Phi-3-mini-4k-instruct-AQLM-PV-2Bit-1x16-hf) |
 
 
 
-Note that models with "gs16" in their scheme require aqlm inference library v1.1.6 or newer: `pip install aqlm[gpu,cpu]>=1.1.6`
+Note that models with "g16" in their scheme require aqlm inference library v1.1.6 or newer: 
+```bash
+pip install aqlm[gpu,cpu]>=1.1.6
+```
 
 Above perplexity is evaluated on **4k** context length for Llama 2 models and **8k** for Mistral/Mixtral and Llama 3. 
 Please also note that token-level perplexity can only be compared within the same model family, but should not be compared between models that use different vocabularies.
