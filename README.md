@@ -64,7 +64,7 @@ You can also download AQLM models tuned via PV-tuning:
 
 
 
-Note that models with "gs16" in their scheme require aqlm inference library v1.1.6 or newer: 
+Note that models with "g16" in their scheme require aqlm inference library v1.1.6 or newer: 
 ```bash
 pip install aqlm[gpu,cpu]>=1.1.6
 ```
