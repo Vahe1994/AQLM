@@ -64,7 +64,10 @@ You can also download AQLM models tuned via PV-tuning:
 
 
 
-Note that models with "gs16" in their scheme require aqlm inference library v1.1.6 or newer: `pip install aqlm[gpu,cpu]>=1.1.6`
+Note that models with "gs16" in their scheme require aqlm inference library v1.1.6 or newer: 
+```bash
+pip install aqlm[gpu,cpu]>=1.1.6
+```
 
 Above perplexity is evaluated on **4k** context length for Llama 2 models and **8k** for Mistral/Mixtral and Llama 3. 
 Please also note that token-level perplexity can only be compared within the same model family, but should not be compared between models that use different vocabularies.
