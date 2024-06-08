@@ -48,7 +48,13 @@ class AQEngine(nn.Module):
         assert args.devices[0] == self.device, (args.devices[0], self.XTX.device)
         channelwise_input_scales = None
         if args.channelwise_input_scales:
-            channelwise_input_scales = 1. / (torch.diag(self.XTX).sqrt() + QuantizedWeight.EPS)
+            H = self.XTX.clone()
+            diag = torch.arange(self.columns, device=self.dev)
+            H[diag, diag] += 0.01 * torch.mean(torch.diag(H))
+            H = torch.linalg.cholesky(H)
+            H = torch.cholesky_inverse(H)
+            H = torch.linalg.cholesky(H, upper=True)
+            channelwise_input_scales = torch.diag(H)  # ~= 1/sqrt(diag(XTX))
         self.quantized_weight = QuantizedWeight(
             reference_weight=self.layer.weight.detach().to(device=self.device, dtype=torch.float32),
             out_group_size=args.out_group_size,
