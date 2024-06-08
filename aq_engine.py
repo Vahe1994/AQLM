@@ -49,8 +49,8 @@ class AQEngine(nn.Module):
         channelwise_input_scales = None
         if args.channelwise_input_scales:
             H = self.XTX.clone()
-            diag = torch.arange(self.columns, device=self.dev)
-            H[diag, diag] += 0.01 * torch.mean(torch.diag(H))
+            diag = torch.arange(self.columns, device=self.device)
+            H[diag, diag] += args.percdamp * torch.mean(torch.diag(H))
             H = torch.linalg.cholesky(H)
             H = torch.cholesky_inverse(H)
             H = torch.linalg.cholesky(H, upper=True)
