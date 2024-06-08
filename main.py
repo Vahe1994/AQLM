@@ -752,6 +752,12 @@ if __name__ == "__main__":
         help="Maximum number of beam search rounds before the optimization is forcibly stopped.",
     )
     parser.add_argument(
+        "--percdamp",
+        type=float,
+        default=0.01,
+        help="Relative dampening rate for matrix inversion used when initializing input scales.",
+    )
+    parser.add_argument(
         "--relative_mse_tolerance",
         type=float,
         default=None,
