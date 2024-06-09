@@ -99,7 +99,7 @@ class QuantizedWeight(nn.Module):
             del weight_groupwise
 
             self.channelwise_input_scales = None
-            if channelwise_input_scales is not None:
+            if channelwise_input_scales:
                 channelwise_input_scales = weight_for_init.norm(dim=1) / self.in_features ** 0.5
                 assert channelwise_input_scales.ndim == 1 and channelwise_input_scales.shape[0] == self.in_features
                 self.channelwise_input_scales = nn.Parameter(
