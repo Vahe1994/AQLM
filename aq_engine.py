@@ -46,15 +46,6 @@ class AQEngine(nn.Module):
         """create a QuantizedLinear with specified args based on the collected hessian (XTX) data"""
         assert isinstance(args.devices, (list, tuple)) and len(args.devices) >= 1, f"Found devices = {args.devices}"
         assert args.devices[0] == self.device, (args.devices[0], self.XTX.device)
-        channelwise_input_scales = None
-        if args.channelwise_input_scales:
-            H = self.XTX.clone()
-            diag = torch.arange(self.columns, device=self.device)
-            H[diag, diag] += args.percdamp * torch.mean(torch.diag(H))
-            H = torch.linalg.cholesky(H)
-            H = torch.cholesky_inverse(H)
-            H = torch.linalg.cholesky(H, upper=True)
-            channelwise_input_scales = torch.diag(H)  # ~= 1/sqrt(diag(XTX))
         self.quantized_weight = QuantizedWeight(
             reference_weight=self.layer.weight.detach().to(device=self.device, dtype=torch.float32),
             out_group_size=args.out_group_size,
@@ -64,7 +55,7 @@ class AQEngine(nn.Module):
             codebook_value_nbits=args.codebook_value_nbits,
             codebook_value_num_groups=args.codebook_value_num_groups,
             scale_nbits=args.scale_nbits,
-            channelwise_input_scales=channelwise_input_scales,
+            channelwise_input_scales=args.channelwise_input_scales,
             max_iter=args.init_max_iter,
             max_points_per_centroid=args.init_max_points_per_centroid,
             devices=args.devices,

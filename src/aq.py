@@ -49,7 +49,7 @@ class QuantizedWeight(nn.Module):
         scale_nbits: int = 0,
         straight_through_gradient: Optional[bool] = None,
         code_dtype: torch.dtype = torch.int32,
-        channelwise_input_scales: Optional[torch.Tensor] = None,
+        channelwise_input_scales: bool = False,
         **init_kwargs,
     ):
         super().__init__()
@@ -100,6 +100,7 @@ class QuantizedWeight(nn.Module):
 
             self.channelwise_input_scales = None
             if channelwise_input_scales is not None:
+                channelwise_input_scales = weight_for_init.norm(dim=1) / self.in_features ** 0.5
                 assert channelwise_input_scales.ndim == 1 and channelwise_input_scales.shape[0] == self.in_features
                 self.channelwise_input_scales = nn.Parameter(
                     channelwise_input_scales.to(dtype=weight_for_init.dtype, device=weight_for_init.device),
