@@ -29,7 +29,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
             self,
             params: Iterable[Union[torch.Tensor, dict]],
             lr: float = 1e-3,
-            betas: Tuple[float] = (0.9, 0.999),
+            betas: Tuple[float, float] = (0.9, 0.999),
             eps: float = 1e-6,
             weight_decay: float = 0,
             debias: Optional[bool] = None,
