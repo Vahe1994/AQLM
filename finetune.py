@@ -509,7 +509,7 @@ def load_student_model(
     extra_block_types = list()
     for extra_module_name in args.wrap_separately:
         extra_block_types.extend(infer_module_classes(student_model, extra_module_name))
-    block_types_to_wrap = tuple(set(transformer_block_types + layernorm_types + extra_block_types))
+    block_types_to_wrap = tuple(set(transformer_block_types + layernorm_types + extra_block_types + [IntCodes,]))
     if torch.distributed.get_rank() == 0:
         print(f"Blocks to be wrapped separately: {block_types_to_wrap}\n")
 
