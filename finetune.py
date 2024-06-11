@@ -388,33 +388,6 @@ def add_data_args(parser: argparse.ArgumentParser):
         help="If not None, save tokenized dataset to this path and exit training immediately",
     )
 
-
-def validate_args(args: argparse.Namespace):
-    assert torch.distributed.is_initialized()
-    world_size = torch.distributed.get_world_size()
-    assert args.batch_size is not None, "please specify batch size"
-    assert args.batch_size % world_size == 0
-    if args.microbatch_size is None:
-        args.microbatch_size = args.batch_size // world_size
-    assert args.batch_size % (world_size * args.microbatch_size) == 0
-
-    args.load_dtype = getattr(torch, args.load_dtype) if args.load_dtype != 'auto' else 'auto'
-    args.amp_dtype = getattr(torch, args.amp_dtype) if args.amp_dtype is not None else None
-    args.code_dtype = getattr(torch, args.code_dtype) if args.code_dtype is not None else None
-    args.master_dtype = getattr(torch, args.master_dtype)
-    if args.straight_through_buffer_dtype is not None:
-        args.straight_through_buffer_dtype = getattr(torch, args.straight_through_buffer_dtype)
-    else:
-        args.straight_through_buffer_dtype = args.master_dtype
-
-    if args.save_every_steps is not None:
-        assert args.save is not None, f"save_every_steps={args.save_every_steps}, but --save path not specified"
-    if args.keep_best_model:
-        assert args.save is not None, f"--keep_best_model requires --save path"
-        assert args.eval_every_steps is not None, f"--keep_best_model requires --eval_every_steps"
-        assert args.eval_datasets is not None, f"--keep_best_model requires --eval_datasets"
-
-
 def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.PreTrainedTokenizer) -> datasets.Dataset:
     if os.path.exists(args.dataset_name):
         dataset = datasets.load_from_disk(args.dataset_name)
@@ -794,9 +767,33 @@ def main():
     add_data_args(parser)
     add_finetuning_args(parser)
     args = parser.parse_args()
-    validate_args(args)
 
+
+    assert torch.distributed.is_initialized()
+    world_size = torch.distributed.get_world_size()
+    assert args.batch_size is not None, "please specify batch size"
+    assert args.batch_size % world_size == 0
+    if args.microbatch_size is None:
+        args.microbatch_size = args.batch_size // world_size
+    assert args.batch_size % (world_size * args.microbatch_size) == 0
     grad_accumulation_steps = args.batch_size // (world_size * args.microbatch_size)
+
+    args.load_dtype = getattr(torch, args.load_dtype) if args.load_dtype != 'auto' else 'auto'
+    args.amp_dtype = getattr(torch, args.amp_dtype) if args.amp_dtype is not None else None
+    args.code_dtype = getattr(torch, args.code_dtype) if args.code_dtype is not None else None
+    args.master_dtype = getattr(torch, args.master_dtype)
+    if args.straight_through_buffer_dtype is not None:
+        args.straight_through_buffer_dtype = getattr(torch, args.straight_through_buffer_dtype)
+    else:
+        args.straight_through_buffer_dtype = args.master_dtype
+
+    if args.save_every_steps is not None:
+        assert args.save is not None, f"save_every_steps={args.save_every_steps}, but --save path not specified"
+    if args.keep_best_model:
+        assert args.save is not None, f"--keep_best_model requires --save path"
+        assert args.eval_every_steps is not None, f"--keep_best_model requires --eval_every_steps"
+        assert args.eval_datasets is not None, f"--keep_best_model requires --eval_datasets"
+
 
     if args.wandb and rank == 0:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
