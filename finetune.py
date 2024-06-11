@@ -535,6 +535,18 @@ def load_student_model(
         use_orig_params=True,
         device_id=device,
     )
+
+    if named_quantized_params is not None:
+        if torch.distributed.get_world_size() > 1:
+            # distributed pv: each rank holds a subset of all quantized weights; the rest are replaced with pointers
+            named_quantized_params = split_quantized_weights_between_ranks(
+                named_quantized_params, verify_checksums=False)
+        for quantized_weight in named_quantized_params.values():
+            if isinstance(quantized_weight, QuantizedWeight):
+                quantized_weight.to(device)
+            else:
+                assert isinstance(quantized_weight, YourQuantizedWeightIsInAnotherRank)
+
     return student_model, named_quantized_params
 
 
@@ -839,17 +851,6 @@ def main():
             print(student_model)
             for name, param in student_model.named_parameters():
                 print(name, param.shape, param.dtype)
-
-        if world_size > 1 and use_pv_tuning:
-            # distributed pv: each rank holds a subset of all quantized weights; the rest are replaced with pointers
-            named_quantized_params = split_quantized_weights_between_ranks(
-                named_quantized_params, verify_checksums=False)
-
-        for quantized_weight in named_quantized_params.values():
-            if isinstance(quantized_weight, QuantizedWeight):
-                quantized_weight.to(device)
-            else:
-                assert isinstance(quantized_weight, YourQuantizedWeightIsInAnotherRank)
 
     if use_pv_tuning:
         optimizer = create_pv_optimizer(args, student_model, named_quantized_params)
