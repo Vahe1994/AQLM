@@ -93,7 +93,7 @@ export SAVE_PATH=/path/to/save/quantized/model/
 export WANDB_PROJECT=MY_EXPS
 export WANDB_NAME=YOUR_EXP_NAME
 
-ython main.py \
+python main.py \
     $MODEL_PATH \
     $DATASET_PATH \
     --nsamples=2048 \
