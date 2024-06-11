@@ -492,7 +492,7 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> FullyS
 
 def load_student_model(
         args: argparse.Namespace, device: torch.device, dequantize: bool
-) -> Tuple[FullyShardedDataParallel, dict]:
+) -> Tuple[FullyShardedDataParallel, Optional[Dict[str, QuantizedWeight]]]:
     """
     load student model for fine-tuning. If dequantize is set, dequantize all quantized weights to accumulate full grads
     """
@@ -529,9 +529,7 @@ def load_student_model(
         student_model, named_quantized_params = create_dequantized_model(
             student_model, dequantized_dtype=args.amp_dtype, reuse_non_quantized=True)
     else:
-        named_quantized_params = {
-            name: module for name, module in student_model.named_parameters() if isinstance(module, QuantizedWeight)
-        }
+        named_quantized_params = None
 
     transformer_block_types = list(infer_module_classes(student_model, args.block_type))
     layernorm_types = list(transformers.pytorch_utils.ALL_LAYERNORM_LAYERS)
@@ -833,11 +831,9 @@ def main():
         ) for dataset_name in args.eval_datasets
     }
 
-    use_pv_tuning = args.update_codes is not None
-    if rank == 0 and use_pv_tuning:
-        print("Training with PV-Tuning, updating discrete codes")
-    elif rank == 0 and not use_pv_tuning:
-        print("Training without PV-Tuning, updating continuous parameters only")
+    use_pv_tuning = args.update_codes
+    if rank == 0:
+        print(f"Training {['without', 'with'][use_pv_tuning]} PV-Tuning")
 
     with one_rank_at_a_time(local=True, group_size=args.limit_parallel_inits):
         base_model = load_teacher_model(args, device)
@@ -852,8 +848,6 @@ def main():
             # distributed pv: each rank holds a subset of all quantized weights; the rest are replaced with pointers
             named_quantized_params = split_quantized_weights_between_ranks(
                 named_quantized_params, verify_checksums=False)
-        else:
-            named_quantized_params = {}  # not needed; delete to save memory
 
         for quantized_weight in named_quantized_params.values():
             if isinstance(quantized_weight, QuantizedWeight):
