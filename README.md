@@ -156,7 +156,7 @@ SEQLEN=4096
 DATASET=togethercomputer/RedPajama-Data-1T-Sample
 OUTPUT_PATH=./redpajama_tokenized_llama2
 
-CUDA_VISIBLE_DEVICES=0 HF_HOME=/mnt/LLM OMP_NUM_THREADS=16 torchrun --master-port 3456 --nproc-per-node=1 finetune_fsdp.py --base_model $TARGET_MODEL --quantized_model ./doesnt_matter --dtype bfloat16 --block_type LlamaDecoderLayer --dataset_name=$DATASET --split train --cache_dir=./cache_dir --trust_remote_code --model_seqlen=$SEQLEN --preprocessing_num_workers=64 --preprocessing_chunk_length 100000 --save_dataset_and_exit $OUTPUT_PATH
+CUDA_VISIBLE_DEVICES=0 HF_HOME=/mnt/LLM OMP_NUM_THREADS=16 torchrun --master-port 3456 --nproc-per-node=1 finetune.py --base_model $TARGET_MODEL --quantized_model ./doesnt_matter --dtype bfloat16 --block_type LlamaDecoderLayer --dataset_name=$DATASET --split train --cache_dir=./cache_dir --trust_remote_code --model_seqlen=$SEQLEN --preprocessing_num_workers=64 --preprocessing_chunk_length 100000 --save_dataset_and_exit $OUTPUT_PATH
 
 tar -cvf tokenized_data_llama2.tar $OUTPUT_PATH   # optionally pack for distribution
 ```
@@ -185,7 +185,7 @@ export SEQLEN=4096
 export WANDB_PROJECT=PV_TUNE_LLAMA_2
 export WANDB_NAME=llama-2-7b-1x16gs16-pv
 
-torchrun --nproc-per-node=$NUM_GPUS finetune_fsdp.py \
+torchrun --nproc-per-node=$NUM_GPUS finetune.py \
     --base_model $MODEL_PATH --quantized_model $QUANTIZED_MODEL_PATH  --monkeypatch_old_pickle \
     --model_seqlen=$SEQLEN --block_type LlamaDecoderLayer --limit_parallel_inits 4 \
     --load_dtype bfloat16 --amp_dtype bfloat16 --code_dtype uint16 \
