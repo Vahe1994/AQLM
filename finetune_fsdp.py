@@ -164,6 +164,7 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--delta_decay",
         type=float,
+        default=0.0,
         help="Determines whether to use direct training, straight-through estimation or a mixture thereof. "
              "If delta_decay is 0, use straight-through estimation. If delta_decay is 1, do not use it at all. "
              "If between 0 and 1, every straight-through buffer will decay to the quantized weight with moving average."
@@ -173,7 +174,7 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--max_code_change_per_step",
         type=float,
-        default=1e-3,
+        default=1e-2,
         help="Maximum number of code groups that can be changed during one update to codes. "
              "This constraint is enforced on a per-tensor level. If the weight is represented with multiple codes, "
              "changing any of the codes will count towards the limit. If more than this many code groups have changed, "
@@ -354,7 +355,7 @@ def add_data_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--preprocessing_chunk_length",
         type=int,
-        default=None,
+        default=100_000,
         help="Texts exceeding this length will be split approximately in the middle",
     )
     parser.add_argument(
