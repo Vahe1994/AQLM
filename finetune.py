@@ -126,6 +126,12 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         help="If set, train the non-quantized model parameters (layernorm scales, biases, logits); if not, freeze them",
     )
     parser.add_argument(
+        '--force_pv_optimizer', action='store_true',
+        help="If set, the algorithm will create a de-quantized model instead of dequantizing weights just in time even"
+             "when doing p-only tuning. This version only has effect if --update_codes is not set. Setting this will"
+             " make the training run faster, but it will also use substantially more memory.",
+    )
+    parser.add_argument(
         "--lr",
         type=float,
         default=1e-5,
@@ -839,7 +845,7 @@ def main():
         ) for dataset_name in args.eval_datasets
     }
 
-    use_pv_tuning = args.update_codes
+    use_pv_tuning = args.update_codes and not args.force_pv_optimizer
     if rank == 0:
         print(f"Training {['without', 'with'][use_pv_tuning]} PV-Tuning")
 
