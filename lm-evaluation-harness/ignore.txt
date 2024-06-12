@@ -1,3 +1,0 @@
-ROUGE
-rouge
-nin
