@@ -599,14 +599,17 @@ def create_p_optimizer(args: argparse.Namespace, student_model: FullyShardedData
             for param in module.parameters():
                 if torch.is_floating_point(param) and param.requires_grad:
                     quantized_weight_continuous_parameters.add(param)
-    all_trainable_params = set()
+    all_trainable_params = []
     if args.update_codebooks_and_scales:
-        all_trainable_params |= quantized_weight_continuous_parameters
+        all_trainable_params.extend(
+            param for param in student_model.parameters() if param in quantized_weight_continuous_parameters
+        )  # use iteration instead of simply adding list(set) to ensure deterministic order of parameters
     if args.update_non_quantized_parameters:
-        non_quantized_parameters = {param for param in student_model.parameters()
-                                    if param not in quantized_weight_continuous_parameters
-                                    and torch.is_floating_point(param) and param.requires_grad}
-        all_trainable_params |= non_quantized_parameters
+        all_trainable_params.extend(
+            param for param in student_model.parameters()
+            if torch.is_floating_point(param) and param.requires_grad
+            and param not in quantized_weight_continuous_parameters
+        )
     if args.update_codes:
         raise RuntimeError("When asked to update_codes, one should create_pv_optimizer, but this is create_p_optimizer")
     assert len(all_trainable_params) > 0, ("found no trainable parameters. Did you specify update_codes, "
