@@ -58,7 +58,7 @@ You can also download AQLM models tuned via PV-tuning:
 | Meta-Llama-3-8B | 1x16g8        | 6.99          | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-8B-AQLM-PV-2Bit-1x16) |
 | Meta-Llama-3-8B  | 1x16g16        | 9.43          | 3.9            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-8B-AQLM-PV-1Bit-1x16) |
 | Meta-Llama-3-70B | 1x16g8        | 4.57           | 21.9           | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-AQLM-PV-2Bit-1x16)|
-| Meta-Llama-3-70B | 1x16g16        | 8.67           | 13           | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-AQLM-PV-2Bit-1x16)|
+| Meta-Llama-3-70B | 1x16g16        | 8.67           | 13           | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-AQLM-PV-1Bit-1x16)|
 | Mistral-7B-v0.1 | 1x16g8  | 5.22 | 2.51 | [Link](https://huggingface.co/ISTA-DASLab/Mistral-7B-v0.1-AQLM-PV-2Bit-1x16-hf) |
 | Phi-3-mini-4k-instruct | 1x16g8 | 6.63 | 1.4 | [Link](https://huggingface.co/ISTA-DASLab/Phi-3-mini-4k-instruct-AQLM-PV-2Bit-1x16-hf) |
 
