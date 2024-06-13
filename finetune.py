@@ -17,7 +17,8 @@ import torch.nn.functional as F
 import torch.utils.data
 import torch.distributed
 from torch import nn as nn
-from torch.distributed.fsdp import FullyShardedDataParallel, MixedPrecision, StateDictType, FullStateDictConfig
+from torch.distributed.fsdp import FullyShardedDataParallel, MixedPrecision, StateDictType, FullStateDictConfig, \
+    CPUOffload
 from tqdm.auto import tqdm
 
 from convert_legacy_model_format import load_quantized_model_with_old_pickle
@@ -220,6 +221,11 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         '--code_adam_16bit',
         action="store_true",
         help="If set, adam statistics for codes will be stored as float16 (exp_avg and v_hat) or bfloat16(exp_avg_sq)",
+    )
+    parser.add_argument(
+        '--offload_teacher_params',
+        action="store_true",
+        help="If set, the teacher model will be offloaded to RAM and paged using FSDP's CPUOffload",
     )
     parser.add_argument(
         '--lamb', action='store_true', help="If set, use Lamb (aka Adam with trust ratio)",
@@ -464,6 +470,7 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> FullyS
     transformer_block_types = infer_module_classes(base_model, args.block_type)
     return FullyShardedDataParallel(
         base_model,
+        cpu_offload=CPUOffload(offload_params=args.offload_teacher_params),
         auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, transformer_block_types),
         device_id=device
     )
