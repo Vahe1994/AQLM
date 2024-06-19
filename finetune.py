@@ -762,7 +762,7 @@ def compute_loss_on_batch(
         with torch.no_grad():
             teacher_hidden_states = teacher_model.base_model(**batch).last_hidden_state
         with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
-            student_hidden_states = student_model.module.base_model(**batch).last_hidden_state
+            student_hidden_states = student_model.base_model(**batch).last_hidden_state
             return compute_kl_divergence_loss_values(
                 student_hidden_states=student_hidden_states, student_lm_head=student_model.get_output_embeddings(),
                 teacher_hidden_states=teacher_hidden_states, teacher_lm_head=teacher_model.get_output_embeddings(),
