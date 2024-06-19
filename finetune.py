@@ -27,7 +27,7 @@ from src.aq_ops import master_rank_first, one_rank_at_a_time, is_signed, IntCode
 from src.configurable_adam import ConfigurableAdamW
 from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
 from src.memory_efficient_loss import compute_kl_divergence_loss_values
-from src.modelutils import get_model, wrap_model_with_fsdp
+from src.modelutils import get_model, wrap_model_with_fsdp_
 from src.pv_utils import get_original_named_parameters_from_fsdp_module, split_quantized_weights_between_ranks, \
     YourQuantizedWeightIsInAnotherRank, infer_module_classes, create_dequantized_model
 from src.pv_optimizer import StraightThroughAdamW
@@ -477,7 +477,7 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> FullyS
 
     model.config.use_cache = False
     transformer_block_types = infer_module_classes(model, args.block_type)
-    return wrap_model_with_fsdp(
+    return wrap_model_with_fsdp_(
         model, cpu_offload=CPUOffload(offload_params=args.offload_teacher_params), device_id=device,
         auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, transformer_block_types),
     )
@@ -548,7 +548,7 @@ def load_student_model(
         if torch.distributed.get_rank() == 0:
             print(f"Not using FSDP native MixedPrecision; Local amp_dtype={args.amp_dtype}.")
 
-    student_model = wrap_model_with_fsdp(
+    student_model = wrap_model_with_fsdp_(
         student_model, use_orig_params=True, mixed_precision=mixed_precision, device_id=device,
         auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, block_types_to_wrap),
     )
@@ -755,26 +755,22 @@ def save_p_model(args: argparse.Namespace, quantized_model: FullyShardedDataPara
 
 
 def compute_loss_on_batch(
-        batch: dict, teacher_model: FullyShardedDataParallel, student_model: FullyShardedDataParallel,
+        batch: dict, teacher_model: transformers.PreTrainedModel, student_model: transformers.PreTrainedModel,
         *, amp_dtype: Optional[torch.dtype], max_tokens_per_chunk: Optional[int]
 ) -> torch.Tensor:
-    if max_tokens_per_chunk is not None:  # chunked inference, transformer and lm head are separate FSDP instances
+    if max_tokens_per_chunk is not None:  # chunked inference, transformer and lm head must be separate FSDP instances
         with torch.no_grad():
-            teacher_hidden_states = teacher_model.module.base_model(**batch).last_hidden_state
-
-        teacher_lm_head = teacher_model.module.get_output_embeddings()
-        student_lm_head = student_model.module.get_output_embeddings()
-
+            teacher_hidden_states = teacher_model.base_model(**batch).last_hidden_state
         with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
             student_hidden_states = student_model.module.base_model(**batch).last_hidden_state
             return compute_kl_divergence_loss_values(
-                student_hidden_states=student_hidden_states, student_lm_head=student_lm_head,
-                teacher_hidden_states=teacher_hidden_states, teacher_lm_head=teacher_lm_head,
+                student_hidden_states=student_hidden_states, student_lm_head=student_model.get_output_embeddings(),
+                teacher_hidden_states=teacher_hidden_states, teacher_lm_head=teacher_model.get_output_embeddings(),
                 max_tokens_per_chunk=max_tokens_per_chunk, checkpoint_last_chunk=False,
                 use_reentrant=False, determinism_check="none",
             ).mean()
 
-    else:  # combined inference without gradient checkpointing / chunks, the entire is a single FSDP instance
+    else:  # combined inference without gradient checkpointing
         with torch.no_grad():
             teacher_logprobs = F.log_softmax(teacher_model(**batch).logits, dim=-1)
         with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):

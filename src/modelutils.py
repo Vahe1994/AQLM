@@ -288,23 +288,16 @@ def get_layers_prefix(config: transformers.PretrainedConfig) -> str:
     raise NotImplementedError(f"Can't get layers prefix for {config.model_type}")
 
 
-def wrap_model_with_fsdp(
-        model: transformers.PreTrainedModel, auto_wrap_policy: callable, **kwargs
-) -> FullyShardedDataParallel:
+def wrap_model_with_fsdp_(model: transformers.PreTrainedModel, **kwargs) -> transformers.PreTrainedModel:
     """Wrap the entire model, its transformer and lm head into FSDP instances; propagate any **kwargs to FSDP"""
     assert isinstance(model, transformers.PreTrainedModel) and is_model_for_causal_lm(model)
-
     accounted_parameters = set(nn.ModuleList([model.base_model, model.get_output_embeddings()]).parameters())
     for name, param in model.named_parameters():
         # If code fails with the assert below, it might be benign, but still needs checking
         assert param in accounted_parameters, (f"FSDP wrapper currently assumes all model parameters to be in either "
                                                f"base model or lm head, but found param {name} that is neither.")
-    setattr(model, model.base_model_prefix, FullyShardedDataParallel(
-        model.base_model, auto_wrap_policy=auto_wrap_policy, **kwargs))
-    model.set_output_embeddings(FullyShardedDataParallel(
-        model.get_output_embeddings(), auto_wrap_policy=auto_wrap_policy, **kwargs))
-    model = FullyShardedDataParallel(model, **kwargs)  # without auto_wrap_policy
-    assert isinstance(model.module, transformers.PreTrainedModel)
-    assert isinstance(model.module.base_model, FullyShardedDataParallel)
-    assert isinstance(model.module.get_output_embeddings(), FullyShardedDataParallel)
+    setattr(model, model.base_model_prefix, FullyShardedDataParallel(model.base_model, **kwargs))
+    assert isinstance(model.base_model, FullyShardedDataParallel)
+    model.set_output_embeddings(FullyShardedDataParallel(model.get_output_embeddings(), **kwargs))
+    assert isinstance(model.get_output_embeddings(), FullyShardedDataParallel)
     return model
