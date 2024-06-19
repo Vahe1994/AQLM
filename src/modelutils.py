@@ -84,7 +84,7 @@ def get_model(
     return model
 
 
-def get_model_head(model):
+def get_model_head_with_norm(model):
     head = torch.nn.ModuleList()
     if model.config.model_type in LLAMA_LIKE:
         if model.model.norm is not None:
