@@ -407,6 +407,7 @@ def add_data_args(parser: argparse.ArgumentParser):
         help="If not None, save tokenized dataset to this path and exit training immediately",
     )
 
+
 def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.PreTrainedTokenizer) -> datasets.Dataset:
     if os.path.exists(args.dataset_name):
         dataset = datasets.load_from_disk(args.dataset_name)

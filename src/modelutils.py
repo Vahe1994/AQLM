@@ -289,6 +289,7 @@ def get_layers_prefix(config: transformers.PretrainedConfig) -> str:
 
 
 def wrap_model_with_fsdp(model: transformers.PreTrainedModel, **kwargs) -> FullyShardedDataParallel:
+    """Wrap the entire model, its transformer and lm head into FSDP instances; propagate any **kwargs to FSDP"""
     assert isinstance(model, transformers.PreTrainedModel) and is_model_for_causal_lm(model)
     setattr(model, model.base_model_prefix, FullyShardedDataParallel(model.base_model, **kwargs))
     model.set_output_embeddings(FullyShardedDataParallel(model.get_output_embeddings(), **kwargs))
