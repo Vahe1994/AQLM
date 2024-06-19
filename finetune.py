@@ -265,7 +265,8 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     )
     parser.add_argument(
         "--loss_tokens_per_chunk",
-        action="store_true",
+        type=int,
+        default=None,
         help="If specified, compute LM logits and loss using gradient checkpointing in chunks of this size."
              "This option slows down loss computation, but reduces memory usage. Recommended for large vocabularies",
     )
