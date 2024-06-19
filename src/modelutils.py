@@ -84,11 +84,11 @@ def get_model(
     return model
 
 
-def is_model_for_causal_lm(model: transformers.PreTrainedModel) -> bool:
-    if not isinstance(model, transformers.PreTrainedModel):
-        raise ValueError(f"Expected PretrainedModel but found {type(model)}")
-    assert len(model.base_model_prefix) > 0
+def is_model_for_causal_lm(model: nn.Module):
+    assert isinstance(model, transformers.PreTrainedModel)
+    assert len(model.base_model_prefix) > 0 and hasattr(model, model.base_model_prefix)
     assert model.get_output_embeddings() is not None
+    return True
 
 
 def get_model_head_with_norm(model):
@@ -282,6 +282,6 @@ def save_quantized_model(model: transformers.PreTrainedModel, save_dir: str):
 
 
 def get_layers_prefix(config: transformers.PretrainedConfig) -> str:
-    if config.model_type in "llama" | "mistral" | "mixtral" | "gemma":
+    if config.model_type in ("llama", "mistral", "mixtral", "gemma"):
         return "model.layers"
     raise NotImplementedError(f"Can't get layers prefix for {config.model_type}")
