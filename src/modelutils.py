@@ -84,6 +84,13 @@ def get_model(
     return model
 
 
+def is_model_for_causal_lm(model: transformers.PreTrainedModel) -> bool:
+    if not isinstance(model, transformers.PreTrainedModel):
+        raise ValueError(f"Expected PretrainedModel but found {type(model)}")
+    assert len(model.base_model_prefix) > 0
+    assert model.get_output_embeddings() is not None
+
+
 def get_model_head_with_norm(model):
     head = torch.nn.ModuleList()
     if model.config.model_type in LLAMA_LIKE:
@@ -272,3 +279,9 @@ def save_quantized_model(model: transformers.PreTrainedModel, save_dir: str):
         layer_save_path = os.path.join(save_dir, f"{layer_index}.pth")
         torch.save(layer, layer_save_path)
     save_not_quantized_weights(model, save_dir)
+
+
+def get_layers_prefix(config: transformers.PretrainedConfig) -> str:
+    if config.model_type in "llama" | "mistral" | "mixtral" | "gemma":
+        return "model.layers"
+    raise NotImplementedError(f"Can't get layers prefix for {config.model_type}")

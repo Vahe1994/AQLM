@@ -7,6 +7,8 @@ import torch
 from tqdm.auto import trange
 from transformers import AutoConfig, AutoModelForCausalLM
 
+from src.modelutils import get_layers_prefix
+
 try:
     import safetensors
 except ModuleNotFoundError:
@@ -31,30 +33,13 @@ def pack_int_data(data: torch.IntTensor, nbits: int) -> torch.IntTensor:
     return data.to(get_int_dtype(nbits))
 
 
-def get_num_layers(config) -> int:
-    match config.model_type:
-        case "llama" | "mistral" | "mixtral" | "gemma":
-            return config.num_hidden_layers
-        case unknown_type:
-            raise NotImplementedError(f"Can't get number of layers for {unknown_type}")
-
-
-def get_layers_prefix(config) -> str:
-    match config.model_type:
-        case "llama" | "mistral" | "mixtral" | "gemma":
-            return "model.layers"
-        case unknown_type:
-            raise NotImplementedError(f"Can't get layers prefix for {unknown_type}")
-
-
 def get_converted_state_dict(config, nbits: int, in_path: os.PathLike) -> [dict, list[str]]:
     state_dict = {}
     linear_weights_not_to_quantize = []
 
-    num_layers = get_num_layers(config)
     layers_prefix = get_layers_prefix(config)
 
-    for i in trange(num_layers):
+    for i in trange(config.num_hidden_layers):
         layer = torch.load(os.path.join(in_path, f"{i}.pth"))
         for name, p in layer.named_parameters():
             if torch.is_floating_point(p.data):
