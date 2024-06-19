@@ -821,7 +821,6 @@ def main():
         assert args.eval_every_steps is not None, f"--keep_best_model requires --eval_every_steps"
         assert args.eval_datasets is not None, f"--keep_best_model requires --eval_datasets"
 
-
     if args.wandb and rank == 0:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
         wandb.init(config={a: getattr(args, a) for a in dir(args) if not a.startswith("_")})
