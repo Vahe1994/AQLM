@@ -1,6 +1,7 @@
 """
 Utility functions for computing a KL divergence loss without materializing all logits / logprobs simultaneously
 """
+import itertools
 from typing import Callable, TypeVar
 
 import torch
@@ -86,14 +87,13 @@ def test_kl_divergence(
         log_target=True, reduction="none"
     ).sum(-1)
 
-    for use_reentrant in [True, False]:
-        for checkpoint_last_chunk in [True, False]:
-            for determinism_check in ["default", "none"]:
-                loss_values = compute_kl_divergence_loss_values(
-                    student_hidden_states=student_hidden_states, student_lm_head=student_lm_head,
-                    teacher_hidden_states=teacher_hidden_states, teacher_lm_head=teacher_lm_head,
-                    max_tokens_per_chunk=max_tokens_per_chunk, checkpoint_last_chunk=checkpoint_last_chunk,
-                    use_reentrant=use_reentrant, determinism_check=determinism_check,
-                )
-                assert loss_values.shape == (batch_size, seq_length)
-                assert torch.allclose(loss_values, ref_loss_values)
+    for use_reentrant, checkpoint_last_chunk, determinism_check in itertools.product(
+            (True, False), (True, False), ("default", "none")):
+        loss_values = compute_kl_divergence_loss_values(
+            student_hidden_states=student_hidden_states, student_lm_head=student_lm_head,
+            teacher_hidden_states=teacher_hidden_states, teacher_lm_head=teacher_lm_head,
+            max_tokens_per_chunk=max_tokens_per_chunk, checkpoint_last_chunk=checkpoint_last_chunk,
+            use_reentrant=use_reentrant, determinism_check=determinism_check,
+        )
+        assert loss_values.shape == (batch_size, seq_length)
+        assert torch.allclose(loss_values, ref_loss_values)
