@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import transformers
 from accelerate import dispatch_model
+from torch.distributed.fsdp import FullyShardedDataParallel
 from transformers import AutoConfig, AutoModelForCausalLM
 
 from src.aq import QuantizedWeight
@@ -285,3 +286,14 @@ def get_layers_prefix(config: transformers.PretrainedConfig) -> str:
     if config.model_type in ("llama", "mistral", "mixtral", "gemma"):
         return "model.layers"
     raise NotImplementedError(f"Can't get layers prefix for {config.model_type}")
+
+
+def wrap_model_with_fsdp(model: transformers.PreTrainedModel, **kwargs) -> FullyShardedDataParallel:
+    assert isinstance(model, transformers.PreTrainedModel) and is_model_for_causal_lm(model)
+    setattr(model, model.base_model_prefix, FullyShardedDataParallel(model.base_model, **kwargs))
+    model.set_output_embeddings(FullyShardedDataParallel(model.get_output_embeddings(), **kwargs))
+    model = FullyShardedDataParallel(model, **kwargs)
+    assert isinstance(model.module, transformers.PreTrainedModel)
+    assert isinstance(model.module.base_model, FullyShardedDataParallel)
+    assert isinstance(model.module.get_output_embeddings(), FullyShardedDataParallel)
+    return model

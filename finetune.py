@@ -26,7 +26,8 @@ from src.aq import QuantizedWeight
 from src.aq_ops import master_rank_first, one_rank_at_a_time, is_signed, IntCodes
 from src.configurable_adam import ConfigurableAdamW
 from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
-from src.modelutils import get_model
+from src.memory_efficient_loss import compute_kl_divergence_loss_values
+from src.modelutils import get_model, wrap_model_with_fsdp
 from src.pv_utils import get_original_named_parameters_from_fsdp_module, split_quantized_weights_between_ranks, \
     YourQuantizedWeightIsInAnotherRank, infer_module_classes, create_dequantized_model
 from src.pv_optimizer import StraightThroughAdamW
@@ -260,7 +261,13 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--gradient_checkpointing",
         action="store_true",
-        help="Whether to apply gradient checkpointing",
+        help="Whether to apply gradient checkpointing for transformer blocks",
+    )
+    parser.add_argument(
+        "--loss_tokens_per_chunk",
+        action="store_true",
+        help="If specified, compute LM logits and loss using gradient checkpointing in chunks of this size."
+             "This option slows down loss computation, but reduces memory usage. Recommended for large vocabularies",
     )
     parser.add_argument(
         "--use_fsdp_amp",
@@ -458,21 +465,19 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
 
 def load_teacher_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
     """Load unquantized model with frozen parameters"""
-    base_model = get_model(
+    model = get_model(
         args.base_model, load_quantized=None, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
         attn_implementation=args.attn_implementation,
     ).to(dtype=args.load_dtype if args.load_dtype != 'auto' else None)
-    base_model.train(False)
-    for param in base_model.parameters():
+    model.train(False)
+    for param in model.parameters():
         param.requires_grad = False
 
-    base_model.config.use_cache = False
-    transformer_block_types = infer_module_classes(base_model, args.block_type)
-    return FullyShardedDataParallel(
-        base_model,
-        cpu_offload=CPUOffload(offload_params=args.offload_teacher_params),
+    model.config.use_cache = False
+    transformer_block_types = infer_module_classes(model, args.block_type)
+    return wrap_model_with_fsdp(
+        model, cpu_offload=CPUOffload(offload_params=args.offload_teacher_params), device_id=device,
         auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, transformer_block_types),
-        device_id=device
     )
 
 
@@ -541,12 +546,9 @@ def load_student_model(
         if torch.distributed.get_rank() == 0:
             print(f"Not using FSDP native MixedPrecision; Local amp_dtype={args.amp_dtype}.")
 
-    student_model = FullyShardedDataParallel(
-        student_model,
+    student_model = wrap_model_with_fsdp(
+        student_model, use_orig_params=True, mixed_precision=mixed_precision, device_id=device,
         auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, block_types_to_wrap),
-        mixed_precision=mixed_precision,
-        use_orig_params=True,
-        device_id=device,
     )
 
     if named_quantized_params is not None:
@@ -751,19 +753,37 @@ def save_p_model(args: argparse.Namespace, quantized_model: FullyShardedDataPara
 
 
 def compute_loss_on_batch(
-        batch: dict, base_model: nn.Module, quantized_model: nn.Module, amp_dtype: Optional[torch.dtype]
+        batch: dict, teacher_model: FullyShardedDataParallel, student_model: FullyShardedDataParallel,
+        *, amp_dtype: Optional[torch.dtype], max_tokens_per_chunk: Optional[int]
 ) -> torch.Tensor:
-    with torch.no_grad():
-        teacher_logprobs = F.log_softmax(base_model(**batch).logits, dim=-1)
-    with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
-        student_logprobs = F.log_softmax(quantized_model(**batch).logits, dim=-1)
-        loss = F.kl_div(
-            input=student_logprobs.flatten(0, -2),
-            target=teacher_logprobs.flatten(0, -2),
-            log_target=True,
-            reduction="batchmean",
-        ).mean()
-    return loss
+    if max_tokens_per_chunk is not None:  # chunked inference, transformer and lm head are separate FSDP instances
+        with torch.no_grad():
+            teacher_hidden_states = teacher_model.module.base_model(**batch).last_hidden_state
+
+        teacher_lm_head = teacher_model.module.get_output_embeddings()
+        student_lm_head = student_model.module.get_output_embeddings()
+
+        with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
+            student_hidden_states = student_model.module.base_model(**batch).last_hidden_state
+            return compute_kl_divergence_loss_values(
+                student_hidden_states=student_hidden_states, student_lm_head=student_lm_head,
+                teacher_hidden_states=teacher_hidden_states, teacher_lm_head=teacher_lm_head,
+                max_tokens_per_chunk=max_tokens_per_chunk, checkpoint_last_chunk=False,
+                use_reentrant=False, determinism_check="none",
+            ).mean()
+
+    else:  # combined inference without gradient checkpointing / chunks, the entire is a single FSDP instance
+        with torch.no_grad():
+            teacher_logprobs = F.log_softmax(teacher_model(**batch).logits, dim=-1)
+        with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
+            student_logprobs = F.log_softmax(student_model(**batch).logits, dim=-1)
+            loss = F.kl_div(
+                input=student_logprobs.flatten(0, -2),
+                target=teacher_logprobs.flatten(0, -2),
+                log_target=True,
+                reduction="batchmean",
+            ).mean()
+        return loss
 
 
 def compute_validation_perplexities(args: argparse.Namespace, model: nn.Module, eval_datasets: dict):
@@ -859,7 +879,7 @@ def main():
         print(f"Training {['without', 'with'][use_pv_tuning]} PV-Tuning")
 
     with one_rank_at_a_time(local=True, group_size=args.limit_parallel_inits):
-        base_model = load_teacher_model(args, device)
+        teacher_model = load_teacher_model(args, device)
         student_model, named_quantized_params = load_student_model(args, device, dequantize=use_pv_tuning)
         if rank == 0:
             print("Wrapped model:")
@@ -903,7 +923,8 @@ def main():
             metadata['total_microbatches'] += 1
 
             batch = {k: v.to(device) for k, v in batch.items()}
-            loss = compute_loss_on_batch(batch, base_model, student_model, amp_dtype=args.amp_dtype)
+            loss = compute_loss_on_batch(batch, teacher_model, student_model, amp_dtype=args.amp_dtype,
+                                         max_tokens_per_chunk=args.loss_tokens_per_chunk)
 
             metadata['loss_numerator'] += loss.item()
             metadata['loss_denominator'] += 1
