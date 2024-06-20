@@ -815,7 +815,6 @@ def main():
     args = parser.parse_args()
 
     assert torch.distributed.is_initialized()
-    world_size = torch.distributed.get_world_size()
     assert args.batch_size is not None, "please specify batch size"
     assert args.batch_size % world_size == 0
     if args.microbatch_size is None:
