@@ -27,7 +27,7 @@ from src.aq_ops import master_rank_first, one_rank_at_a_time, is_signed, IntCode
 from src.configurable_adam import ConfigurableAdamW
 from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
 from src.memory_efficient_loss import compute_kl_divergence_loss_values
-from src.modelutils import get_model, wrap_model_with_fsdp_
+from src.modelutils import get_model
 from src.pv_utils import get_original_named_parameters_from_fsdp_module, split_quantized_weights_between_ranks, \
     YourQuantizedWeightIsInAnotherRank, infer_module_classes, create_dequantized_model
 from src.pv_optimizer import StraightThroughAdamW
@@ -477,10 +477,17 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> FullyS
 
     model.config.use_cache = False
     transformer_block_types = infer_module_classes(model, args.block_type)
-    return wrap_model_with_fsdp_(
-        model, cpu_offload=CPUOffload(offload_params=args.offload_teacher_params), device_id=device,
-        auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, transformer_block_types),
-    )
+    base_model, lm_head = model.base_model, model.get_output_embeddings()
+
+    def auto_wrap_policy(module, recurse, **_etc):
+        return recurse or (module in (base_model, lm_head)) or isinstance(module, transformer_block_types)
+
+    model = FullyShardedDataParallel(model, cpu_offload=CPUOffload(offload_params=args.offload_teacher_params),
+                                     device_id=device, auto_wrap_policy=auto_wrap_policy)
+    assert isinstance(model.module, transformers.PreTrainedModel)
+    assert isinstance(model.module.base_model, FullyShardedDataParallel)
+    assert isinstance(model.module.get_output_embeddings(), FullyShardedDataParallel)
+    return model
 
 
 def load_student_model(
@@ -548,10 +555,16 @@ def load_student_model(
         if torch.distributed.get_rank() == 0:
             print(f"Not using FSDP native MixedPrecision; Local amp_dtype={args.amp_dtype}.")
 
-    student_model = wrap_model_with_fsdp_(
-        student_model, use_orig_params=True, mixed_precision=mixed_precision, device_id=device,
-        auto_wrap_policy=lambda module, recurse, **_: recurse or isinstance(module, block_types_to_wrap),
-    )
+    base_model, lm_head = student_model.base_model, student_model.get_output_embeddings()
+
+    def auto_wrap_policy(module, recurse, **_etc):
+        return recurse or (module in (base_model, lm_head)) or isinstance(module, block_types_to_wrap),
+
+    student_model = FullyShardedDataParallel(student_model, use_orig_params=True, mixed_precision=mixed_precision,
+                                             device_id=device, auto_wrap_policy=auto_wrap_policy)
+    assert isinstance(student_model.module, transformers.PreTrainedModel)
+    assert isinstance(student_model.module.base_model, FullyShardedDataParallel)
+    assert isinstance(student_model.module.get_output_embeddings(), FullyShardedDataParallel)
 
     if named_quantized_params is not None:
         if torch.distributed.get_world_size() > 1:
