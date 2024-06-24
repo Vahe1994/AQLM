@@ -465,7 +465,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     return lm_dataset
 
 
-def load_teacher_model(args: argparse.Namespace, device: torch.device) -> transformers.PreTrainedModel:
+def load_teacher_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
     """Load unquantized model with frozen parameters"""
     model = get_model(
         args.base_model, load_quantized=None, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
