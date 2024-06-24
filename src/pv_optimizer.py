@@ -446,14 +446,18 @@ def _aggregate_tensors_by_name(sharded_tensors_by_name: Dict[str, torch.Tensor],
                 if shard_sizes[i] == 0:
                     continue  # optimization: this handles FSDP where some param/grad shards are empty
                 elif i != own_rank:
+                    print(end=f"[rank{own_rank}] gather_buffers[{i}] shape={gather_buffers[i].shape} dtype={gather_buffers[i].dtype} device={gather_buffers[i].device}\n")
                     async_ops.append(torch.distributed.irecv(gather_buffers[i], src=i))
+                    async_ops[-1].wait()
                 else:
                     gather_buffers[i].copy_(shard)
             aggregated_tensors_by_name[name] = combined_buffer
         else:
             if shard_sizes[own_rank] == 0:
                 continue
+            print(end=f"[rank{own_rank}] shard shape={shard.shape} dtype={shard.dtype} device={shard.device}\n")
             async_ops.append(torch.distributed.isend(shard, destination_rank))
+            async_ops[-1].wait()
 
     for handle in async_ops:
         handle.wait()
