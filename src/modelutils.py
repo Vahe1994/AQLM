@@ -287,29 +287,3 @@ def get_layers_prefix(config: transformers.PretrainedConfig) -> str:
     if config.model_type in ("llama", "mistral", "mixtral", "gemma"):
         return "model.layers"
     raise NotImplementedError(f"Can't get layers prefix for {config.model_type}")
-
-
-def wrap_model_with_fsdp_(
-        model: transformers.PreTrainedModel, auto_wrap_policy: callable,
-        mixed_precision: Optional[MixedPrecision] = None, **kwargs
-) -> FullyShardedDataParallel:
-    """Wrap the entire model, its transformer and lm head into FSDP instances; propagate any **kwargs to FSDP"""
-    assert isinstance(model, transformers.PreTrainedModel) and is_model_for_causal_lm(model)
-    base_model, lm_head = model.base_model, model.get_output_embeddings()
-
-    def modified_auto_wrap_policy(module, recurse: bool, **etc):
-        if module in (base_model, lm_head):
-            return True
-        return auto_wrap_policy(module=module, recurse=recurse, **etc)
-
-    model = FullyShardedDataParallel(
-        model, auto_wrap_policy=modified_auto_wrap_policy, mixed_precision=mixed_precision, **kwargs
-    )
-    if torch.distributed.get_rank() == 0:
-        print("MODEL BEFORE ASSERTS")
-        print(model)
-        print("END OF DEBUGPRINT")
-    assert isinstance(model.module, transformers.PreTrainedModel)
-    assert isinstance(model.module.base_model, FullyShardedDataParallel)
-    assert isinstance(model.module.get_output_embeddings(), FullyShardedDataParallel)
-    return model
