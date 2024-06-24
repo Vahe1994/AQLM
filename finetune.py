@@ -224,6 +224,11 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         help="If set, adam statistics for codes will be stored as float16 (exp_avg and v_hat) or bfloat16(exp_avg_sq)",
     )
     parser.add_argument(
+        '--offload_optimizer',
+        action="store_true",
+        help="If set, adam statistics will be offloaded to RAM",
+    )
+    parser.add_argument(
         '--offload_teacher_params',
         action="store_true",
         help="If set, the teacher model will be offloaded to RAM and paged using FSDP's CPUOffload",
@@ -584,6 +589,7 @@ def create_pv_optimizer(args: argparse.Namespace, student_model: FullyShardedDat
                         named_quantized_params: Dict[str, QuantizedWeight]) -> torch.optim.Optimizer:
     """Create optimizer for PV-Tuning using a de-quantized student model and a dictionary of quantized weights"""
     named_dequantized_params = get_original_named_parameters_from_fsdp_module(student_model)
+    opt_device = torch.device('cpu') if args.offload_optimizer else next(student_model.parameters()).device
     assert all(name in named_dequantized_params for name in named_quantized_params)
     return StraightThroughAdamW(
         named_dequantized_params=named_dequantized_params,
@@ -594,16 +600,19 @@ def create_pv_optimizer(args: argparse.Namespace, student_model: FullyShardedDat
             exp_avg_dtype=torch.float16 if args.code_adam_16bit else args.master_dtype,
             exp_avg_sq_dtype=torch.bfloat16 if args.code_adam_16bit else args.master_dtype,
             v_hat_max_dtype=torch.float16 if args.code_adam_16bit else args.master_dtype,
+            exp_avg_device=opt_device, exp_avg_sq_device=opt_device, v_hat_max_device=opt_device,
         ) if args.update_codes else None,
         update_codebooks_and_scales=dict(
             lr=args.lr, betas=(args.adam_beta1, args.adam_beta2),
             lamb=args.lamb, debias=args.debias, amsgrad=args.amsgrad, compute_dtype=args.master_dtype,
             exp_avg_dtype=args.master_dtype, exp_avg_sq_dtype=args.master_dtype, v_hat_max_dtype=args.master_dtype,
+            exp_avg_device=opt_device, exp_avg_sq_device=opt_device, v_hat_max_device=opt_device,
         ) if args.update_codebooks_and_scales else None,
         update_non_quantized_parameters=dict(
             lr=args.lr, betas=(args.adam_beta1, args.adam_beta2),
             lamb=args.lamb, debias=args.debias, amsgrad=args.amsgrad, compute_dtype=args.master_dtype,
             exp_avg_dtype=args.master_dtype, exp_avg_sq_dtype=args.master_dtype, v_hat_max_dtype=args.master_dtype,
+            exp_avg_device=opt_device, exp_avg_sq_device=opt_device, v_hat_max_device=opt_device,
         ) if args.update_non_quantized_parameters else None,
         delta_decay=args.delta_decay,
         max_code_change_per_step=args.max_code_change_per_step,
@@ -638,11 +647,13 @@ def create_p_optimizer(args: argparse.Namespace, student_model: FullyShardedData
         raise RuntimeError("When asked to update_codes, one should create_pv_optimizer, but this is create_p_optimizer")
     assert len(all_trainable_params) > 0, ("found no trainable parameters. Did you specify update_codes, "
                                            "update_codebooks_and_scales or update_non_quantized_parameters?")
+    opt_device = torch.device('cpu') if args.offload_optimizer else next(student_model.parameters()).device
     return ConfigurableAdamW(
         params=list(all_trainable_params),
         lr=args.lr, betas=(args.adam_beta1, args.adam_beta2),
         lamb=args.lamb, debias=args.debias, amsgrad=args.amsgrad, compute_dtype=args.master_dtype,
         exp_avg_dtype=args.master_dtype, exp_avg_sq_dtype=args.master_dtype, v_hat_max_dtype=args.master_dtype,
+        exp_avg_device=opt_device, exp_avg_sq_device=opt_device, v_hat_max_device=opt_device,
     )
 
 
