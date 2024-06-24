@@ -484,7 +484,7 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> FullyS
     transformer_block_types = infer_module_classes(model, args.block_type)
     base_model, lm_head = model.base_model, model.get_output_embeddings()
 
-    def auto_wrap_policy(module, recurse, **_etc):
+    def auto_wrap_policy(module, recurse, **_etc) -> bool:
         return recurse or (module in (base_model, lm_head)) or isinstance(module, transformer_block_types)
 
     model = FullyShardedDataParallel(model, cpu_offload=CPUOffload(offload_params=args.offload_teacher_params),
@@ -562,8 +562,8 @@ def load_student_model(
 
     base_model, lm_head = student_model.base_model, student_model.get_output_embeddings()
 
-    def auto_wrap_policy(module, recurse, **_etc):
-        return recurse or (module in (base_model, lm_head)) or isinstance(module, block_types_to_wrap),
+    def auto_wrap_policy(module, recurse, **_etc) -> bool:
+        return recurse or (module in (base_model, lm_head)) or isinstance(module, block_types_to_wrap)
 
     student_model = FullyShardedDataParallel(student_model, use_orig_params=True, mixed_precision=mixed_precision,
                                              device_id=device, auto_wrap_policy=auto_wrap_policy)
