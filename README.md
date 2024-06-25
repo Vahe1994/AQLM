@@ -274,30 +274,40 @@ For larger models one would need multi-GPU training. At the moment, FSDP trainin
 
 ### Zero-shot benchmarks via LM Evaluation Harness
 
-To perform zero-shot evaluation, we use [Language Model Evaluation Harness](https://github.com/EleutherAI/lm-evaluation-harness) framework with slight modifications. This repository contains a copy of LM Evaluation Harness repo from early 2023 in `lm-eval-harness` folder. 
+To perform zero-shot evaluation, we adopt [Language Model Evaluation Harness](https://github.com/EleutherAI/lm-evaluation-harness) framework. Our code works with models in standard `transformers`` format and may (optionally) load
+the weights of a quantized model via `--aqlm_checkpoint_path` argument.
 
-Before running the code make sure that you have all the requirements and dependencies of `lm-eval-harness` installed. To install them run:
-```
-pip install -r lm-evaluation-harness/requirements.txt
-```
+The evalution results in PV-Tuning were produced with `lm-eval=0.4.0`. 
 
-The main script launching the evaluation procedure is `lmeval.py` .
+To run evaluation make sure that proper version is installed or install it via:
+`pip install lm-eval==0.4.0`. 
 
+The main script for launching the evaluation procedure is `lmeval.py`.
 
 ```bash
 export CUDA_VISIBLE_DEVICES=0,1,2,3  # optional: select GPUs
-export QUANTZED_MODEL=<PATH_TO_SAVED_QUANTIZED_MODEL_FROM_MAIN.py>
+export QUANTIZED_MODEL=<PATH_TO_SAVED_QUANTIZED_MODEL_FROM_MAIN.py>
 export MODEL_PATH=<INSERT_PATH_TO_ORIINAL_MODEL_ON_HUB>
 export DATASET=<INSERT DATASET NAME OR PATH TO CUSTOM DATA>
-export WANDB_PROJECT=MY_AQ_LM_EVAL
+export WANDB_PROJECT=MY_AQLM_EVAL
 export WANDB_NAME=COOL_EVAL_NAME
 
+# for 0-shot evals
 python lmeval.py \
     --model hf-causal \
     --model_args pretrained=$MODEL_PATH,dtype=float16,use_accelerate=True \
-    --load $QUANTZED_MODEL \
     --tasks winogrande,piqa,hellaswag,arc_easy,arc_challenge \
-    --batch_size 1
+    --batch_size <EVAL_BATCH_SIZE> \
+    --aqlm_checkpoint_path QUANTIZED_MODEL # if evaluating quantized model
+
+# for 5-shot MMLU
+python lmeval.py \
+    --model hf-causal \
+    --model_args pretrained=$MODEL_PATH,dtype=float16,use_accelerate=True \
+    --tasks mmlu \
+    --batch_size <EVAL_BATCH_SIZE> \
+    --num_fewshot 5 \
+    --aqlm_checkpoint_path QUANTIZED_MODEL # if evaluating quantized model
 ```
 
 ### Preparing models for inference
