@@ -27,7 +27,7 @@ from src.aq_ops import master_rank_first, one_rank_at_a_time, is_signed, IntCode
 from src.configurable_adam import ConfigurableAdamW
 from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
 from src.memory_efficient_loss import compute_kl_divergence_loss_values
-from src.modelutils import get_model
+from src.modelutils import get_model, is_model_for_causal_lm
 from src.pv_utils import get_original_named_parameters_from_fsdp_module, split_quantized_weights_between_ranks, \
     YourQuantizedWeightIsInAnotherRank, infer_module_classes, create_dequantized_model
 from src.pv_optimizer import StraightThroughAdamW
@@ -485,18 +485,12 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> transf
 
     model.config.use_cache = False
     transformer_block_types = infer_module_classes(model, args.block_type)
-    base_model, lm_head = model.base_model, model.get_output_embeddings()
 
-    def auto_wrap_policy(module, recurse, **_etc) -> bool:
-        return recurse or (module in (base_model, lm_head)) or isinstance(module, transformer_block_types)
-
-    model = FullyShardedDataParallel(
-        model, device_id=device, auto_wrap_policy=auto_wrap_policy,
-        cpu_offload=CPUOffload(offload_params=args.offload_teacher_params), limit_all_gathers=args.limit_all_gathers
-    ).module
-    assert isinstance(model, transformers.PreTrainedModel)
-    assert isinstance(model.base_model, FullyShardedDataParallel)
-    assert isinstance(model.get_output_embeddings(), FullyShardedDataParallel)
+    model = wrap_model_with_fsdp_(
+        model, device_id=device,
+        cpu_offload=CPUOffload(offload_params=args.offload_teacher_params), limit_all_gathers=args.limit_all_gathers,
+        auto_wrap_policy = lambda module, recurse, **_etc: recurse or isinstance(module, transformer_block_types),
+    )
     return model
 
 
@@ -565,18 +559,14 @@ def load_student_model(
         if torch.distributed.get_rank() == 0:
             print(f"Not using FSDP native MixedPrecision; Local amp_dtype={args.amp_dtype}.")
 
-    base_model, lm_head = student_model.base_model, student_model.get_output_embeddings()
-
-    def auto_wrap_policy(module, recurse, **_etc) -> bool:
-        return recurse or (module in (base_model, lm_head)) or isinstance(module, block_types_to_wrap)
-
-    student_model = FullyShardedDataParallel(
-        student_model, use_orig_params=True, device_id=device, auto_wrap_policy=auto_wrap_policy,
-        limit_all_gathers=args.limit_all_gathers, mixed_precision=mixed_precision,
-    ).module #TODO un-hack this, explicitly wrap body and lm_head OR extract into a function with comment
-    assert isinstance(student_model, transformers.PreTrainedModel)
-    assert isinstance(student_model.base_model, FullyShardedDataParallel)
-    assert isinstance(student_model.get_output_embeddings(), FullyShardedDataParallel)
+    student_model = wrap_model_with_fsdp_(
+        student_model,
+        use_orig_params=True,
+        auto_wrap_policy=lambda module, recurse, **_etc: recurse or isinstance(module, block_types_to_wrap),
+        limit_all_gathers=args.limit_all_gathers,
+        mixed_precision=mixed_precision,
+        device_id=device,
+    )
 
     if named_quantized_params is not None:
         if torch.distributed.get_world_size() > 1:
@@ -590,6 +580,21 @@ def load_student_model(
                 assert isinstance(quantized_weight, YourQuantizedWeightIsInAnotherRank)
 
     return student_model, named_quantized_params
+
+
+def wrap_model_with_fsdp_(model: transformers.PreTrainedModel, **kwargs) -> transformers.PreTrainedModel:
+    """Wrap a model *ForCausalLM components: transformer and lm_head are wrapped as FSDP instances"""
+    assert isinstance(model, transformers.PreTrainedModel) and is_model_for_causal_lm(model)
+    accounted_parameters = set(nn.ModuleList([model.base_model, model.get_output_embeddings()]).parameters())
+    for name, param in model.named_parameters():
+        # If code fails with the assert below, it might be benign, but still needs checking
+        assert param in accounted_parameters, (f"FSDP wrapper currently assumes all model parameters to be in either "
+                                               f"base model or lm head, but found param {name} that is neither.")
+    setattr(model, model.base_model_prefix, FullyShardedDataParallel(model.base_model, **kwargs))
+    assert isinstance(model.base_model, FullyShardedDataParallel)
+    model.set_output_embeddings(FullyShardedDataParallel(model.get_output_embeddings(), **kwargs))
+    assert isinstance(model.get_output_embeddings(), FullyShardedDataParallel)
+    return model
 
 
 def create_pv_optimizer(args: argparse.Namespace, student_model: transformers.PreTrainedModel,
