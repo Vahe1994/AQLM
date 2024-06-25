@@ -234,6 +234,9 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         help="If set, the teacher model will be offloaded to RAM and paged using FSDP's CPUOffload",
     )
     parser.add_argument(
+        '--limit_all_gathers', action="store_true", help="sets limit_all_gathers in both FSDP instances",
+    )
+    parser.add_argument(
         '--lamb', action='store_true', help="If set, use Lamb (aka Adam with trust ratio)",
     )
     parser.add_argument(
@@ -470,7 +473,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     return lm_dataset
 
 
-def load_teacher_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
+def load_teacher_model(args: argparse.Namespace, device: torch.device) -> transformers.PreTrainedModel:
     """Load unquantized model with frozen parameters"""
     model = get_model(
         args.base_model, load_quantized=None, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
@@ -487,17 +490,19 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> FullyS
     def auto_wrap_policy(module, recurse, **_etc) -> bool:
         return recurse or (module in (base_model, lm_head)) or isinstance(module, transformer_block_types)
 
-    model = FullyShardedDataParallel(model, cpu_offload=CPUOffload(offload_params=args.offload_teacher_params),
-                                     device_id=device, auto_wrap_policy=auto_wrap_policy)
-    assert isinstance(model.module, transformers.PreTrainedModel)
-    assert isinstance(model.module.base_model, FullyShardedDataParallel)
-    assert isinstance(model.module.get_output_embeddings(), FullyShardedDataParallel)
+    model = FullyShardedDataParallel(
+        model, device_id=device, auto_wrap_policy=auto_wrap_policy,
+        cpu_offload=CPUOffload(offload_params=args.offload_teacher_params), limit_all_gathers=args.limit_all_gathers
+    ).module
+    assert isinstance(model, transformers.PreTrainedModel)
+    assert isinstance(model.base_model, FullyShardedDataParallel)
+    assert isinstance(model.get_output_embeddings(), FullyShardedDataParallel)
     return model
 
 
 def load_student_model(
         args: argparse.Namespace, device: torch.device, dequantize: bool
-) -> Tuple[FullyShardedDataParallel, Optional[Dict[str, QuantizedWeight]]]:
+) -> Tuple[transformers.PreTrainedModel, Optional[Dict[str, QuantizedWeight]]]:
     """
     load student model for fine-tuning. If dequantize is set, dequantize all quantized weights to accumulate full grads
     """
@@ -565,11 +570,13 @@ def load_student_model(
     def auto_wrap_policy(module, recurse, **_etc) -> bool:
         return recurse or (module in (base_model, lm_head)) or isinstance(module, block_types_to_wrap)
 
-    student_model = FullyShardedDataParallel(student_model, use_orig_params=True, mixed_precision=mixed_precision,
-                                             device_id=device, auto_wrap_policy=auto_wrap_policy)
-    assert isinstance(student_model.module, transformers.PreTrainedModel)
-    assert isinstance(student_model.module.base_model, FullyShardedDataParallel)
-    assert isinstance(student_model.module.get_output_embeddings(), FullyShardedDataParallel)
+    student_model = FullyShardedDataParallel(
+        student_model, use_orig_params=True, device_id=device, auto_wrap_policy=auto_wrap_policy,
+        limit_all_gathers=args.limit_all_gathers, mixed_precision=mixed_precision,
+    ).module #TODO un-hack this, explicitly wrap body and lm_head OR extract into a function with comment
+    assert isinstance(student_model, transformers.PreTrainedModel)
+    assert isinstance(student_model.base_model, FullyShardedDataParallel)
+    assert isinstance(student_model.get_output_embeddings(), FullyShardedDataParallel)
 
     if named_quantized_params is not None:
         if torch.distributed.get_world_size() > 1:
