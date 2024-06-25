@@ -620,7 +620,7 @@ def trigger_fsdp_lazy_init_(
     (student_model(**dummy_batch).logits * 0).sum().backward()
 
 
-def create_pv_optimizer(args: argparse.Namespace, student_model: transformers.PreTrainedModel,
+def create_pv_optimizer(args: argparse.Namespace, student_model: FullyShardedDataParallel,
                         named_quantized_params: Dict[str, QuantizedWeight]) -> torch.optim.Optimizer:
     """Create optimizer for PV-Tuning using a de-quantized student model and a dictionary of quantized weights"""
     named_dequantized_params = get_original_named_parameters_from_fsdp_module(student_model)
@@ -659,7 +659,7 @@ def create_pv_optimizer(args: argparse.Namespace, student_model: transformers.Pr
     )
 
 
-def create_p_optimizer(args: argparse.Namespace, student_model: transformers.PreTrainedModel) -> torch.optim.Optimizer:
+def create_p_optimizer(args: argparse.Namespace, student_model: FullyShardedDataParallel) -> torch.optim.Optimizer:
     """Create optimizer for training only continuous parameters of a quantized model"""
     quantized_weight_continuous_parameters = set()
     for module in student_model.modules():
