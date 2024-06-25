@@ -476,7 +476,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
     return lm_dataset
 
 
-def load_teacher_model(args: argparse.Namespace, device: torch.device) -> transformers.PreTrainedModel:
+def load_teacher_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
     """Load unquantized model with frozen parameters"""
     model = get_model(
         args.base_model, load_quantized=None, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
@@ -500,7 +500,7 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> transf
 
 def load_student_model(
         args: argparse.Namespace, device: torch.device, dequantize: bool
-) -> Tuple[transformers.PreTrainedModel, Optional[Dict[str, QuantizedWeight]]]:
+) -> Tuple[FullyShardedDataParallel, Optional[Dict[str, QuantizedWeight]]]:
     """
     load student model for fine-tuning. If dequantize is set, dequantize all quantized weights to accumulate full grads
     """
@@ -588,7 +588,7 @@ def load_student_model(
 
 
 def wrap_model_with_fsdp_(
-        model: transformers.PreTrainedModel, auto_wrap_policy: callable, **kwargs) -> transformers.PreTrainedModel:
+        model: transformers.PreTrainedModel, auto_wrap_policy: callable, **kwargs) -> FullyShardedDataParallel:
     """Wrap a model *ForCausalLM components: transformer and lm_head are wrapped as FSDP instances"""
     assert isinstance(model, transformers.PreTrainedModel) and is_model_for_causal_lm(model)
     base_model, lm_head = model.base_model, model.get_output_embeddings()
@@ -596,14 +596,9 @@ def wrap_model_with_fsdp_(
     def _modified_auto_wrap_policy(module, recurse, **kwargs):
         return auto_wrap_policy(module, recurse, **kwargs) or (module in (base_model, lm_head))
 
-    model = FullyShardedDataParallel(model, auto_wrap_policy=_modified_auto_wrap_policy, **kwargs).module
-    # tricky code above: we wrap model with FSDP to invoke auto_wrap_policy, but immediately unwrap with .module;
-    # this is intentional, so that the root model is not a FSDP instance, but both transformer and LM head are FSDP.
-    # this allows us to call both full_model.forward() in eval and call .forward on individual components. If the full
-    # model were also wrapped with FSDP, calling full_model.forward would raise an error because inner FSDPs have
-    # _is_root==True and this causes _share_state_and_init_handle_attrs to fail (2.2.0<torch<=2.3.1)
+    model = FullyShardedDataParallel(model, auto_wrap_policy=_modified_auto_wrap_policy, **kwargs)
 
-    assert isinstance(model, transformers.PreTrainedModel)
+    assert isinstance(model.module, transformers.PreTrainedModel)
     assert isinstance(model.base_model, FullyShardedDataParallel)
     assert isinstance(model.get_output_embeddings(), FullyShardedDataParallel)
     return model
@@ -803,7 +798,7 @@ def save_p_model(args: argparse.Namespace, quantized_model: FullyShardedDataPara
 
 
 def compute_loss_on_batch(
-        batch: dict, teacher_model: transformers.PreTrainedModel, student_model: transformers.PreTrainedModel,
+        batch: dict, teacher_model: FullyShardedDataParallel, student_model: FullyShardedDataParallel,
         *, amp_dtype: Optional[torch.dtype], max_tokens_per_chunk: Optional[int]
 ) -> torch.Tensor:
     if max_tokens_per_chunk is not None:  # chunked inference, transformer and lm head must be separate FSDP instances
@@ -954,6 +949,15 @@ def main():
 
     load_training_state(args, metadata, student_model, optimizer)
     torch.distributed.barrier()
+
+    print("Initializing FSDP root")
+    dummy_batch = tokenizer("I am the monument to all your sins")
+    dummy_batch = {k: v.to(device) for k, v in dummy_batch.items()}
+    with torch.no_grad():
+        teacher_model(**dummy_batch)
+    (student_model(**dummy_batch).logits * 0).sum().backward()
+    del dummy_batch
+    # TODO if init works make this into a function
 
     for current_epoch in range(args.max_epochs):
         if current_epoch < metadata['current_epoch']:
