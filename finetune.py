@@ -605,6 +605,21 @@ def wrap_model_with_fsdp_(
     return model
 
 
+def _trigger_fsdp_lazy_init(
+        tokenizer: transformers.PreTrainedTokenizer,
+        teacher_model: FullyShardedDataParallel,
+        student_model: FullyShardedDataParallel,
+        device: torch.device,
+):
+    """Trigger FullyShardedDataParallel lazy init in the correct order to allow both training and eval"""
+    print("Initializing FSDP root")
+    dummy_batch = tokenizer("I am the monument to all your sins", return_tensors="pt")
+    dummy_batch = {k: v.to(device) for k, v in dummy_batch.items()}
+    with torch.no_grad():
+        teacher_model(**dummy_batch)
+    (student_model(**dummy_batch).logits * 0).sum().backward()
+
+
 def create_pv_optimizer(args: argparse.Namespace, student_model: transformers.PreTrainedModel,
                         named_quantized_params: Dict[str, QuantizedWeight]) -> torch.optim.Optimizer:
     """Create optimizer for PV-Tuning using a de-quantized student model and a dictionary of quantized weights"""
@@ -950,15 +965,7 @@ def main():
 
     load_training_state(args, metadata, student_model, optimizer)
     torch.distributed.barrier()
-
-    print("Initializing FSDP root")
-    dummy_batch = tokenizer("I am the monument to all your sins", return_tensors="pt")
-    dummy_batch = {k: v.to(device) for k, v in dummy_batch.items()}
-    with torch.no_grad():
-        teacher_model(**dummy_batch)
-    (student_model(**dummy_batch).logits * 0).sum().backward()
-    del dummy_batch
-    # TODO if init works make this into a function
+    _trigger_fsdp_lazy_init(tokenizer, teacher_model, student_model, device)
 
     for current_epoch in range(args.max_epochs):
         if current_epoch < metadata['current_epoch']:
