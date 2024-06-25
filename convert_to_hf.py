@@ -5,7 +5,7 @@ import shutil
 
 import torch
 from tqdm.auto import trange
-from transformers import AutoConfig, AutoModelForCausalLM
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 try:
     import safetensors
@@ -142,6 +142,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to load model",
     )
+    parser.add_argument(
+        "--save_tokenizer",
+        action="store_true",
+        help="Whether to save tokenizer",
+    )
     args = parser.parse_args()
 
     old_config = AutoConfig.from_pretrained(args.model, trust_remote_code=args.trust_remote_code)
@@ -168,3 +173,7 @@ if __name__ == "__main__":
         model = AutoModelForCausalLM.from_pretrained(args.out_path, trust_remote_code=True, torch_dtype=torch.float16)
         shutil.rmtree(args.out_path)
         model.save_pretrained(args.out_path)
+
+    if args.save_tokenizer:
+        tokenizer = AutoTokenizer.from_pretrained(args.model)
+        tokenizer.save_pretrained(args.out_path)
