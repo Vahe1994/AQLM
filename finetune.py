@@ -593,6 +593,11 @@ def wrap_model_with_fsdp_(
     assert isinstance(model, transformers.PreTrainedModel) and is_model_for_causal_lm(model)
     base_model, lm_head = model.base_model, model.get_output_embeddings()
 
+    accounted_parameters = set(base_model.parameters()) | set(lm_head.parameters())
+    for name, param in base_model.parameters():
+        if param not in accounted_parameters and param.requires_grad:
+            raise ValueError(f"Parameter {name} requires grad and is not a part of transformer or lm_head.")
+
     def _modified_auto_wrap_policy(module, recurse, **kwargs):
         return auto_wrap_policy(module, recurse, **kwargs) or (module in (base_model, lm_head))
 
