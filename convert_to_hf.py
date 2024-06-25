@@ -173,7 +173,7 @@ if __name__ == "__main__":
         model = AutoModelForCausalLM.from_pretrained(args.out_path, trust_remote_code=True, torch_dtype=torch.float16)
         shutil.rmtree(args.out_path)
         model.save_pretrained(args.out_path)
-    
+
     if args.save_tokenizer:
         tokenizer = AutoTokenizer.from_pretrained(args.model)
         tokenizer.save_pretrained(args.out_path)
