@@ -285,7 +285,7 @@ def group_texts(examples: Sequence[Sequence[int]], block_size: int, add_labels: 
     return result
 
 
-@torch.inference_mode()
+@torch.no_grad()
 def evaluate_perplexity(
         model: nn.Module,
         data: torch.Tensor,
