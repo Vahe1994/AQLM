@@ -587,17 +587,24 @@ def load_student_model(
     return student_model, named_quantized_params
 
 
-def wrap_model_with_fsdp_(model: transformers.PreTrainedModel, **kwargs) -> transformers.PreTrainedModel:
+def wrap_model_with_fsdp_(
+        model: transformers.PreTrainedModel, auto_wrap_policy: callable, **kwargs) -> transformers.PreTrainedModel:
     """Wrap a model *ForCausalLM components: transformer and lm_head are wrapped as FSDP instances"""
     assert isinstance(model, transformers.PreTrainedModel) and is_model_for_causal_lm(model)
-    accounted_parameters = set(nn.ModuleList([model.base_model, model.get_output_embeddings()]).parameters())
-    for name, param in model.named_parameters():
-        # If code fails with the assert below, it might be benign, but still needs checking
-        assert param in accounted_parameters, (f"FSDP wrapper currently assumes all model parameters to be in either "
-                                               f"base model or lm head, but found param {name} that is neither.")
-    setattr(model, model.base_model_prefix, FullyShardedDataParallel(model.base_model, **kwargs))
+    base_model, lm_head = model.base_model, model.get_output_embeddings()
+
+    def _modified_auto_wrap_policy(module, recurse, **kwargs):
+        return auto_wrap_policy(module, recurse, **kwargs) or (module in (base_model, lm_head))
+
+    model = FullyShardedDataParallel(model, auto_wrap_policy=_modified_auto_wrap_policy, **kwargs).module
+    # tricky code above: we wrap model with FSDP to invoke auto_wrap_policy, but immediately unwrap with .module;
+    # this is intentional, so that the root model is not a FSDP instance, but both transformer and LM head are FSDP.
+    # this allows us to call both full_model.forward() in eval and call .forward on individual components. If the full
+    # model were also wrapped with FSDP, calling full_model.forward would raise an error because inner FSDPs have
+    # _is_root==True and this causes _share_state_and_init_handle_attrs to fail (2.2.0<torch<=2.3.1)
+
+    assert isinstance(model, transformers.PreTrainedModel)
     assert isinstance(model.base_model, FullyShardedDataParallel)
-    model.set_output_embeddings(FullyShardedDataParallel(model.get_output_embeddings(), **kwargs))
     assert isinstance(model.get_output_embeddings(), FullyShardedDataParallel)
     return model
 
