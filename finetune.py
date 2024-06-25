@@ -605,7 +605,7 @@ def wrap_model_with_fsdp_(
     return model
 
 
-def _trigger_fsdp_lazy_init(
+def trigger_fsdp_lazy_init_(
         tokenizer: transformers.PreTrainedTokenizer,
         teacher_model: FullyShardedDataParallel,
         student_model: FullyShardedDataParallel,
@@ -965,7 +965,7 @@ def main():
 
     load_training_state(args, metadata, student_model, optimizer)
     torch.distributed.barrier()
-    _trigger_fsdp_lazy_init(tokenizer, teacher_model, student_model, device)
+    trigger_fsdp_lazy_init_(tokenizer, teacher_model, student_model, device)
 
     for current_epoch in range(args.max_epochs):
         if current_epoch < metadata['current_epoch']:
