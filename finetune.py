@@ -592,7 +592,7 @@ def load_student_model(
     return student_model, named_quantized_params
 
 
-def create_pv_optimizer(args: argparse.Namespace, student_model: FullyShardedDataParallel,
+def create_pv_optimizer(args: argparse.Namespace, student_model: transformers.PreTrainedModel,
                         named_quantized_params: Dict[str, QuantizedWeight]) -> torch.optim.Optimizer:
     """Create optimizer for PV-Tuning using a de-quantized student model and a dictionary of quantized weights"""
     named_dequantized_params = get_original_named_parameters_from_fsdp_module(student_model)
@@ -631,7 +631,7 @@ def create_pv_optimizer(args: argparse.Namespace, student_model: FullyShardedDat
     )
 
 
-def create_p_optimizer(args: argparse.Namespace, student_model: FullyShardedDataParallel) -> torch.optim.Optimizer:
+def create_p_optimizer(args: argparse.Namespace, student_model: transformers.PreTrainedModel) -> torch.optim.Optimizer:
     """Create optimizer for training only continuous parameters of a quantized model"""
     quantized_weight_continuous_parameters = set()
     for module in student_model.modules():
