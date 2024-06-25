@@ -294,7 +294,7 @@ export WANDB_NAME=COOL_EVAL_NAME
 
 # for 0-shot evals
 python lmeval.py \
-    --model hf-causal \
+    --model hf \
     --model_args pretrained=$MODEL_PATH,dtype=float16,use_accelerate=True \
     --tasks winogrande,piqa,hellaswag,arc_easy,arc_challenge \
     --batch_size <EVAL_BATCH_SIZE> \
@@ -302,7 +302,7 @@ python lmeval.py \
 
 # for 5-shot MMLU
 python lmeval.py \
-    --model hf-causal \
+    --model hf \
     --model_args pretrained=$MODEL_PATH,dtype=float16,use_accelerate=True \
     --tasks mmlu \
     --batch_size <EVAL_BATCH_SIZE> \
