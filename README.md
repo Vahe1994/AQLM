@@ -295,7 +295,7 @@ export WANDB_NAME=COOL_EVAL_NAME
 # for 0-shot evals
 python lmeval.py \
     --model hf \
-    --model_args pretrained=$MODEL_PATH,dtype=float16,use_accelerate=True \
+    --model_args pretrained=$MODEL_PATH,dtype=float16,parallelize=True \
     --tasks winogrande,piqa,hellaswag,arc_easy,arc_challenge \
     --batch_size <EVAL_BATCH_SIZE> \
     --aqlm_checkpoint_path QUANTIZED_MODEL # if evaluating quantized model
@@ -303,7 +303,7 @@ python lmeval.py \
 # for 5-shot MMLU
 python lmeval.py \
     --model hf \
-    --model_args pretrained=$MODEL_PATH,dtype=float16,use_accelerate=True \
+    --model_args pretrained=$MODEL_PATH,dtype=float16,parallelize=True \
     --tasks mmlu \
     --batch_size <EVAL_BATCH_SIZE> \
     --num_fewshot 5 \
