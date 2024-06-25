@@ -951,7 +951,7 @@ def main():
     torch.distributed.barrier()
 
     print("Initializing FSDP root")
-    dummy_batch = tokenizer("I am the monument to all your sins")
+    dummy_batch = tokenizer("I am the monument to all your sins", return_tensors="pt")
     dummy_batch = {k: v.to(device) for k, v in dummy_batch.items()}
     with torch.no_grad():
         teacher_model(**dummy_batch)
