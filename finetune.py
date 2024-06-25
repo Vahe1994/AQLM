@@ -237,6 +237,9 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         '--limit_all_gathers', action="store_true", help="sets limit_all_gathers in both FSDP instances",
     )
     parser.add_argument(
+        '--forward_prefetch', action="store_true", help="sets forward_prefetech in both FSDP instances",
+    )
+    parser.add_argument(
         '--lamb', action='store_true', help="If set, use Lamb (aka Adam with trust ratio)",
     )
     parser.add_argument(
@@ -486,12 +489,13 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> transf
     model.config.use_cache = False
     transformer_block_types = infer_module_classes(model, args.block_type)
 
-    model = wrap_model_with_fsdp_(
-        model, device_id=device,
-        cpu_offload=CPUOffload(offload_params=args.offload_teacher_params), limit_all_gathers=args.limit_all_gathers,
-        auto_wrap_policy = lambda module, recurse, **_etc: recurse or isinstance(module, transformer_block_types),
+    return wrap_model_with_fsdp_(
+        model,
+        auto_wrap_policy=lambda module, recurse, **_etc: recurse or isinstance(module, transformer_block_types),
+        limit_all_gathers=args.limit_all_gathers,
+        forward_prefetch=args.forward_prefetch,
+        device_id=device,
     )
-    return model
 
 
 def load_student_model(
@@ -564,6 +568,7 @@ def load_student_model(
         use_orig_params=True,
         auto_wrap_policy=lambda module, recurse, **_etc: recurse or isinstance(module, block_types_to_wrap),
         limit_all_gathers=args.limit_all_gathers,
+        forward_prefetch=args.forward_prefetch,
         mixed_precision=mixed_precision,
         device_id=device,
     )
