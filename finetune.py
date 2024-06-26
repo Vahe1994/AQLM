@@ -594,8 +594,8 @@ def wrap_model_with_fsdp_(
     base_model, lm_head = model.base_model, model.get_output_embeddings()
 
     accounted_parameters = set(base_model.parameters()) | set(lm_head.parameters())
-    for name, param in base_model.parameters():  # if this assert fails, the code may still run fine, but you need to
-        if param not in accounted_parameters and param.requires_grad:  # double-check that FSDP wraps model properly
+    for name, param in base_model.named_parameters():  # if this assert fails, the code may still run fine, but you need
+        if param not in accounted_parameters and param.requires_grad:  # to double-check that FSDP wraps model properly
             raise ValueError(f"Parameter {name} requires grad and is not a part of transformer or lm_head.")
 
     def _modified_auto_wrap_policy(module, recurse, **kwargs):
