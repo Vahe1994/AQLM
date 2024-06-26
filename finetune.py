@@ -811,9 +811,14 @@ def compute_loss_on_batch(
         batch: dict, teacher_model: transformers.PreTrainedModel, student_model: transformers.PreTrainedModel,
         *, amp_dtype: Optional[torch.dtype], max_tokens_per_chunk: Optional[int]
 ) -> torch.Tensor:
+    device = torch.device(f"cuda:{torch.distributed.get_rank()}")
+
     if max_tokens_per_chunk is not None:  # chunked inference, transformer and lm head must be separate FSDP instances
         with torch.no_grad():
+            teacher_model.base_model.to(device)
             teacher_hidden_states = teacher_model.base_model(**batch).last_hidden_state
+            teacher_model.base_model.to(torch.device("cpu"))
+
         with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
             student_hidden_states = student_model.base_model(**batch).last_hidden_state
             return compute_kl_divergence_loss_values(
