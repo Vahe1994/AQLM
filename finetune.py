@@ -496,13 +496,11 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> transf
 
     model = wrap_model_with_fsdp_(
         model,
-        _wrap=True,
         device_id=device,
         auto_wrap_policy=auto_wrap_policy,
         cpu_offload=CPUOffload(offload_params=args.offload_teacher_params),
         limit_all_gathers=args.limit_all_gathers,
-        # forward_prefetch=args.forward_prefetch, TODO
-
+        forward_prefetch=args.forward_prefetch
     )
     assert isinstance(model, transformers.PreTrainedModel)
     assert isinstance(model.base_model, FullyShardedDataParallel)
@@ -600,22 +598,19 @@ def load_student_model(
 
 
 def wrap_model_with_fsdp_(
-        model: transformers.PreTrainedModel, auto_wrap_policy: callable, _wrap: bool = True, **kwargs) -> transformers.PreTrainedModel:
+        model: transformers.PreTrainedModel, auto_wrap_policy: callable, **kwargs) -> transformers.PreTrainedModel:
     """Wrap a model *ForCausalLM components: transformer and lm_head are wrapped as FSDP instances"""
     assert isinstance(model, transformers.PreTrainedModel) and is_model_for_causal_lm(model)
+    base_model, lm_head = model.base_model, model.get_output_embeddings()
 
-    if _wrap:
-        base_model, lm_head = model.base_model, model.get_output_embeddings()
+    accounted_parameters = set(base_model.parameters()) | set(lm_head.parameters())
+    for name, param in base_model.named_parameters():  # if this assert fails, the code may still run fine, but you need
+        if param not in accounted_parameters and param.requires_grad:  # to double-check that FSDP wraps model properly
+            raise ValueError(f"Parameter {name} requires grad and is not a part of transformer or lm_head.")
+    del accounted_parameters  # important: dereference parameters, otherwise it will cause an OOM during fsdp init
 
-        accounted_parameters = set(base_model.parameters()) | set(lm_head.parameters())
-        for name, param in base_model.named_parameters():  # if this assert fails, the code may still run fine, but you need
-            if param not in accounted_parameters and param.requires_grad:  # to double-check that FSDP wraps model properly
-                raise ValueError(f"Parameter {name} requires grad and is not a part of transformer or lm_head.")
-
-        def _modified_auto_wrap_policy(module, recurse, **_etc):
-            return auto_wrap_policy(module, recurse, **_etc) or (module in (base_model, lm_head))
-    else:
-        _modified_auto_wrap_policy = auto_wrap_policy
+    def _modified_auto_wrap_policy(module, recurse, **_etc):
+        return auto_wrap_policy(module, recurse, **_etc) or (module in (base_model, lm_head))
 
     model = FullyShardedDataParallel(model, auto_wrap_policy=_modified_auto_wrap_policy, **kwargs).module
     # tricky code above: we wrap model with FSDP to invoke auto_wrap_policy, but immediately unwrap with .module;
