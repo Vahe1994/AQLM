@@ -599,7 +599,7 @@ def load_student_model(
 
 
 def wrap_model_with_fsdp_(
-        model: transformers.PreTrainedModel, _wrap: bool=True, auto_wrap_policy: callable, **kwargs) -> transformers.PreTrainedModel:
+        model: transformers.PreTrainedModel, auto_wrap_policy: callable, _wrap: bool=True, **kwargs) -> transformers.PreTrainedModel:
     """Wrap a model *ForCausalLM components: transformer and lm_head are wrapped as FSDP instances"""
     assert isinstance(model, transformers.PreTrainedModel) and is_model_for_causal_lm(model)
 
