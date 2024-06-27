@@ -489,14 +489,27 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> transf
     model.config.use_cache = False
     transformer_block_types = infer_module_classes(model, args.block_type)
 
-    return wrap_model_with_fsdp_(
-        model,
-        auto_wrap_policy=lambda module, recurse, **_etc: recurse or isinstance(module, transformer_block_types),
-        cpu_offload=CPUOffload(offload_params=args.offload_teacher_params),
-        limit_all_gathers=args.limit_all_gathers,
-        forward_prefetch=args.forward_prefetch,
-        device_id=device,
-    )
+    # return wrap_model_with_fsdp_(
+    #     model,
+    #     auto_wrap_policy=lambda module, recurse, **_etc: recurse or isinstance(module, transformer_block_types),
+    #     cpu_offload=CPUOffload(offload_params=args.offload_teacher_params),
+    #     limit_all_gathers=args.limit_all_gathers,
+    #     forward_prefetch=args.forward_prefetch,
+    #     device_id=device,
+    # )#TODO
+    base_model, lm_head = model.base_model, model.get_output_embeddings()
+
+    def auto_wrap_policy(module, recurse, **_etc) -> bool:
+        return recurse or (module in (base_model, lm_head)) or isinstance(module, transformer_block_types)
+
+    model = FullyShardedDataParallel(
+        model, device_id=device, auto_wrap_policy=auto_wrap_policy,
+        cpu_offload=CPUOffload(offload_params=args.offload_teacher_params), limit_all_gathers=args.limit_all_gathers
+    ).module
+    assert isinstance(model, transformers.PreTrainedModel)
+    assert isinstance(model.base_model, FullyShardedDataParallel)
+    assert isinstance(model.get_output_embeddings(), FullyShardedDataParallel)
+    return model
 
 
 def load_student_model(
