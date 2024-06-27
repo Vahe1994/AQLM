@@ -831,7 +831,7 @@ def compute_loss_on_batch(
                 student_hidden_states=student_hidden_states, student_lm_head=student_model.get_output_embeddings(),
                 teacher_hidden_states=teacher_hidden_states, teacher_lm_head=teacher_model.get_output_embeddings(),
                 max_tokens_per_chunk=max_tokens_per_chunk, checkpoint_last_chunk=False,
-                use_reentrant=False, determinism_check="none",
+                use_reentrant=True, determinism_check="none",
             ).mean()
 
     else:  # combined inference without gradient checkpointing
