@@ -497,11 +497,12 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> transf
     model = wrap_model_with_fsdp_(
         model,
         _wrap=False,
+        device_id=device,
         auto_wrap_policy=auto_wrap_policy,
         cpu_offload=CPUOffload(offload_params=args.offload_teacher_params),
         limit_all_gathers=args.limit_all_gathers,
-        forward_prefetch=args.forward_prefetch,
-        device_id=device,
+        # forward_prefetch=args.forward_prefetch,
+
     )
     assert isinstance(model, transformers.PreTrainedModel)
     assert isinstance(model.base_model, FullyShardedDataParallel)
