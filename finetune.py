@@ -494,7 +494,7 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> transf
     def auto_wrap_policy(module, recurse, **_etc) -> bool:
         return recurse or (module in (base_model, lm_head)) or isinstance(module, transformer_block_types)
 
-    model = wrap_model_with_fsdp_(
+    return wrap_model_with_fsdp_(
         model,
         device_id=device,
         auto_wrap_policy=auto_wrap_policy,
@@ -502,10 +502,6 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> transf
         limit_all_gathers=args.limit_all_gathers,
         forward_prefetch=args.forward_prefetch
     )
-    assert isinstance(model, transformers.PreTrainedModel)
-    assert isinstance(model.base_model, FullyShardedDataParallel)
-    assert isinstance(model.get_output_embeddings(), FullyShardedDataParallel)
-    return model
 
 
 def load_student_model(
@@ -822,9 +818,12 @@ def compute_loss_on_batch(
         batch: dict, teacher_model: transformers.PreTrainedModel, student_model: transformers.PreTrainedModel,
         *, amp_dtype: Optional[torch.dtype], max_tokens_per_chunk: Optional[int]
 ) -> torch.Tensor:
+
     if max_tokens_per_chunk is not None:  # chunked inference, transformer and lm head must be separate FSDP instances
         with torch.no_grad():
+            teacher_model.base_model.to(torch.device(f"cuda:{torch.distributed.get_rank()}"))
             teacher_hidden_states = teacher_model.base_model(**batch).last_hidden_state
+            teacher_model.base_model.to(torch.device("cpu"))
         with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
             student_hidden_states = student_model.base_model(**batch).last_hidden_state
             return compute_kl_divergence_loss_values(
