@@ -489,23 +489,20 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> transf
     model.config.use_cache = False
     transformer_block_types = infer_module_classes(model, args.block_type)
 
-    # return wrap_model_with_fsdp_(
-    #     model,
-    #     auto_wrap_policy=lambda module, recurse, **_etc: recurse or isinstance(module, transformer_block_types),
-    #     cpu_offload=CPUOffload(offload_params=args.offload_teacher_params),
-    #     limit_all_gathers=args.limit_all_gathers,
-    #     forward_prefetch=args.forward_prefetch,
-    #     device_id=device,
-    # )#TODO
     base_model, lm_head = model.base_model, model.get_output_embeddings()
 
     def auto_wrap_policy(module, recurse, **_etc) -> bool:
         return recurse or (module in (base_model, lm_head)) or isinstance(module, transformer_block_types)
 
-    model = FullyShardedDataParallel(
-        model, device_id=device, auto_wrap_policy=auto_wrap_policy,
-        cpu_offload=CPUOffload(offload_params=args.offload_teacher_params), limit_all_gathers=args.limit_all_gathers
-    ).module
+    model = wrap_model_with_fsdp_(
+        model,
+        _wrap=False,
+        auto_wrap_policy=auto_wrap_policy,
+        cpu_offload=CPUOffload(offload_params=args.offload_teacher_params),
+        limit_all_gathers=args.limit_all_gathers,
+        forward_prefetch=args.forward_prefetch,
+        device_id=device,
+    )
     assert isinstance(model, transformers.PreTrainedModel)
     assert isinstance(model.base_model, FullyShardedDataParallel)
     assert isinstance(model.get_output_embeddings(), FullyShardedDataParallel)
@@ -602,18 +599,22 @@ def load_student_model(
 
 
 def wrap_model_with_fsdp_(
-        model: transformers.PreTrainedModel, auto_wrap_policy: callable, **kwargs) -> transformers.PreTrainedModel:
+        model: transformers.PreTrainedModel, _wrap: bool=True, auto_wrap_policy: callable, **kwargs) -> transformers.PreTrainedModel:
     """Wrap a model *ForCausalLM components: transformer and lm_head are wrapped as FSDP instances"""
     assert isinstance(model, transformers.PreTrainedModel) and is_model_for_causal_lm(model)
-    base_model, lm_head = model.base_model, model.get_output_embeddings()
 
-    accounted_parameters = set(base_model.parameters()) | set(lm_head.parameters())
-    for name, param in base_model.named_parameters():  # if this assert fails, the code may still run fine, but you need
-        if param not in accounted_parameters and param.requires_grad:  # to double-check that FSDP wraps model properly
-            raise ValueError(f"Parameter {name} requires grad and is not a part of transformer or lm_head.")
+    if _wrap:
+        base_model, lm_head = model.base_model, model.get_output_embeddings()
 
-    def _modified_auto_wrap_policy(module, recurse, **kwargs):
-        return auto_wrap_policy(module, recurse, **kwargs) or (module in (base_model, lm_head))
+        accounted_parameters = set(base_model.parameters()) | set(lm_head.parameters())
+        for name, param in base_model.named_parameters():  # if this assert fails, the code may still run fine, but you need
+            if param not in accounted_parameters and param.requires_grad:  # to double-check that FSDP wraps model properly
+                raise ValueError(f"Parameter {name} requires grad and is not a part of transformer or lm_head.")
+
+        def _modified_auto_wrap_policy(module, recurse, **_etc):
+            return auto_wrap_policy(module, recurse, **_etc) or (module in (base_model, lm_head))
+    else:
+        _modified_auto_wrap_policy = auto_wrap_policy
 
     model = FullyShardedDataParallel(model, auto_wrap_policy=_modified_auto_wrap_policy, **kwargs).module
     # tricky code above: we wrap model with FSDP to invoke auto_wrap_policy, but immediately unwrap with .module;
