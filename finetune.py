@@ -825,6 +825,8 @@ def compute_loss_on_batch(
             teacher_model.base_model.to(device)
             teacher_hidden_states = teacher_model.base_model(**batch).last_hidden_state
             teacher_model.base_model.cpu()
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
         with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
             student_hidden_states = student_model.base_model(**batch).last_hidden_state
             return compute_kl_divergence_loss_values(
