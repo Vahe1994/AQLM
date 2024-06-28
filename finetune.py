@@ -489,6 +489,10 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> transf
     model.config.use_cache = False
     transformer_block_types = infer_module_classes(model, args.block_type)
 
+    print("FORCIBLY CASTING EMBEDDINGS TO FP16")#TODO
+    model.set_output_embeddings(model.get_output_embeddings().to(torch.bfloat16))
+    model.set_input_embeddings(model.get_input_embeddings().to(torch.bfloat16))
+
     base_model, lm_head = model.base_model, model.get_output_embeddings()
 
     def auto_wrap_policy(module, recurse, **_etc) -> bool:
