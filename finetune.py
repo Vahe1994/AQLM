@@ -692,7 +692,7 @@ def create_p_optimizer(args: argparse.Namespace, student_model: transformers.Pre
         params=list(all_trainable_params),
         lr=args.lr, betas=(args.adam_beta1, args.adam_beta2),
         lamb=args.lamb, debias=args.debias, amsgrad=args.amsgrad, compute_dtype=args.master_dtype,
-        exp_avg_dtype=args.master_dtype, exp_avg_sq_dtype=args.master_dtype, v_hat_max_dtype=args.master_dtype,
+        exp_avg_dtype=torch.bfloat16, exp_avg_sq_dtype=torch.bfloat16, v_hat_max_dtype=torch.bfloat16,#TODO unhardcode
         exp_avg_device=opt_device, exp_avg_sq_device=opt_device, v_hat_max_device=opt_device,
     )
 
