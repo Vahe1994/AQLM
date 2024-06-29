@@ -488,11 +488,6 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> transf
 
     model.config.use_cache = False
     transformer_block_types = infer_module_classes(model, args.block_type)
-
-    print("FORCIBLY CASTING EMBEDDINGS TO FP16")#TODO
-    model.set_output_embeddings(model.get_output_embeddings().to(torch.bfloat16))
-    model.set_input_embeddings(model.get_input_embeddings().to(torch.bfloat16))
-
     base_model, lm_head = model.base_model, model.get_output_embeddings()
 
     def auto_wrap_policy(module, recurse, **_etc) -> bool:
@@ -531,6 +526,10 @@ def load_student_model(
     if args.gradient_checkpointing:
         student_model.gradient_checkpointing_enable()
         student_model.enable_input_require_grads()
+
+    print("FORCIBLY CASTING STUDENT EMBEDDINGS TO BF16")  # TODO
+    student_model.set_output_embeddings(student_model.get_output_embeddings().to(torch.bfloat16))
+    student_model.set_input_embeddings(student_model.get_input_embeddings().to(torch.bfloat16))
 
     # convert QuantizedModel state dict to make it compatible with FSDP
     for name, module in student_model.named_modules():
@@ -692,7 +691,7 @@ def create_p_optimizer(args: argparse.Namespace, student_model: transformers.Pre
         params=list(all_trainable_params),
         lr=args.lr, betas=(args.adam_beta1, args.adam_beta2),
         lamb=args.lamb, debias=args.debias, amsgrad=args.amsgrad, compute_dtype=args.master_dtype,
-        exp_avg_dtype=torch.bfloat16, exp_avg_sq_dtype=torch.bfloat16, v_hat_max_dtype=torch.bfloat16,#TODO unhardcode
+        exp_avg_dtype=args.master_dtype, exp_avg_sq_dtype=args.master_dtype, v_hat_max_dtype=args.master_dtype,
         exp_avg_device=opt_device, exp_avg_sq_device=opt_device, v_hat_max_device=opt_device,
     )
 
