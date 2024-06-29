@@ -530,7 +530,7 @@ def load_student_model(
 
     print("CASTING STUDENT EMBEDS TO BF16")#TODO
     student_model.set_output_embeddings(student_model.get_output_embeddings().to(torch.bfloat16))
-    student_model.set_input_embeddings(student_model.set_input_embeddings().to(torch.bfloat16))
+    student_model.set_input_embeddings(student_model.get_input_embeddings().to(torch.bfloat16))
 
 
     # convert QuantizedModel state dict to make it compatible with FSDP
