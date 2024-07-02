@@ -33,7 +33,7 @@ def create_dequantized_model(
         model: transformers.PreTrainedModel, *,
         reuse_non_quantized: bool,
         dequantized_dtype: Optional[torch.dtype] = None
-):
+) -> transformers.PreTrainedModel:
     """
     Create a version of the model where all QuanizedWeight and derivative layers are de-quantized and cast to dtype.
     :param model: model to be dequantized (out-of-place)
