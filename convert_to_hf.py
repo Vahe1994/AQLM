@@ -5,9 +5,7 @@ import shutil
 
 import torch
 from tqdm.auto import trange
-from transformers import AutoConfig, AutoModelForCausalLM
-
-from src.modelutils import get_layers_prefix
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 try:
     import safetensors
@@ -33,13 +31,30 @@ def pack_int_data(data: torch.IntTensor, nbits: int) -> torch.IntTensor:
     return data.to(get_int_dtype(nbits))
 
 
+def get_num_layers(config) -> int:
+    match config.model_type:
+        case "llama" | "mistral" | "mixtral" | "gemma" | "phi3" | "qwen2":
+            return config.num_hidden_layers
+        case unknown_type:
+            raise NotImplementedError(f"Can't get number of layers for {unknown_type}")
+
+
+def get_layers_prefix(config) -> str:
+    match config.model_type:
+        case "llama" | "mistral" | "mixtral" | "gemma" | "phi3" | "qwen2":
+            return "model.layers"
+        case unknown_type:
+            raise NotImplementedError(f"Can't get layers prefix for {unknown_type}")
+
+
 def get_converted_state_dict(config, nbits: int, in_path: os.PathLike) -> [dict, list[str]]:
     state_dict = {}
     linear_weights_not_to_quantize = []
 
+    num_layers = get_num_layers(config)
     layers_prefix = get_layers_prefix(config)
 
-    for i in trange(config.num_hidden_layers):
+    for i in trange(num_layers):
         layer = torch.load(os.path.join(in_path, f"{i}.pth"))
         for name, p in layer.named_parameters():
             if torch.is_floating_point(p.data):
@@ -117,10 +132,31 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to save in safetensors format",
     )
+    parser.add_argument(
+        "--trust_remote_code",
+        action="store_true",
+        help="Whether to trust remote code",
+    )
+    parser.add_argument(
+        "--load_model",
+        action="store_true",
+        help="Whether to load model",
+    )
+    parser.add_argument(
+        "--save_tokenizer",
+        action="store_true",
+        help="Whether to save tokenizer",
+    )
     args = parser.parse_args()
 
-    old_config = AutoConfig.from_pretrained(args.model)
+    old_config = AutoConfig.from_pretrained(args.model, trust_remote_code=args.trust_remote_code)
     metadata = get_metadata(args.in_path)
+
+    # load dummy model
+    if args.load_model:
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model, trust_remote_code=args.trust_remote_code, low_cpu_mem_usage=True, torch_dtype=torch.float16
+        )
 
     state_dict, linear_weights_not_to_quantize = get_converted_state_dict(
         old_config, metadata["nbits_per_codebook"], args.in_path
@@ -137,3 +173,7 @@ if __name__ == "__main__":
         model = AutoModelForCausalLM.from_pretrained(args.out_path, trust_remote_code=True, torch_dtype=torch.float16)
         shutil.rmtree(args.out_path)
         model.save_pretrained(args.out_path)
+
+    if args.save_tokenizer:
+        tokenizer = AutoTokenizer.from_pretrained(args.model)
+        tokenizer.save_pretrained(args.out_path)
