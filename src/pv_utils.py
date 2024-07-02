@@ -6,11 +6,10 @@ import time
 from collections import defaultdict
 from copy import deepcopy
 from itertools import chain
-from typing import Tuple, Optional, Dict, List
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import transformers
-
 from torch import nn as nn
 
 from src.aq import QuantizedLinear, QuantizedWeight

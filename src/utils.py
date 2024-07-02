@@ -4,14 +4,12 @@ from __future__ import annotations
 import contextlib
 import functools
 import os
-
-from typing import Optional, Callable, Sequence, Iterator, Union, Any, List, Iterable
+from typing import Any, Callable, Iterable, Iterator, List, Optional, Sequence, Union
 
 import torch
-from torch import nn
 import torch.distributed
+from torch import nn
 from torch.nn import functional as F
-
 
 ellipsis = type(...)
 

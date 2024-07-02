@@ -1,16 +1,16 @@
 """Module containing utilities for straight-through fine-tuning of language models"""
 import random
 from enum import Enum, auto
-from typing import Optional, Dict, Tuple, List, Any, Sequence, Iterator, Union
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple, Union
 
 import torch
-import torch.nn as nn
 import torch.distributed
+import torch.nn as nn
 from torch.optim.optimizer import StateDict
 
 from src.aq import QuantizedWeight
 from src.configurable_adam import ConfigurableAdamW
-from src.pv_utils import print_runtime_stats, YourQuantizedWeightIsInAnotherRank
+from src.pv_utils import YourQuantizedWeightIsInAnotherRank, print_runtime_stats
 
 
 class ParameterRole(Enum):

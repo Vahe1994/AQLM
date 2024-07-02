@@ -1,8 +1,8 @@
 import math
 from contextlib import contextmanager
+from typing import Iterable, Optional, Tuple, Union
 
 import torch
-from typing import Tuple, Iterable, Union, Optional
 
 from src.utils import maybe_script
 

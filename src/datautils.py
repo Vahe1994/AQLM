@@ -5,9 +5,9 @@ from typing import Optional, Sequence
 
 import numpy as np
 import torch
-from torch import nn
 import torch.distributed
 from datasets import load_dataset
+from torch import nn
 from tqdm import trange
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer

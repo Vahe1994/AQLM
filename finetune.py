@@ -6,31 +6,40 @@ import argparse
 import os
 from contextlib import nullcontext
 from functools import partial
-from typing import Optional, Dict, Tuple
+from typing import Dict, Optional, Tuple
 
-import torch.optim
-import transformers
 import datasets
-
 import torch
-import torch.nn.functional as F
-import torch.utils.data
 import torch.distributed
+import torch.nn.functional as F
+import torch.optim
+import torch.utils.data
+import transformers
 from torch import nn as nn
-from torch.distributed.fsdp import FullyShardedDataParallel, MixedPrecision, StateDictType, FullStateDictConfig, \
-    CPUOffload
+from torch.distributed.fsdp import (
+    CPUOffload,
+    FullStateDictConfig,
+    FullyShardedDataParallel,
+    MixedPrecision,
+    StateDictType,
+)
 from tqdm.auto import tqdm
 
 from convert_legacy_model_format import load_quantized_model_with_old_pickle
 from src.aq import QuantizedWeight
-from src.utils import master_rank_first, one_rank_at_a_time, is_signed, IntCodes
 from src.configurable_adam import ConfigurableAdamW
-from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
+from src.datautils import evaluate_perplexity, get_loaders, group_texts, split_long_texts
 from src.memory_efficient_loss import compute_kl_divergence_loss_values
 from src.modelutils import get_model, is_model_for_causal_lm
-from src.pv_utils import get_original_named_parameters_from_fsdp_module, split_quantized_weights_between_ranks, \
-    YourQuantizedWeightIsInAnotherRank, infer_module_classes, create_dequantized_model
 from src.pv_optimizer import StraightThroughAdamW
+from src.pv_utils import (
+    YourQuantizedWeightIsInAnotherRank,
+    create_dequantized_model,
+    get_original_named_parameters_from_fsdp_module,
+    infer_module_classes,
+    split_quantized_weights_between_ranks,
+)
+from src.utils import IntCodes, is_signed, master_rank_first, one_rank_at_a_time
 
 try:
     import wandb

@@ -2,12 +2,12 @@
 import math
 import random
 import time
-from typing import Optional, List
+from typing import List, Optional
 
 import torch
 import torch.nn.functional as F
 
-from src.utils import maybe_script, _dequantize_weight
+from src.utils import _dequantize_weight, maybe_script
 
 
 @torch.inference_mode
