@@ -20,7 +20,7 @@ from src.modelutils import (
     get_layers,
     get_lm_logits,
     get_model,
-    get_model_head,
+    get_model_head_with_norm,
     get_sequential_groups,
     save_not_quantized_weights,
 )
@@ -397,7 +397,7 @@ def perplexity_eval(model: PreTrainedModel, testenc: torch.LongTensor, args: Nam
         torch.cuda.empty_cache()
         inps, outs = outs, inps
 
-    get_model_head(model).to(device)
+    get_model_head_with_norm(model).to(device)
     testenc = testenc.to(device)
     nsamples_per_device = len(inps[0])
     assert len(set(map(len, inps[:-1]))) <= 1 and len(inps[-1]) <= len(inps[0])
@@ -415,7 +415,7 @@ def perplexity_eval(model: PreTrainedModel, testenc: torch.LongTensor, args: Nam
     ppl = torch.exp(torch.stack(nlls).sum() / (nsamples * args.model_seqlen)).item()
     print(f"\n{args.dataset_name} perplexity = {ppl:.4f}\n")
 
-    get_model_head(model).to(torch.device("cpu"))
+    get_model_head_with_norm(model).to(torch.device("cpu"))
 
     if args.wandb:
         wandb.log({args.dataset_name: ppl})
