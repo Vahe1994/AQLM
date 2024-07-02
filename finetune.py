@@ -64,6 +64,18 @@ def add_model_args(parser: argparse.ArgumentParser):
         help="Model seqlen and calibration data context length.",
     )
     parser.add_argument(
+        "--master_dtype",
+        type=str,
+        default="float32",
+        help="data type for storing master parameters and computing optimizer updates",
+    )
+    parser.add_argument(
+        "--embed_dtype",
+        type=str,
+        default=None,
+        help="data type for storing master input and output embeddings; defaults to master_dtype",
+    )
+    parser.add_argument(
         "--load_dtype",
         type=str,
         default="auto",
@@ -75,12 +87,6 @@ def add_model_args(parser: argparse.ArgumentParser):
         type=str,
         default=None,
         help="if specified, runs automated mixed precision with this dtype",
-    )
-    parser.add_argument(
-        "--master_dtype",
-        type=str,
-        default="float32",
-        help="data type for storing master parameters and computing optimizer updates",
     )
     parser.add_argument(
         "--straight_through_buffer_dtype",
@@ -521,17 +527,17 @@ def load_student_model(
             attn_implementation=args.attn_implementation
         ).to(args.master_dtype)
 
+    if args.embed_dtype != args.master_dtype:
+        student_model.set_output_embeddings(student_model.get_output_embeddings().to(args.embed_dtype))
+        student_model.set_input_embeddings(student_model.get_input_embeddings().to(args.embed_dtype))
+
+
     student_model.config.use_cache = False
     student_model.train(True)  # note: HF gradient checkpoints do not work for some models without train(True); see
     # https://github.com/huggingface/transformers/blob/2d92db8/src/transformers/models/llama/modeling_llama.py#L1006
     if args.gradient_checkpointing:
         student_model.gradient_checkpointing_enable()
         student_model.enable_input_require_grads()
-
-    print("CASTING STUDENT EMBEDS TO BF16")#TODO
-    student_model.set_output_embeddings(student_model.get_output_embeddings().to(torch.bfloat16))
-    student_model.set_input_embeddings(student_model.get_input_embeddings().to(torch.bfloat16))
-
 
     # convert QuantizedModel state dict to make it compatible with FSDP
     for name, module in student_model.named_modules():
@@ -892,10 +898,12 @@ def main():
     assert args.batch_size % (world_size * args.microbatch_size) == 0
     grad_accumulation_steps = args.batch_size // (world_size * args.microbatch_size)
 
-    args.load_dtype = getattr(torch, args.load_dtype) if args.load_dtype != 'auto' else 'auto'
-    args.amp_dtype = getattr(torch, args.amp_dtype) if args.amp_dtype is not None else None
-    args.code_dtype = getattr(torch, args.code_dtype) if args.code_dtype is not None else None
     args.master_dtype = getattr(torch, args.master_dtype)
+    args.embed_dtype = getattr(torch, args.embed_dtype) if args.embed_dtype is not None else args.master_dtype
+    args.load_dtype = getattr(torch, args.load_dtype) if args.load_dtype != 'auto' else 'auto'
+    args.code_dtype = getattr(torch, args.code_dtype) if args.code_dtype is not None else None
+    args.amp_dtype = getattr(torch, args.amp_dtype) if args.amp_dtype is not None else None
+
     if args.straight_through_buffer_dtype is not None:
         args.straight_through_buffer_dtype = getattr(torch, args.straight_through_buffer_dtype)
     else:
