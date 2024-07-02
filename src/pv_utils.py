@@ -68,7 +68,7 @@ def create_dequantized_model(
             memo[id(module)] = dequantized_module
             master_parameters[f"{name}.weight"] = quantized_weight
             if dequantized_module.bias is not module.bias:
-                master_parameters[f"{name}.weight"] = module.bias
+                master_parameters[f"{name}.bias"] = module.bias
             all_quantized_weight_parameters |= set(quantized_weight.parameters())
             assert all(param in {dequantized_module.weight, dequantized_module.bias}
                        for param in dequantized_module.parameters())
