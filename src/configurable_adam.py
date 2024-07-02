@@ -4,7 +4,7 @@ from contextlib import contextmanager
 import torch
 from typing import Tuple, Iterable, Union, Optional
 
-from src.aq_ops import maybe_script
+from src.utils import maybe_script
 
 NO_DATA = torch.empty(0)
 

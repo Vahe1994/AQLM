@@ -10,7 +10,7 @@ import torch.nn as nn
 from torch.nn.parallel.scatter_gather import Gather
 
 from src.aq import QuantizedWeight
-from src.aq_ops import ellipsis
+from src.utils import ellipsis
 
 
 class AQEngine(nn.Module):

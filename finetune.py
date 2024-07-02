@@ -23,7 +23,7 @@ from tqdm.auto import tqdm
 
 from convert_legacy_model_format import load_quantized_model_with_old_pickle
 from src.aq import QuantizedWeight
-from src.aq_ops import master_rank_first, one_rank_at_a_time, is_signed, IntCodes
+from src.utils import master_rank_first, one_rank_at_a_time, is_signed, IntCodes
 from src.configurable_adam import ConfigurableAdamW
 from src.datautils import group_texts, split_long_texts, get_loaders, evaluate_perplexity
 from src.memory_efficient_loss import compute_kl_divergence_loss_values

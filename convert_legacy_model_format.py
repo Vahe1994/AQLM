@@ -14,7 +14,7 @@ import transformers.models
 from torch import nn
 
 from src.aq import QuantizedWeight, QuantizedLinear
-from src.aq_ops import is_signed
+from src.utils import is_signed
 from src.modelutils import get_model, save_quantized_model
 
 

@@ -7,7 +7,7 @@ from typing import Optional, List
 import torch
 import torch.nn.functional as F
 
-from src.aq_ops import maybe_script, _dequantize_weight
+from src.utils import maybe_script, _dequantize_weight
 
 
 @torch.inference_mode
