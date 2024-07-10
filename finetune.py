@@ -636,14 +636,16 @@ def trigger_fsdp_lazy_init_(
         teacher_model: FullyShardedDataParallel,
         student_model: FullyShardedDataParallel,
         device: torch.device,
+        amp_dtype: Optional[torch.dtype],
 ):
     """Trigger FullyShardedDataParallel lazy init in the correct order to allow both training and eval"""
     print("Initializing FSDP root")
     dummy_batch = tokenizer("I am the monument to all your sins", return_tensors="pt")
     dummy_batch = {k: v.to(device) for k, v in dummy_batch.items()}
-    with torch.no_grad():
-        teacher_model(**dummy_batch)
-    (student_model(**dummy_batch).logits * 0).sum().backward()
+    with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
+        with torch.no_grad():
+            teacher_model(**dummy_batch)
+        (student_model(**dummy_batch).logits * 0).sum().backward()
 
 
 def create_pv_optimizer(args: argparse.Namespace, student_model: FullyShardedDataParallel,
