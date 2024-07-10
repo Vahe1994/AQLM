@@ -995,7 +995,7 @@ def main():
 
     load_training_state(args, metadata, student_model, optimizer)
     torch.distributed.barrier()
-    trigger_fsdp_lazy_init_(tokenizer, teacher_model, student_model, device)
+    trigger_fsdp_lazy_init_(tokenizer, teacher_model, student_model, device, amp_dtype=args.amp_dtype)
 
     for current_epoch in range(args.max_epochs):
         if current_epoch < metadata['current_epoch']:
