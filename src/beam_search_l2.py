@@ -147,7 +147,7 @@ def beam_search_optimal_codes(
     return flat_new_codes.view_as(prev_codes)
 
 
-# @maybe_script
+@maybe_script
 def _beam_search_update_codes_groupwise(
         reference: torch.Tensor,
         codebooks: torch.Tensor,
