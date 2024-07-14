@@ -56,6 +56,12 @@ def add_model_args(parser: argparse.ArgumentParser):
         help="path or name of the teacher model",
     )
     parser.add_argument(
+        "--teacher_model",
+        type=str,
+        required=True,
+        help="path or name of the teacher model",
+    )
+    parser.add_argument(
         "--quantized_model",
         type=str,
         required=True,
@@ -499,7 +505,7 @@ def prepare_training_dataset(args: argparse.Namespace, tokenizer: transformers.P
 def load_teacher_model(args: argparse.Namespace, device: torch.device) -> FullyShardedDataParallel:
     """Load unquantized model with frozen parameters"""
     model = get_model(
-        args.base_model, load_quantized=None, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
+        args.teacher_model, load_quantized=None, dtype=args.load_dtype, trust_remote_code=args.trust_remote_code,
         attn_implementation=args.attn_implementation,
     ).to(dtype=args.load_dtype if args.load_dtype != 'auto' else None)
     model.train(False)
