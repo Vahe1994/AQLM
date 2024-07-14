@@ -845,30 +845,36 @@ def compute_loss_on_batch(
         batch: dict, teacher_model: FullyShardedDataParallel, student_model: FullyShardedDataParallel,
         *, amp_dtype: Optional[torch.dtype], max_tokens_per_chunk: Optional[int]
 ) -> torch.Tensor:
-    if max_tokens_per_chunk is not None:  # chunked inference, transformer and lm head must be separate FSDP instances
-        with torch.no_grad():
-            teacher_hidden_states = teacher_model.base_model(**batch).last_hidden_state
-        with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
-            student_hidden_states = student_model.base_model(**batch).last_hidden_state
-            return compute_kl_divergence_loss_values(
-                student_hidden_states=student_hidden_states, student_lm_head=student_model.get_output_embeddings(),
-                teacher_hidden_states=teacher_hidden_states, teacher_lm_head=teacher_model.get_output_embeddings(),
-                max_tokens_per_chunk=max_tokens_per_chunk, checkpoint_last_chunk=False,
-                use_reentrant=False, determinism_check="none",
-            ).mean()
+    with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
+        student_logprobs = F.log_softmax(student_model(**batch).logits, dim=-1)[:, :-1]
+    labels = batch["input_ids"][:, 1:]
+    loss = F.cross_entropy(input=student_logprobs.flatten(0, -2), target=labels.flatten(), reduction="mean")
+    return loss
 
-    else:  # combined inference without gradient checkpointing
-        with torch.no_grad():
-            teacher_logprobs = F.log_softmax(teacher_model(**batch).logits, dim=-1)
-        with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
-            student_logprobs = F.log_softmax(student_model(**batch).logits, dim=-1)
-            loss = F.kl_div(
-                input=student_logprobs.flatten(0, -2),
-                target=teacher_logprobs.flatten(0, -2),
-                log_target=True,
-                reduction="batchmean",
-            ).mean()
-        return loss
+    # if max_tokens_per_chunk is not None:  # chunked inference, transformer and lm head must be separate FSDP instances
+    #     with torch.no_grad():
+    #         teacher_hidden_states = teacher_model.base_model(**batch).last_hidden_state
+    #     with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
+    #         student_hidden_states = student_model.base_model(**batch).last_hidden_state
+    #         return compute_kl_divergence_loss_values(
+    #             student_hidden_states=student_hidden_states, student_lm_head=student_model.get_output_embeddings(),
+    #             teacher_hidden_states=teacher_hidden_states, teacher_lm_head=teacher_model.get_output_embeddings(),
+    #             max_tokens_per_chunk=max_tokens_per_chunk, checkpoint_last_chunk=False,
+    #             use_reentrant=False, determinism_check="none",
+    #         ).mean()
+    #
+    # else:  # combined inference without gradient checkpointing
+    #     with torch.no_grad():
+    #         teacher_logprobs = F.log_softmax(teacher_model(**batch).logits, dim=-1)
+    #     with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
+    #         student_logprobs = F.log_softmax(student_model(**batch).logits, dim=-1)
+    #         loss = F.kl_div(
+    #             input=student_logprobs.flatten(0, -2),
+    #             target=teacher_logprobs.flatten(0, -2),
+    #             log_target=True,
+    #             reduction="batchmean",
+    #         ).mean()
+    #     return loss
 
 
 def compute_validation_perplexities(args: argparse.Namespace, model: nn.Module, eval_datasets: dict):
