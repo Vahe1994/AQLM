@@ -10,7 +10,7 @@ from transformers import AutoConfig, AutoModelForCausalLM
 
 MODEL_ERROR_MSG = "Unsupported model type {} - only 'llama', 'Yi', 'opt', 'falcon', 'phi3' are supported"
 FALCON_TYPES = ("falcon", "refinedweb", "refinedwebmodel")
-LLAMA_LIKE = ("llama", "Yi", "mistral", "mixtral", "gemma", "cohere", "qwen2")
+LLAMA_LIKE = ("llama", "Yi", "mistral", "mixtral", "gemma", "gemma2", "cohere", "qwen2")
 
 
 @contextmanager
