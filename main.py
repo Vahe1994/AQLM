@@ -24,7 +24,7 @@ from src.modelutils import (
     get_sequential_groups,
     save_not_quantized_weights,
 )
-from src.utils import using_tf32
+from src.utils import using_tf32, maybe_to
 
 try:
     import wandb
@@ -96,6 +96,8 @@ def get_inps(
             model.model.decoder.embed_positions = model.model.decoder.embed_positions.to(device)
             if hasattr(model.model.decoder, "project_in") and model.model.decoder.project_in:
                 model.model.decoder.project_in = model.model.decoder.project_in.to(device)
+        if hasattr(model.model, "rotary_emb"):
+            model.model.rotary_emb = model.model.rotary_emb.to(device)
     device = emb.weight.device  # now default device is the one where the embeddings are.
     layer_device = next(layers[0].parameters()).device
     layers[0] = layers[0].to(device)
@@ -112,6 +114,9 @@ def get_inps(
         for i in range(len(devices))
     ]
     forward_arg_names = ["attention_mask", "position_ids"]
+    # in passing position_ids will be deprecated in transformers v4.45
+    if hasattr(model.model, "rotary_emb"):
+        forward_arg_names.append("position_embeddings")
     if model.config.model_type.lower() in FALCON_TYPES:
         forward_arg_names.append("alibi")
 
@@ -154,6 +159,8 @@ def get_inps(
         model.model.decoder.embed_positions = model.model.decoder.embed_positions.to(emb_device)
         if hasattr(model.model.decoder, "project_in") and model.model.decoder.project_in:
             model.model.decoder.project_in = model.model.decoder.project_in.to(emb_device)
+    if hasattr(model.model, "rotary_emb"):
+        model.model.rotary_emb = model.model.rotary_emb.to(emb_device)
     torch.cuda.empty_cache()
 
     forward_args = {k: cache[k] for k in forward_arg_names}
@@ -197,7 +204,7 @@ def quantize_aq(model: PreTrainedModel, data: Sequence, val_data: Optional[Seque
         print(f"{layer_device_original=}")
         layer = layers[layer_index].to(args.devices[0])
         for k, v in forward_args.items():
-            forward_args[k] = v.to(args.devices[0]) if isinstance(v, torch.Tensor) else v
+            forward_args[k] = maybe_to(v, device=args.devices[0])
 
         if args.true_sequential:
             sequential = get_sequential_groups(model)
@@ -382,7 +389,7 @@ def perplexity_eval(model: PreTrainedModel, testenc: torch.LongTensor, args: Nam
     outs = [torch.zeros_like(inp_tensor, pin_memory=inp_tensor.is_pinned()) for inp_tensor in inps]
     device = args.devices[0]
     for k, v in forward_args.items():
-        forward_args[k] = v.to(device) if isinstance(v, torch.Tensor) else v
+        forward_args[k] = maybe_to(v, device=device)
 
     layers = get_layers(model)
     for i in trange(len(layers), desc="processing eval data by layer"):
@@ -500,12 +507,7 @@ def init_aq_engines_parallel(
     kwargs_by_device = []
     for i in range(len(devices)):
         inputs_by_device.append((layer_replicas[i], names, inps[i], outs[i]))
-        kwargs_by_device.append(
-            {
-                k: (v.to(devices[i], non_blocking=True) if isinstance(v, torch.Tensor) else v)
-                for k, v in forward_args.items()
-            }
-        )
+        kwargs_by_device.append({k: maybe_to(v, device=devices[i], non_blocking=True) for k, v in forward_args.items()})
     aq_handles_by_device: Sequence[Dict[str, AQEngine]] = torch.nn.parallel.parallel_apply(
         funcs_by_device, inputs_by_device, kwargs_by_device, devices=devices
     )
@@ -568,12 +570,7 @@ def update_outs_parallel(
     kwargs_by_device = []
     for i in range(len(devices)):
         inputs_by_device.append((layer_replicas[i], inps[i], outs[i], compute_mse))
-        kwargs_by_device.append(
-            {
-                k: (v.to(devices[i], non_blocking=True) if isinstance(v, torch.Tensor) else v)
-                for k, v in forward_args.items()
-            }
-        )
+        kwargs_by_device.append({k: maybe_to(v, device=devices[i], non_blocking=True) for k, v in forward_args.items()})
     out_losses_by_device: Sequence[Sequence[float]] = torch.nn.parallel.parallel_apply(
         funcs_by_device, inputs_by_device, kwargs_by_device, devices=devices
     )

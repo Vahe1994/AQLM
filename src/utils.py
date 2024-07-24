@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import functools
 import os
 from typing import Any, Callable, Iterable, Iterator, List, Optional, Sequence, Union
@@ -117,3 +118,25 @@ def maybe_get_0th_element(x: Union[Any, Sequence[Any]]) -> Any:
 def _extract_into_tensor(tensor_list: List[torch.Tensor], indices: Iterable[int], device=None, dtype=None):
     extracted_items = [maybe_get_0th_element(tensor_list[i]) for i in indices]
     return torch.cat(extracted_items, dim=0).to(device=device, dtype=dtype)
+
+
+def maybe_to(data: Any, *args, **kwargs):
+    """
+    # adopted from https://github.com/Yura52/delu/blob/main/delu/_tensor_ops.py
+    TODO
+    """
+
+    def _maybe_to(x):
+        return maybe_to(x, *args, **kwargs)
+
+    if isinstance(data, torch.Tensor):
+        return data.to(*args, **kwargs)
+    elif isinstance(data, (tuple, list, set)):
+        return type(data)(_maybe_to(x) for x in data)
+    elif isinstance(data, dict):
+        return type(data)((k, _maybe_to(v)) for k, v in data.items())
+    elif dataclasses.is_dataclass(data):
+        return type(data)(**{k: _maybe_to(v) for k, v in vars(data).items()})
+    # do nothing if provided value is not tensor or collection of tensors
+    else:
+        return data
