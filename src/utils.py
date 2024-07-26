@@ -147,6 +147,28 @@ def maybe_get_0th_element(x: Union[Any, Sequence[Any]]) -> Any:
     return x
 
 
+def maybe_to(data: Any, *args, **kwargs):
+    """
+    # adopted from https://github.com/Yura52/delu/blob/main/delu/_tensor_ops.py
+    TODO
+    """
+
+    def _maybe_to(x):
+        return maybe_to(x, *args, **kwargs)
+
+    if isinstance(data, torch.Tensor):
+        return data.to(*args, **kwargs)
+    elif isinstance(data, (tuple, list, set)):
+        return type(data)(_maybe_to(x) for x in data)
+    elif isinstance(data, dict):
+        return type(data)((k, _maybe_to(v)) for k, v in data.items())
+    elif dataclasses.is_dataclass(data):
+        return type(data)(**{k: _maybe_to(v) for k, v in vars(data).items()})
+    # do nothing if provided value is not tensor or collection of tensors
+    else:
+        return data
+
+
 def _extract_into_tensor(tensor_list: List[torch.Tensor], indices: Iterable[int], device=None, dtype=None):
     extracted_items = [maybe_get_0th_element(tensor_list[i]) for i in indices]
     return torch.cat(extracted_items, dim=0).to(device=device, dtype=dtype)
@@ -157,6 +179,7 @@ class IntCodes(nn.Module):
     A storage for integer codes that makes them compatible with FullyShardedDataParallel,
     see https://github.com/pytorch/pytorch/issues/123528 for details
     """
+
     def __init__(self, codes: torch.tensor, storage_dtype: torch.dtype = torch.float64):
         super().__init__()
         assert torch.finfo(storage_dtype).bits % torch.iinfo(codes.dtype).bits == 0
@@ -166,16 +189,17 @@ class IntCodes(nn.Module):
         assert len(codes.untyped_storage()) == codes.nbytes  # no offset / stride / tail
         self.storage_dtype = storage_dtype
         self.data = nn.Parameter(
-            torch.as_tensor(codes.untyped_storage(), device=codes.device, dtype=storage_dtype),
-            requires_grad=False)
+            torch.as_tensor(codes.untyped_storage(), device=codes.device, dtype=storage_dtype), requires_grad=False
+        )
 
     def forward(self):
         assert self.data.is_contiguous() and self.data.dtype == self.storage_dtype
         byte_offset = self.data.storage_offset() * self.data.nbytes // self.data.numel()
         return torch.as_tensor(
-            self.data.untyped_storage()[byte_offset: byte_offset + self.data.nbytes],
-            device=self.data.device, dtype=self.dtype
-        )[:self.numel].view(*self.shape)
+            self.data.untyped_storage()[byte_offset : byte_offset + self.data.nbytes],
+            device=self.data.device,
+            dtype=self.dtype,
+        )[: self.numel].view(*self.shape)
 
 
 @contextlib.contextmanager
