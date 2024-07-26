@@ -59,9 +59,7 @@ def finetune_groupwise(
         replicas[0] = layer
         kwargs_by_device = []
         for device in args.devices:
-            kwargs_by_device.append(
-                {k: (v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v) for k, v in kwargs.items()}
-            )
+            kwargs_by_device.append({k: maybe_to(v, device=device, non_blocking=True) for k, v in kwargs.items()})
 
     # initialize trainable parameters on main device; prepare to send them to replicas
     differentiable_parameters_by_name = {name: param for name, param in layer.named_parameters() if param.requires_grad}
@@ -260,7 +258,7 @@ def _compute_mse_on_batch(
     if inps_batch.shape[0] != 1:  # replicate kwargs to match the batch size
         for name, value in list(kwargs.items()):
             if isinstance(value, torch.Tensor) and value.shape[0] == 1:
-                if name not in ("attention_mask", "position_ids"):
+                if name not in ("attention_mask", "position_ids", "position_embeddings"):
                     warnings.warn(f"Tiling an unexpected kwarg {name} over batch size; make sure this is valid.")
                 repeats = [len(inps_batch)] + [1 for _ in range(value.ndim - 1)]
                 kwargs[name] = value.tile(*repeats)
