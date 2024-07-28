@@ -70,6 +70,11 @@ def get_forward_pass_kernel(
         from .triton_kernel import triton_matmul
 
         return triton_matmul
+    elif (codebooks.device.type, num_codebooks, codebook_size, out_group_size) == ("cpu", 2, 256, 1):
+        from .lut_kernel import LUT_FOLDER
+
+        return torch.ops.aqlm.code2x8_lut_matmat
+        
     elif (codebooks.device.type, codebook_size, out_group_size) == ("cpu", 256, 1):
         from .numba_kernel import numba_gemm_lut
 
