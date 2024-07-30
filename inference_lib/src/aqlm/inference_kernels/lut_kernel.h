@@ -1,10 +1,15 @@
+#pragma once
+
 #include <torch/all.h>
 #include <torch/python.h>
 #include <c10/util/Exception.h>
 
-// #include <bits/stdc++.h>
-// #include <tuple>
-// #include "lib.h"
+#include <executorch/extension/kernel_util/make_boxed_from_unboxed_functor.h>
+#include <executorch/runtime/core/exec_aten/testing_util/tensor_factory.h>
+#include <executorch/runtime/core/portable_type/tensor.h>
+#include <executorch/runtime/kernel/kernel_runtime_context.h>
+#include <executorch/runtime/kernel/operator_registry.h>
+#include <executorch/runtime/platform/runtime.h>
 
 
 inline torch::Tensor scale_bias_unflatten_output(
@@ -64,12 +69,13 @@ void quadruple_for(
     }
 }
 
-torch::Tensor code2x8_lut_matmat(
+torch::Tensor& code2x8_lut_matmat_out(
   const torch::Tensor& input,
   const torch::Tensor& codes,
   const torch::Tensor& codebooks,
   const torch::Tensor& scales,
-  const std::optional<torch::Tensor>& bias
+  const std::optional<torch::Tensor>& bias,
+  torch::Tensor& out
 ) {
   auto input_sizes = input.sizes();
   auto out_features = codes.size(1) * codebooks.size(2);
@@ -94,14 +100,13 @@ torch::Tensor code2x8_lut_matmat(
         flat_output.data_ptr()
     );
   
-  return scale_bias_unflatten_output(
+  out = scale_bias_unflatten_output(
     flat_output,
     scales,
     bias,
     input_sizes
   );
+  return out;
 }
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("code2x8_lut_matmat", &code2x8_lut_matmat, "2x8 (2bit) codebook matrix-matrix product.");
-}
+// EXECUTORCH_LIBRARY(aqlm, "code2x8_lut_matmat.out", code2x8_lut_matmat_out);
