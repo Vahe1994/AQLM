@@ -4,12 +4,8 @@ project(aqlm)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-find_package(Torch REQUIRED)
-find_library(
-    TORCH_PYTHON_LIBRARY torch_python PATHS "${TORCH_INSTALL_PREFIX}/lib"
-)
-
 option(EXECUTORCH_BUILD_KERNELS_OPTIMIZED "" ON)
+option(BUILD_BINDING "Build PyTorch bindings" OFF)
 
 # Include the executorch subdirectory.
 add_subdirectory(
@@ -17,7 +13,6 @@ add_subdirectory(
     ${CMAKE_BINARY_DIR}/../executorch)
 
 add_library(aqlm SHARED
-    ./lut_kernel_pytorch.cpp
     ./lut_kernel.cpp
     ./lut_kernel.h)
 
@@ -31,6 +26,30 @@ target_include_directories(
 target_link_libraries(
     aqlm
     PRIVATE
-    torch
     executorch
     cpublas)
+
+
+if (BUILD_BINDING)
+    find_package(Torch REQUIRED)
+    find_library(
+        TORCH_PYTHON_LIBRARY torch_python PATHS "${TORCH_INSTALL_PREFIX}/lib"
+    )
+
+    add_library(aqlm_bindings SHARED
+        ./lut_kernel_pytorch.cpp)
+
+    target_include_directories(
+        aqlm_bindings
+        PRIVATE
+        /opt/miniconda3/envs/executorch/include/python3.10
+        /Users/blacksamorez/reps
+    )
+    
+    target_link_libraries(
+        aqlm_bindings
+        PRIVATE
+        aqlm
+        torch
+    )
+endif()

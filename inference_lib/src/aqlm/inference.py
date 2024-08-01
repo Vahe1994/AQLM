@@ -7,6 +7,7 @@ import torch.nn as nn
 from aqlm.inference_kernels import get_backward_pass_kernel, get_forward_pass_kernel
 from aqlm.utils import get_int_dtype
 
+from aqlm.inference_kernels.lut_kernel import LUT_FOLDER
 
 class QuantizedLinear(nn.Module):
     def __init__(
@@ -37,11 +38,12 @@ class QuantizedLinear(nn.Module):
 
         # CODES & CODEBOOKS
         self.codebooks = nn.Parameter(
-            torch.empty((num_codebooks, self.codebook_size, out_group_size, in_group_size), **factory_kwargs),
+            torch.rand((num_codebooks, self.codebook_size, out_group_size, in_group_size), **factory_kwargs) * 2 - 1,
             requires_grad=False,
         )  # [num_codebooks, codebook_size, out_group_size, in_group_size]
         self.codes = nn.Parameter(
-            torch.empty(
+            torch.randint(
+                0, 128,
                 (num_out_groups, num_in_groups, num_codebooks),
                 device=device,
                 dtype=get_int_dtype(nbits_per_codebook),
@@ -51,12 +53,12 @@ class QuantizedLinear(nn.Module):
 
         # SCALES
         self.scales = nn.Parameter(
-            torch.empty((num_out_groups, 1, 1, 1), **factory_kwargs), requires_grad=False
+            torch.rand((num_out_groups, 1, 1, 1), **factory_kwargs), requires_grad=False
         )  #  [num_out_groups, 1, 1, 1]
 
         # BIAS
         if bias:
-            self.bias = nn.Parameter(torch.empty(out_features, **factory_kwargs), requires_grad=False)
+            self.bias = nn.Parameter(torch.rand(out_features, **factory_kwargs), requires_grad=False)
         else:
             self.register_parameter("bias", None)
 
@@ -66,13 +68,16 @@ class QuantizedLinear(nn.Module):
         self.use_gemv_rule = None
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        if self.gemv_op is None:
-            self.prepare_matmul_op(input)
+        # if self.gemv_op is None:
+        #     self.prepare_matmul_op(input)
 
-        if self.use_gemv_rule(input):
-            return self.gemv_op.apply(input, self.codes, self.codebooks, self.scales, self.bias)
-        else:
-            return self.gemm_op.apply(input, self.codes, self.codebooks, self.scales, self.bias)
+        return torch.ops.aqlm.code2x8_lut_matmat(
+            input, self.codes, self.codebooks, self.scales, self.bias
+        )
+        # if self.use_gemv_rule(input):
+        #     return self.gemv_op.apply(input, self.codes, self.codebooks, self.scales, self.bias)
+        # else:
+        #     return self.gemm_op.apply(input, self.codes, self.codebooks, self.scales, self.bias)
 
     def prepare_matmul_op(self, input: torch.Tensor):
         if (

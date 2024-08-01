@@ -5,17 +5,11 @@ import torch
 from torch.utils.cpp_extension import load
 
 LUT_FOLDER = os.path.dirname(os.path.abspath(__file__))
-LUT_KERNEL = load(
-    name="lut_matmat",
-    sources=[
-        os.path.join(LUT_FOLDER, "lut_kernel_pytorch.cpp"),
-        os.path.join(LUT_FOLDER, "lut_kernel.h"),
-    ],
-    extra_include_paths=["/Users/blacksamorez/reps/"],
-)
+torch.ops.load_library(f"{LUT_FOLDER}/cmake-out/libaqlm_bindings.dylib")
 
-torch.library.define(
-    "aqlm::code2x8_lut_matmat", "(Tensor input, Tensor codes, Tensor codebooks, Tensor scales, Tensor bias) -> Tensor"
-)
 
-torch.library.impl("aqlm::code2x8_lut_matmat", "default", LUT_KERNEL.code2x8_lut_matmat)
+@torch.library.register_fake("aqlm::code2x8_lut_matmat")
+def code2x8_lut_matmat_meta(input, codes, codebooks, scales, bias):
+    return torch.empty(
+        input.shape[:-1] + (codes.shape[1] * codebooks.shape[3],), device=input.device, dtype=input.dtype
+    )

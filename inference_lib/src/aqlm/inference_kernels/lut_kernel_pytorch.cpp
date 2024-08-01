@@ -67,7 +67,7 @@ TORCH_LIBRARY(aqlm, m) {
   );
   m.def(
       "code2x8_lut_matmat.out(Tensor input, Tensor codes, "
-      "Tensor codebooks, Tensor scales, Tensor? bias=None, *, Tensor(a!) out) -> Tensor(a!)"
+      "Tensor codebooks, Tensor scales, Tensor? bias=None, *, Tensor(c!) out) -> Tensor(c!)"
   );
 }
 
