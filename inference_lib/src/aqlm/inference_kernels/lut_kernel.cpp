@@ -26,22 +26,25 @@ void quadruple_for(
     const uint8_t* b_alt = (uint8_t*)b_alt_void;
 
     for (int input = 0; input < num_inputs; ++input) {
+        for (int i = 0; i < out_features; ++i) {
+            output_vec[input * out_features + i] = 0;
+        }
+    }
+
+    for (int input = 0; input < num_inputs; ++input) {
         for (int j = 0; j < num_input_groups; ++j) {
-            for (int i_group = 0; i_group < out_features / GROUP_SIZE; ++i_group) {
-                for (int i_local = 0; i_local < GROUP_SIZE; ++i_local) {
-                    auto i = i_group * GROUP_SIZE + i_local;
-                    for (int c = 0; c < num_codebooks; ++c) {
-                        output_vec[input * out_features + i] += lut[
-                            input * num_input_groups * num_codebooks * codebook_size +
-                            j * num_codebooks * codebook_size + 
-                            c * codebook_size +
-                            b_alt[
-                                j * num_codebooks * out_features + 
-                                i * num_codebooks + 
-                                c
-                            ]
-                        ];
-                    }
+            for (int i = 0; i < out_features; ++i) {
+                for (int c = 0; c < num_codebooks; ++c) {
+                    output_vec[input * out_features + i] += lut[
+                        input * num_input_groups * num_codebooks * codebook_size +
+                        j * num_codebooks * codebook_size + 
+                        c * codebook_size +
+                        b_alt[
+                            j * num_codebooks * out_features + 
+                            i * num_codebooks + 
+                            c
+                        ]
+                    ];
                 }
             }
         }
@@ -56,6 +59,7 @@ namespace torch {
       //   const Tensor& scales,
       //   const optional<Tensor>& bias
       // ) {
+      //   out *= scales.flatten().unsqueeze(0);
       //   out *= view_copy_out(ctx, scales, {-1}).unsqueeze(0);
       //   if (bias.has_value()) {
       //     out += bias.unsqueeze(0);
@@ -83,48 +87,25 @@ namespace torch {
             4 * num_input_vectors * input_vector_size / 8 * codebooks.size(0) * codebooks.size(1)
         ).get();
 
-        std::array<exec_aten::DimOrderType, 4> lut_dim_order{
-            0, 1, 2, 3};
-        std::array<exec_aten::SizesType, 4> lut_sizes;
-        lut_sizes[0] = num_input_vectors;      // NUM INPUTS
-        lut_sizes[1] = input_vector_size / 8;  // NUM INPUT GROUPS
-        lut_sizes[2] = codebooks.size(0);       // NUM CODEBOOKS
-        lut_sizes[3] = codebooks.size(1);       // CODEBOOK SIZE
-        std::array<exec_aten::StridesType, 4> lut_strides;
-        dim_order_to_stride_nocheck(
-            lut_sizes.data(),
-            lut_dim_order.data(),
-            4,
-            lut_strides.data());
-        TensorImpl k_impl = TensorImpl(
-            input.scalar_type(),
-            4,
-            lut_sizes.data(),
-            lut_data,
-            lut_dim_order.data(),
-            lut_strides.data(),
-            TensorShapeDynamism::STATIC);
-        Tensor lut(&k_impl);
-
         // A @ B.T
         ::executorch::cpublas::gemm(
-            ::executorch::cpublas::TransposeType::NoTranspose,
             ::executorch::cpublas::TransposeType::Transpose,
-            (int64_t)num_input_vectors * input_vector_size / 8,   // A rows
-            (int64_t)codebooks.size(0) * codebooks.size(1),       // B rows
-            (int64_t)8,                                           // MatMul dim
+            ::executorch::cpublas::TransposeType::NoTranspose,
+            (int64_t)codebooks.size(0) * codebooks.size(1),      // B rows
+            (int64_t)num_input_vectors * input_vector_size / 8,  // A rows
+            (int64_t)8,                                          // MatMul dim size
             1.f,
-            (float*)input.const_data_ptr(), (int64_t)8,
             (float*)codebooks.const_data_ptr(), (int64_t)8,
+            (float*)input.const_data_ptr(), (int64_t)8,
             0.f,
-            (float*)lut.mutable_data_ptr(), (int64_t)codebooks.size(0) * codebooks.size(1)
+            (float*)lut_data, (int64_t)codebooks.size(0) * codebooks.size(1)
         );
 
-
+        // Do lookup matmul
         quadruple_for<float, 2, 256>(
             num_input_vectors,
             input_vector_size / 8,
-            lut.const_data_ptr(),
+            lut_data,
             out_features,
             codes.const_data_ptr(),
             out.mutable_data_ptr()
