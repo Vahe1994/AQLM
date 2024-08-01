@@ -54,20 +54,6 @@ void quadruple_for(
 namespace torch {
   namespace executor {
     namespace native {
-      // inline Tensor scale_bias_unflatten_output(
-      //   Tensor& out,
-      //   const Tensor& scales,
-      //   const optional<Tensor>& bias
-      // ) {
-      //   out *= scales.flatten().unsqueeze(0);
-      //   out *= view_copy_out(ctx, scales, {-1}).unsqueeze(0);
-      //   if (bias.has_value()) {
-      //     out += bias.unsqueeze(0);
-      //   }
-      //   return out;
-      // }
-
-
       Tensor& code2x8_lut_matmat_out(
         RuntimeContext& ctx,
         const Tensor& input,
@@ -111,11 +97,19 @@ namespace torch {
             out.mutable_data_ptr()
         );
         
-        // out = torch::executor::native::scale_bias_unflatten_output(
-        //   out,
-        //   scales,
-        //   bias
-        // );
+        for (int j = 0; j < out_features; ++j) {
+            for (int i=0; i < num_input_vectors; ++i) {
+                out.mutable_data_ptr<float>()[
+                    i * out_features + j
+                ] *= scales.const_data_ptr<float>()[j];
+                if (bias.has_value()) {
+                    out.mutable_data_ptr<float>()[
+                        i * out_features + j
+                    ] += bias.value().const_data_ptr<float>()[j];
+                }
+            }
+        }
+        
         return out;
       }
     } // namespace native
