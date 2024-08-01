@@ -8,13 +8,17 @@ find_package(Torch REQUIRED)
 find_library(
     TORCH_PYTHON_LIBRARY torch_python PATHS "${TORCH_INSTALL_PREFIX}/lib"
 )
-# find_package(executorch REQUIRED)
+
+option(EXECUTORCH_BUILD_KERNELS_OPTIMIZED "" ON)
+
+# Include the executorch subdirectory.
 add_subdirectory(
     /Users/blacksamorez/reps/executorch
     ${CMAKE_BINARY_DIR}/../executorch)
 
 add_library(aqlm SHARED
     ./lut_kernel_pytorch.cpp
+    ./lut_kernel.cpp
     ./lut_kernel.h)
 
 target_include_directories(
@@ -28,4 +32,5 @@ target_link_libraries(
     aqlm
     PRIVATE
     torch
-    executorch)
+    executorch
+    cpublas)

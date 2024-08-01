@@ -7,7 +7,11 @@ from torch.utils.cpp_extension import load
 LUT_FOLDER = os.path.dirname(os.path.abspath(__file__))
 LUT_KERNEL = load(
     name="lut_matmat",
-    sources=[os.path.join(LUT_FOLDER, "lut_kernel.cpp")],
+    sources=[
+        os.path.join(LUT_FOLDER, "lut_kernel_pytorch.cpp"),
+        os.path.join(LUT_FOLDER, "lut_kernel.h"),
+    ],
+    extra_include_paths=["/Users/blacksamorez/reps/"],
 )
 
 torch.library.define(
