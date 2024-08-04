@@ -66,14 +66,20 @@ class QuantizedLinear(nn.Module):
         self.gemv_op = None
         self.gemm_op = None
         self.use_gemv_rule = None
+        
+    def transpose_codes(self):
+        self.codes.data = torch.permute(self.codes.data, (1, 0, 2)).contiguous()
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         # if self.gemv_op is None:
         #     self.prepare_matmul_op(input)
+        # if self.codes.shape[0] == self.out_features // self.out_group_size:
+        #     self.codes.data = torch.permute(self.codes.data, (1, 0, 2)).contiguous()  #  TODO: fix this thing
 
-        return torch.ops.aqlm.code2x8_lut_matmat(
-            input, self.codes, self.codebooks, self.scales, self.bias
+        result = torch.ops.aqlm.code2x8_lut_matmat(
+            input, self.codes, self.codebooks, self.scales, bias=self.bias
         )
+        return result
         # if self.use_gemv_rule(input):
         #     return self.gemv_op.apply(input, self.codes, self.codebooks, self.scales, self.bias)
         # else:
@@ -85,7 +91,7 @@ class QuantizedLinear(nn.Module):
             and self.codebook_size == 256
             and self.codes.shape[0] == self.out_features // self.out_group_size
         ):
-            self.codes.data = torch.permute(self.codes.data, (1, 0, 2)).contiguous()  #  TODO: fix this thing
+            self.transpose_codes()  #  TODO: fix this thing
 
         self.gemv_op = _get_autograd_matmul_op(
             get_forward_pass_kernel(self.codebooks, False),

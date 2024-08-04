@@ -97,6 +97,7 @@ namespace torch {
             out.mutable_data_ptr()
         );
         
+        // Scale and bias
         for (int j = 0; j < out_features; ++j) {
             for (int i=0; i < num_input_vectors; ++i) {
                 out.mutable_data_ptr<float>()[

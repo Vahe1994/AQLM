@@ -5,6 +5,9 @@
 
 #include <torch/library.h>
 
+
+static uint8_t temp_allocator_pool[10 * 1024U * 1024U]; // 10 MB
+
 namespace torch {
     namespace executor {
         namespace native {
@@ -16,8 +19,7 @@ namespace torch {
                 const optional<Tensor> bias,
                 Tensor& output
             ) {
-                void* memory_pool = malloc(10000000 * sizeof(uint8_t));
-                MemoryAllocator allocator(10000000, (uint8_t*)memory_pool);
+                MemoryAllocator allocator(10 * 1024U * 1024U, temp_allocator_pool);
 
                 exec_aten::RuntimeContext context{nullptr, &allocator};
                 return torch::executor::native::code2x8_lut_matmat_out(
@@ -39,7 +41,7 @@ namespace torch {
                 const c10::optional<at::Tensor> bias
             ) {
                 auto sizes = input.sizes().vec();
-                sizes[sizes.size() - 1] = codes.size(1) * codebooks.size(2);
+                sizes[sizes.size() - 1] = codes.size(1);
                 auto out = at::empty(sizes,
                     at::TensorOptions()
                     .dtype(input.dtype())
@@ -63,11 +65,11 @@ namespace torch {
 TORCH_LIBRARY(aqlm, m) {
   m.def(
       "code2x8_lut_matmat(Tensor input, Tensor codes, "
-      "Tensor codebooks, Tensor scales, Tensor? bias=None) -> Tensor"
+      "Tensor codebooks, Tensor scales, *, Tensor? bias=None) -> Tensor"
   );
   m.def(
       "code2x8_lut_matmat.out(Tensor input, Tensor codes, "
-      "Tensor codebooks, Tensor scales, Tensor? bias=None, *, Tensor(c!) out) -> Tensor(c!)"
+      "Tensor codebooks, Tensor scales, *, Tensor? bias=None, Tensor(c!) out) -> Tensor(c!)"
   );
 }
 
