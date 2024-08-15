@@ -29,9 +29,7 @@ def infer_module_classes(model: nn.Module, class_name: str) -> Tuple[type[nn.Mod
 
 
 def create_dequantized_model(
-        model: transformers.PreTrainedModel, *,
-        reuse_non_quantized: bool,
-        dequantized_dtype: Optional[torch.dtype] = None
+    model: transformers.PreTrainedModel, *, reuse_non_quantized: bool, dequantized_dtype: Optional[torch.dtype] = None
 ) -> transformers.PreTrainedModel:
     """
     Create a version of the model where all QuanizedWeight and derivative layers are de-quantized and cast to dtype.
@@ -50,9 +48,11 @@ def create_dequantized_model(
             quantized_weight = module.quantized_weight
 
             dequantized_module = nn.Linear(
-                module.in_features, module.out_features, bias=module.bias is not None,
+                module.in_features,
+                module.out_features,
+                bias=module.bias is not None,
                 dtype=dequantized_dtype if dequantized_dtype is not None else quantized_weight.get_codebooks().dtype,
-                device=next(quantized_weight.parameters()).device
+                device=next(quantized_weight.parameters()).device,
             )
             with torch.no_grad():
                 dequantized_module.weight[...] = quantized_weight()
@@ -69,8 +69,10 @@ def create_dequantized_model(
             if dequantized_module.bias is not module.bias:
                 master_parameters[f"{name}.bias"] = module.bias
             all_quantized_weight_parameters |= set(quantized_weight.parameters())
-            assert all(param in {dequantized_module.weight, dequantized_module.bias}
-                       for param in dequantized_module.parameters())
+            assert all(
+                param in {dequantized_module.weight, dequantized_module.bias}
+                for param in dequantized_module.parameters()
+            )
 
     for name, param_or_buffer in chain(model.named_parameters(), model.named_buffers()):
         if name in master_parameters or param_or_buffer in all_quantized_weight_parameters:
@@ -90,8 +92,9 @@ def create_dequantized_model(
     dequantized_model = deepcopy(model, memo=memo)
 
     for name, module in dequantized_model.named_modules():
-        assert not isinstance(module, QuantizedWeight), (f"Dequantized model should not have quantized weights, "
-                                                         f"but found {name} that is {module}")
+        assert not isinstance(module, QuantizedWeight), (
+            f"Dequantized model should not have quantized weights, " f"but found {name} that is {module}"
+        )
     if reuse_non_quantized:
         assert all(isinstance(master, QuantizedWeight) for master in master_parameters.values())
     verify_dequantized_model(dequantized_model, master_parameters)
@@ -111,7 +114,7 @@ def verify_dequantized_model(dequantized_model: nn.Module, master_parameters: di
 
 
 def get_original_named_parameters_from_fsdp_module(dequantized_model) -> Dict[str, nn.Parameter]:
-    return {name.replace('_fsdp_wrapped_module.', ''): param for name, param in dequantized_model.named_parameters()}
+    return {name.replace("_fsdp_wrapped_module.", ""): param for name, param in dequantized_model.named_parameters()}
 
 
 @contextlib.contextmanager
@@ -122,12 +125,12 @@ def print_runtime_stats(operation_name: str, enabled: bool = True, device: Optio
 
     rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
     if device is None:
-        device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
-    if torch.device.type == 'cuda':
+        device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
+    if torch.device.type == "cuda":
         torch.cuda.synchronize(device)
     start_time = time.perf_counter()
     yield
-    if torch.device.type == 'cuda':
+    if torch.device.type == "cuda":
         torch.cuda.synchronize(device)
     maybe_distributed_msg = f"rank {rank} " if torch.distributed.is_initialized() else ""
     print(end=f"{maybe_distributed_msg}{operation_name} took {time.perf_counter() - start_time}\n")
@@ -155,6 +158,7 @@ def split_quantized_weights_between_ranks(quantized_weights: Dict[str, Quantized
     # order quantized weights in a rank-agnostic way: order by (param size desc, linked param name asc)
     def _compute_size(qw: QuantizedWeight) -> float:
         return qw.out_features * qw.in_features * qw.estimate_nbits_per_parameter()
+
     ordered_quantized_weights = sorted(
         all_quantized_weights, key=lambda qw: (-_compute_size(qw), min(all_quantized_weights[qw]))
     )
@@ -168,8 +172,10 @@ def split_quantized_weights_between_ranks(quantized_weights: Dict[str, Quantized
         total_size_by_rank[least_busy_rank] += _compute_size(quantized_weight)
         quantized_weight_to_rank[quantized_weight] = least_busy_rank
 
-    checksum = tuple((min(all_quantized_weights[qw]), quantized_weight_to_rank[qw], _compute_size(qw))
-                     for qw in ordered_quantized_weights)
+    checksum = tuple(
+        (min(all_quantized_weights[qw]), quantized_weight_to_rank[qw], _compute_size(qw))
+        for qw in ordered_quantized_weights
+    )
     if verify_checksums:
         checksums = [() for _ in range(world_size)]
         torch.distributed.all_gather_object(checksums, checksum)
@@ -193,4 +199,5 @@ def split_quantized_weights_between_ranks(quantized_weights: Dict[str, Quantized
 @dataclasses.dataclass(init=True, frozen=True)
 class YourQuantizedWeightIsInAnotherRank:
     """This replaces quantized weights that are not held on this rank"""
+
     rank: int

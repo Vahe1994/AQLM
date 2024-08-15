@@ -238,7 +238,7 @@ class QuantizedWeight(nn.Module):
         prev_codes = self.get_codes()[selection]
         scales = self.get_scales()[selection]
         if XTX is not None:
-             new_codes = beam_search_minimize_activation_mse(
+            new_codes = beam_search_minimize_activation_mse(
                 XTX=XTX,
                 reference_weight=reference_weight,
                 codebooks=codebooks,
@@ -248,11 +248,7 @@ class QuantizedWeight(nn.Module):
             )
         else:
             new_codes = beam_search_minimize_weight_mse(
-                reference_weight=reference_weight,
-                codebooks=codebooks,
-                prev_codes=prev_codes,
-                scales=scales,
-                **kwargs
+                reference_weight=reference_weight, codebooks=codebooks, prev_codes=prev_codes, scales=scales, **kwargs
             )
         self.set_codes(new_codes, selection)
         return new_codes

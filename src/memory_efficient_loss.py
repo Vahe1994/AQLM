@@ -13,10 +13,14 @@ T = TypeVar("T")
 
 
 def compute_kl_divergence_loss_values(
-        *,
-        student_hidden_states: torch.Tensor, student_lm_head: nn.Module,
-        teacher_hidden_states: torch.Tensor, teacher_lm_head: nn.Module,
-        max_tokens_per_chunk: int = 256, checkpoint_last_chunk: bool = True, **checkpoint_kwargs
+    *,
+    student_hidden_states: torch.Tensor,
+    student_lm_head: nn.Module,
+    teacher_hidden_states: torch.Tensor,
+    teacher_lm_head: nn.Module,
+    max_tokens_per_chunk: int = 256,
+    checkpoint_last_chunk: bool = True,
+    **checkpoint_kwargs,
 ) -> torch.Tensor:
     """
     Compute token-wise KL divergence loss without materializing all logits/logprobs simultaneously
@@ -40,19 +44,25 @@ def compute_kl_divergence_loss_values(
     loss_values_by_chunk = []
     for chunk_start in range(0, total_tokens, max_tokens_per_chunk):
         is_last_chunk = chunk_start + max_tokens_per_chunk >= total_tokens
-        loss_values_by_chunk.append(maybe_checkpoint(
-            _compute_kl_div_from_flat_hidden_states,
-            flat_student_hidden_states[chunk_start: chunk_start + max_tokens_per_chunk], student_lm_head,
-            flat_teacher_hidden_states[chunk_start: chunk_start + max_tokens_per_chunk], teacher_lm_head,
-            checkpoint_enabled=torch.is_grad_enabled() and (checkpoint_last_chunk or not is_last_chunk),
-            **checkpoint_kwargs
-        ))
+        loss_values_by_chunk.append(
+            maybe_checkpoint(
+                _compute_kl_div_from_flat_hidden_states,
+                flat_student_hidden_states[chunk_start : chunk_start + max_tokens_per_chunk],
+                student_lm_head,
+                flat_teacher_hidden_states[chunk_start : chunk_start + max_tokens_per_chunk],
+                teacher_lm_head,
+                checkpoint_enabled=torch.is_grad_enabled() and (checkpoint_last_chunk or not is_last_chunk),
+                **checkpoint_kwargs,
+            )
+        )
     return torch.cat(loss_values_by_chunk).reshape(*student_hidden_states.shape[:2])
 
 
 def _compute_kl_div_from_flat_hidden_states(
-    flat_student_hidden_states: torch.Tensor, student_lm_head: nn.Module,
-    flat_teacher_hidden_states: torch.Tensor, teacher_lm_head: nn.Module,
+    flat_student_hidden_states: torch.Tensor,
+    student_lm_head: nn.Module,
+    flat_teacher_hidden_states: torch.Tensor,
+    teacher_lm_head: nn.Module,
 ) -> torch.Tensor:
     student_logprobs = F.log_softmax(student_lm_head(flat_student_hidden_states), dim=-1)
     teacher_logprobs = F.log_softmax(teacher_lm_head(flat_teacher_hidden_states), dim=-1)
@@ -83,16 +93,22 @@ def test_kl_divergence(
     ref_loss_values = F.kl_div(
         input=F.log_softmax(student_lm_head(student_hidden_states), dim=-1),
         target=F.log_softmax(teacher_lm_head(teacher_hidden_states), dim=-1),
-        log_target=True, reduction="none"
+        log_target=True,
+        reduction="none",
     ).sum(-1)
 
     for use_reentrant, checkpoint_last_chunk, determinism_check in itertools.product(
-            (True, False), (True, False), ("default", "none")):
+        (True, False), (True, False), ("default", "none")
+    ):
         loss_values = compute_kl_divergence_loss_values(
-            student_hidden_states=student_hidden_states, student_lm_head=student_lm_head,
-            teacher_hidden_states=teacher_hidden_states, teacher_lm_head=teacher_lm_head,
-            max_tokens_per_chunk=max_tokens_per_chunk, checkpoint_last_chunk=checkpoint_last_chunk,
-            use_reentrant=use_reentrant, determinism_check=determinism_check,
+            student_hidden_states=student_hidden_states,
+            student_lm_head=student_lm_head,
+            teacher_hidden_states=teacher_hidden_states,
+            teacher_lm_head=teacher_lm_head,
+            max_tokens_per_chunk=max_tokens_per_chunk,
+            checkpoint_last_chunk=checkpoint_last_chunk,
+            use_reentrant=use_reentrant,
+            determinism_check=determinism_check,
         )
         assert loss_values.shape == (batch_size, seq_length)
         assert torch.allclose(loss_values, ref_loss_values)
