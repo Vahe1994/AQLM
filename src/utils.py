@@ -157,6 +157,7 @@ class IntCodes(nn.Module):
     A storage for integer codes that makes them compatible with FullyShardedDataParallel,
     see https://github.com/pytorch/pytorch/issues/123528 for details
     """
+
     def __init__(self, codes: torch.tensor, storage_dtype: torch.dtype = torch.float64):
         super().__init__()
         assert torch.finfo(storage_dtype).bits % torch.iinfo(codes.dtype).bits == 0
@@ -166,16 +167,17 @@ class IntCodes(nn.Module):
         assert len(codes.untyped_storage()) == codes.nbytes  # no offset / stride / tail
         self.storage_dtype = storage_dtype
         self.data = nn.Parameter(
-            torch.as_tensor(codes.untyped_storage(), device=codes.device, dtype=storage_dtype),
-            requires_grad=False)
+            torch.as_tensor(codes.untyped_storage(), device=codes.device, dtype=storage_dtype), requires_grad=False
+        )
 
     def forward(self):
         assert self.data.is_contiguous() and self.data.dtype == self.storage_dtype
         byte_offset = self.data.storage_offset() * self.data.nbytes // self.data.numel()
         return torch.as_tensor(
-            self.data.untyped_storage()[byte_offset: byte_offset + self.data.nbytes],
-            device=self.data.device, dtype=self.dtype
-        )[:self.numel].view(*self.shape)
+            self.data.untyped_storage()[byte_offset : byte_offset + self.data.nbytes],
+            device=self.data.device,
+            dtype=self.dtype,
+        )[: self.numel].view(*self.shape)
 
 
 @contextlib.contextmanager

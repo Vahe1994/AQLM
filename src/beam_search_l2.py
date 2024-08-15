@@ -12,18 +12,18 @@ from src.utils import _dequantize_weight, maybe_script
 
 @torch.inference_mode
 def beam_search_optimal_codes(
-        reference_weight: torch.Tensor,
-        codebooks: torch.Tensor,
-        prev_codes: torch.Tensor,
-        scales: Optional[torch.Tensor],
-        beam_size: int,
-        stochastic_rounding_tau: float = 0.0,
-        chunk_size_bytes: int = 2 ** 32,
-        dim_rng: Optional[random.Random] = None,
-        force_update: bool = False,
-        max_update_fraction: float = 1.0,
-        code_selection_temperature: float = 0,
-        trust_ratio: Optional[float] = None,
+    reference_weight: torch.Tensor,
+    codebooks: torch.Tensor,
+    prev_codes: torch.Tensor,
+    scales: Optional[torch.Tensor],
+    beam_size: int,
+    stochastic_rounding_tau: float = 0.0,
+    chunk_size_bytes: int = 2**32,
+    dim_rng: Optional[random.Random] = None,
+    force_update: bool = False,
+    max_update_fraction: float = 1.0,
+    code_selection_temperature: float = 0,
+    trust_ratio: Optional[float] = None,
 ) -> torch.Tensor:
     """
     Update codes using beam search to minimize L2 error in code values (regardless of activations)
@@ -70,7 +70,9 @@ def beam_search_optimal_codes(
 
     flat_unscaled_reference = reference_weight.reshape(
         num_output_groups, out_group_size, num_input_groups, in_group_size
-    ).permute(0, 2, 1, 3)  # [num_output_groups, num_input_groups, out_group_size, in_group_size]
+    ).permute(
+        0, 2, 1, 3
+    )  # [num_output_groups, num_input_groups, out_group_size, in_group_size]
     if scales is not None:
         flat_unscaled_reference = flat_unscaled_reference / scales
         # divide by scales; the resulting problem is equivalent to multiplying dequantized weight
@@ -85,22 +87,34 @@ def beam_search_optimal_codes(
         """update _flat_codes [num_groups, num_codebooks] to approximate _flat_reference [num_groups, group_size]"""
         if num_codebooks == 1 and beam_size == 1 and stochastic_rounding_tau == 0 and not force_update:
             # a faster algorithm for a special case of one codebook
-            return _greedy_find_best_codes(reference=_flat_reference, codebook=flat_codebooks[0],
-                                           chunk_size_values=chunk_size_bytes // _flat_reference[0, 0].nbytes,
-                                           code_dtype=prev_codes.dtype)
+            return _greedy_find_best_codes(
+                reference=_flat_reference,
+                codebook=flat_codebooks[0],
+                chunk_size_values=chunk_size_bytes // _flat_reference[0, 0].nbytes,
+                code_dtype=prev_codes.dtype,
+            )
         else:
             return _beam_search_update_codes_groupwise(
-                reference=_flat_reference, codebooks=flat_codebooks, codes=_flat_codes, beam_size=beam_size,
-                stochastic_rounding_tau=stochastic_rounding_tau, force_update=force_update,
-                chunk_size_values=chunk_size_bytes // _flat_reference[0, 0].nbytes, dim_order=dim_order)
+                reference=_flat_reference,
+                codebooks=flat_codebooks,
+                codes=_flat_codes,
+                beam_size=beam_size,
+                stochastic_rounding_tau=stochastic_rounding_tau,
+                force_update=force_update,
+                chunk_size_values=chunk_size_bytes // _flat_reference[0, 0].nbytes,
+                dim_order=dim_order,
+            )
 
     def _groupwise_squared_norms(delta: torch.Tensor):
         """
         Given a matrix delta [out_features, in_features], compute a tensor [num_output_groups, num_input_groups] that
         contains the squared sum of elements of delta from each tile of (out_group_size, in_group_size) values.
         """
-        return delta.view(delta.shape[0] // out_group_size, out_group_size,
-                          delta.shape[1] // in_group_size, in_group_size).square().sum(dim=(1, 3))
+        return (
+            delta.view(delta.shape[0] // out_group_size, out_group_size, delta.shape[1] // in_group_size, in_group_size)
+            .square()
+            .sum(dim=(1, 3))
+        )
 
     flat_indices_to_update = prev_dequantized_weight = None
     if max_update_fraction < 1 or trust_ratio is not None:
@@ -111,19 +125,23 @@ def beam_search_optimal_codes(
         # ^-- [num_output_groups, num_input_groups]
         if code_selection_temperature > 0:
             flat_indices_to_update = torch.pow(
-                difference_with_reference_squared_norms.flatten(), 0.5 / code_selection_temperature,
+                difference_with_reference_squared_norms.flatten(),
+                0.5 / code_selection_temperature,
                 # note: temperature is multuplied by 0.5 because sampling is proportional to norms without square
             ).multinomial(num_samples=num_codes_to_update, replacement=False)
         else:
-            flat_indices_to_update = torch.topk(difference_with_reference_squared_norms.flatten(),
-                                                k=num_codes_to_update, largest=True, sorted=True).indices
+            flat_indices_to_update = torch.topk(
+                difference_with_reference_squared_norms.flatten(), k=num_codes_to_update, largest=True, sorted=True
+            ).indices
 
     if max_update_fraction == 1:
         flat_new_codes = _update_flat_codes(flat_unscaled_reference, flat_prev_codes)
     else:
         flat_new_codes = flat_prev_codes.index_put(  # note: this is an out-of-place op that does not modify prev codes
             (flat_indices_to_update[:, None], torch.arange(num_codebooks, device=codebooks.device)[None, :]),
-            _update_flat_codes(flat_unscaled_reference[flat_indices_to_update], flat_prev_codes[flat_indices_to_update])
+            _update_flat_codes(
+                flat_unscaled_reference[flat_indices_to_update], flat_prev_codes[flat_indices_to_update]
+            ),
         )
 
     if trust_ratio is not None:
@@ -137,27 +155,27 @@ def beam_search_optimal_codes(
         # [num_codes_to_update]
 
         num_codes_selected = 1 + torch.searchsorted(
-            flat_ordered_cumulative_norms, trust_ratio * prev_dequantized_weight.norm(), side='left'
+            flat_ordered_cumulative_norms, trust_ratio * prev_dequantized_weight.norm(), side="left"
         )
         truncated_flat_indices_to_update = flat_indices_to_update[:num_codes_selected]  # sorted most to least important
         flat_new_codes = flat_prev_codes.index_put(  # <-- note: this is an out-of-place operation
             (truncated_flat_indices_to_update[:, None], torch.arange(num_codebooks, device=codebooks.device)[None, :]),
-            flat_new_codes[truncated_flat_indices_to_update]
+            flat_new_codes[truncated_flat_indices_to_update],
         )
     return flat_new_codes.view_as(prev_codes)
 
 
 @maybe_script
 def _beam_search_update_codes_groupwise(
-        reference: torch.Tensor,
-        codebooks: torch.Tensor,
-        codes: torch.Tensor,
-        *,
-        beam_size: int,
-        stochastic_rounding_tau: float,
-        chunk_size_values: int,
-        dim_order: Optional[List[int]],
-        force_update: bool
+    reference: torch.Tensor,
+    codebooks: torch.Tensor,
+    codes: torch.Tensor,
+    *,
+    beam_size: int,
+    stochastic_rounding_tau: float,
+    chunk_size_values: int,
+    dim_order: Optional[List[int]],
+    force_update: bool,
 ) -> torch.Tensor:
     """
     :param reference: [num_groups, group_size]
@@ -174,7 +192,7 @@ def _beam_search_update_codes_groupwise(
     num_codebooks, codebook_size, group_size = codebooks.shape
     codebook_offsets = torch.arange(0, num_codebooks * codebook_size, codebook_size, device=device)  # [num_codebooks]
     original_dequantized_vectors = F.embedding_bag(
-        codes + codebook_offsets, codebooks.flatten(0, 1), mode='sum'
+        codes + codebook_offsets, codebooks.flatten(0, 1), mode="sum"
     )  # [num_groups, group_size]
     if dim_order is None:
         dim_order = list(range(num_codebooks))
@@ -204,16 +222,18 @@ def _beam_search_update_codes_groupwise(
         chunk_size_rows = chunk_size_values // (codebook_size * current_beam_size) // 32
         for chunk_start in range(0, num_groups, chunk_size_rows):
             chunk_end = min(chunk_start + chunk_size_rows, num_groups)
-            scores = torch.matmul(residue[chunk_start: chunk_end], codebooks[codebook_index].T)
+            scores = torch.matmul(residue[chunk_start:chunk_end], codebooks[codebook_index].T)
             if beam_size > 1 or stochastic_rounding_tau > 0:
-                scores = residue_norms_sq[chunk_start: chunk_end] - 2 * scores + code_norms_sq[codebook_index]
+                scores = residue_norms_sq[chunk_start:chunk_end] - 2 * scores + code_norms_sq[codebook_index]
             else:
-                scores = - 2 * scores + code_norms_sq[codebook_index]  # residue norms are const(j)
+                scores = -2 * scores + code_norms_sq[codebook_index]  # residue norms are const(j)
             # ^-- [num_groups_chunk, beam_size, codebook_size]
 
             flat_best_losses_chunk, flat_best_indices_chunk = torch.topk(
-                scores.flatten(1, 2), k=target_num_candidates, largest=False,
-                sorted=is_last_step or beam_size > 1 or stochastic_rounding_tau > 0
+                scores.flatten(1, 2),
+                k=target_num_candidates,
+                largest=False,
+                sorted=is_last_step or beam_size > 1 or stochastic_rounding_tau > 0,
             )  # [num_groups_chunk, target_num_candidates]
 
             if stochastic_rounding_tau > 0:
@@ -224,9 +244,10 @@ def _beam_search_update_codes_groupwise(
                 keep_prob = torch.where(torch.isinf(scores[:, :-1]), 1.0, keep_prob)
                 keep = torch.less_equal(torch.rand_like(keep_prob), keep_prob)
                 flat_best_indices_chunk = torch.where(
-                    keep, flat_best_indices_chunk[:, :-1], flat_best_indices_chunk[:, 1:])
+                    keep, flat_best_indices_chunk[:, :-1], flat_best_indices_chunk[:, 1:]
+                )
 
-            flat_best_indices[chunk_start: chunk_end] = flat_best_indices_chunk
+            flat_best_indices[chunk_start:chunk_end] = flat_best_indices_chunk
 
         arange_num_groups = torch.arange(num_groups, device=device)
         best_hypo_source_ids = flat_best_indices // codebook_size
@@ -250,10 +271,7 @@ def _beam_search_update_codes_groupwise(
 
 @maybe_script
 def _greedy_find_best_codes(
-    reference: torch.Tensor,
-    codebook: torch.Tensor,
-    chunk_size_values: int,
-    code_dtype: torch.dtype
+    reference: torch.Tensor, codebook: torch.Tensor, chunk_size_values: int, code_dtype: torch.dtype
 ) -> torch.Tensor:
     """
     :param reference: [num_groups, group_size]
@@ -267,16 +285,16 @@ def _greedy_find_best_codes(
     codebook_norms_sq = codebook.square().sum(dim=-1)
     new_codes = torch.empty((len(reference),), dtype=code_dtype, device=reference.device)
     for chunk_start in range(0, len(reference), chunk_size):
-        new_codes[chunk_start: chunk_start + chunk_size] = torch.addmm(
-            codebook_norms_sq[None], reference[chunk_start: chunk_start + chunk_size], codebook_t, alpha=-2
+        new_codes[chunk_start : chunk_start + chunk_size] = torch.addmm(
+            codebook_norms_sq[None], reference[chunk_start : chunk_start + chunk_size], codebook_t, alpha=-2
         ).argmin(-1)
     return new_codes.unsqueeze(-1)
 
 
 def _find_optimal_codebooks(
-        reference: torch.Tensor,
-        codebooks: torch.Tensor,
-        codes: torch.Tensor,
+    reference: torch.Tensor,
+    codebooks: torch.Tensor,
+    codes: torch.Tensor,
 ) -> torch.Tensor:
     num_samples = len(reference)
     num_codebooks, codebook_size, group_size = codebooks.shape
@@ -284,21 +302,23 @@ def _find_optimal_codebooks(
     # compute optimal codebooks via linsolve
     codebook_offsets = torch.arange(num_codebooks, device=codes.device) * codebook_size
     code_indicators = torch.sparse_coo_tensor(
-        indices=torch.stack([
-            torch.arange(num_samples * num_codebooks, device=codes.device) // num_codebooks,
-            (codes + codebook_offsets).flatten()
-        ], 0),
+        indices=torch.stack(
+            [
+                torch.arange(num_samples * num_codebooks, device=codes.device) // num_codebooks,
+                (codes + codebook_offsets).flatten(),
+            ],
+            0,
+        ),
         values=torch.ones(num_samples * num_codebooks, device=codes.device),
-        size=(num_samples, num_codebooks * codebook_size)
+        size=(num_samples, num_codebooks * codebook_size),
     )
     cooc = (code_indicators.T @ code_indicators).coalesce()
-    rhs = (code_indicators.T @ reference)
+    rhs = code_indicators.T @ reference
 
     try:
         cooc = cooc.to_dense()
         cooc[torch.arange(len(cooc)), torch.arange(len(cooc))].clamp_min_(1.0)
-        optimal_codebooks = (torch.linalg.lstsq(cooc, rhs)
-                             ).solution.reshape(num_codebooks, codebook_size, group_size)
+        optimal_codebooks = (torch.linalg.lstsq(cooc, rhs)).solution.reshape(num_codebooks, codebook_size, group_size)
     except Exception as e:
         print(f"Linsolve failed with {e}")
         optimal_codebooks = codebooks

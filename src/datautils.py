@@ -257,12 +257,12 @@ def split_long_texts(inputs: Sequence[str], split_max_length: int):
     outputs = []
     for index, input_str in enumerate(inputs):
         while True:
-            truncation_index = input_str.find('\n', split_max_length)
+            truncation_index = input_str.find("\n", split_max_length)
             if truncation_index == -1:
                 outputs.append(input_str)
                 break
             outputs.append(input_str[:truncation_index])
-            input_str = input_str[truncation_index + 1:]  # continue after \n
+            input_str = input_str[truncation_index + 1 :]  # continue after \n
     return outputs
 
 
@@ -277,8 +277,7 @@ def group_texts(examples: Sequence[Sequence[int]], block_size: int, add_labels: 
     total_length = (total_length // block_size) * block_size
     # Split by chunks of max_len.
     result = {
-        k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
-        for k, t in concatenated_examples.items()
+        k: [t[i : i + block_size] for i in range(0, total_length, block_size)] for k, t in concatenated_examples.items()
     }
     if add_labels:
         result["labels"] = result["input_ids"].copy()
@@ -287,18 +286,15 @@ def group_texts(examples: Sequence[Sequence[int]], block_size: int, add_labels: 
 
 @torch.no_grad()
 def evaluate_perplexity(
-        model: nn.Module,
-        data: torch.Tensor,
-        seqlen: int,
-        device: torch.device,
-        amp_dtype: Optional[torch.dtype] = None) -> float:
+    model: nn.Module, data: torch.Tensor, seqlen: int, device: torch.device, amp_dtype: Optional[torch.dtype] = None
+) -> float:
     """Perplexity evaluation as per https://github.com/IST-DASLab/gptq (standard among quantization research)"""
     rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
     world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
 
-    inps = [data[:, start: start + seqlen]
-            for start in range(0, data.shape[1], seqlen)
-            if start + seqlen < data.shape[1]]  # ignore last incomplete sequence as in the GPTQ paper
+    inps = [
+        data[:, start : start + seqlen] for start in range(0, data.shape[1], seqlen) if start + seqlen < data.shape[1]
+    ]  # ignore last incomplete sequence as in the GPTQ paper
     num_sequences_without_padding = len(inps)
 
     # pad sequences to be divisible by world_size for DDP/FSDP compatibility

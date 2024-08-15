@@ -181,8 +181,10 @@ class AQEngine(nn.Module):
             assert replicas is None
             dtype = self.quantized_weight.codebooks.dtype
             self.quantized_weight.beam_search_update_codes_(
-                XTX=self.XTX.to(dtype), reference_weight=self.layer.weight.detach().to(dtype),
-                dim_rng=random.Random(seed), **kwargs
+                XTX=self.XTX.to(dtype),
+                reference_weight=self.layer.weight.detach().to(dtype),
+                dim_rng=random.Random(seed),
+                **kwargs,
             )
         else:
             assert replicas[0] is self

@@ -26,29 +26,40 @@ class ConfigurableAdamW(torch.optim.Optimizer):
     """
 
     def __init__(
-            self,
-            params: Iterable[Union[torch.Tensor, dict]],
-            lr: float = 1e-3,
-            betas: Tuple[float, float] = (0.9, 0.999),
-            eps: float = 1e-6,
-            weight_decay: float = 0,
-            debias: Optional[bool] = None,
-            amsgrad: bool = False,
-            lamb: bool = False,
-            clamp_value: Optional[float] = None,
-            compute_dtype: Optional[torch.dtype] = None,
-            exp_avg_dtype: Optional[torch.dtype] = None,
-            exp_avg_sq_dtype: Optional[torch.dtype] = None,
-            v_hat_max_dtype: Optional[torch.dtype] = None,
-            exp_avg_device: torch.device = None,
-            exp_avg_sq_device: torch.device = None,
-            v_hat_max_device: torch.device = None,
+        self,
+        params: Iterable[Union[torch.Tensor, dict]],
+        lr: float = 1e-3,
+        betas: Tuple[float, float] = (0.9, 0.999),
+        eps: float = 1e-6,
+        weight_decay: float = 0,
+        debias: Optional[bool] = None,
+        amsgrad: bool = False,
+        lamb: bool = False,
+        clamp_value: Optional[float] = None,
+        compute_dtype: Optional[torch.dtype] = None,
+        exp_avg_dtype: Optional[torch.dtype] = None,
+        exp_avg_sq_dtype: Optional[torch.dtype] = None,
+        v_hat_max_dtype: Optional[torch.dtype] = None,
+        exp_avg_device: torch.device = None,
+        exp_avg_sq_device: torch.device = None,
+        v_hat_max_device: torch.device = None,
     ) -> None:
         defaults = dict(
-            lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, debias=debias, amsgrad=amsgrad, lamb=lamb,
-            clamp_value=clamp_value, compute_dtype=compute_dtype, exp_avg_dtype=exp_avg_dtype,
-            exp_avg_sq_dtype=exp_avg_sq_dtype, v_hat_max_dtype=v_hat_max_dtype, exp_avg_device=exp_avg_device,
-            exp_avg_sq_device=exp_avg_sq_device, v_hat_max_device=v_hat_max_device,
+            lr=lr,
+            betas=betas,
+            eps=eps,
+            weight_decay=weight_decay,
+            debias=debias,
+            amsgrad=amsgrad,
+            lamb=lamb,
+            clamp_value=clamp_value,
+            compute_dtype=compute_dtype,
+            exp_avg_dtype=exp_avg_dtype,
+            exp_avg_sq_dtype=exp_avg_sq_dtype,
+            v_hat_max_dtype=v_hat_max_dtype,
+            exp_avg_device=exp_avg_device,
+            exp_avg_sq_device=exp_avg_sq_device,
+            v_hat_max_device=v_hat_max_device,
         )
         super().__init__(params, defaults)
 
@@ -59,24 +70,30 @@ class ConfigurableAdamW(torch.optim.Optimizer):
         if group["betas"][0] != 0 and "exp_avg" not in state:
             pin_memory = group["exp_avg_device"] == torch.device("cpu")
             state["exp_avg"] = torch.zeros_like(
-                param, dtype=group['exp_avg_dtype'],
+                param,
+                dtype=group["exp_avg_dtype"],
                 memory_format=torch.preserve_format,
                 device=group["exp_avg_device"],
-                pin_memory=pin_memory)
+                pin_memory=pin_memory,
+            )
         if group["betas"][1] not in (0, 1) and "exp_avg_sq" not in state:
             pin_memory = group["exp_avg_sq_device"] == torch.device("cpu")
             state["exp_avg_sq"] = torch.zeros_like(
-                param, dtype=group['exp_avg_sq_dtype'],
+                param,
+                dtype=group["exp_avg_sq_dtype"],
                 memory_format=torch.preserve_format,
                 device=group["exp_avg_sq_device"],
-                pin_memory=pin_memory)
+                pin_memory=pin_memory,
+            )
         if group["amsgrad"] and "v_hat_max" not in state:
             pin_memory = group["v_hat_max_device"] == torch.device("cpu")
             state["v_hat_max"] = torch.zeros_like(
-                param, dtype=group['v_hat_max_dtype'],
+                param,
+                dtype=group["v_hat_max_dtype"],
                 memory_format=torch.preserve_format,
                 device=group["v_hat_max_device"],
-                pin_memory=pin_memory)
+                pin_memory=pin_memory,
+            )
         return state
 
     @torch.no_grad()
@@ -104,8 +121,16 @@ class ConfigurableAdamW(torch.optim.Optimizer):
 
             # Decay the first and second moment running average coefficient
             update = _inner_adam_step_and_update_statistics(
-                p, grad, state.get("exp_avg", p), state.get("exp_avg_sq", p), state.get("v_hat_max", p),
-                beta1, beta2, group["eps"], group["amsgrad"], compute_dtype
+                p,
+                grad,
+                state.get("exp_avg", p),
+                state.get("exp_avg_sq", p),
+                state.get("v_hat_max", p),
+                beta1,
+                beta2,
+                group["eps"],
+                group["amsgrad"],
+                compute_dtype,
             )
 
             if group["lamb"] and group["weight_decay"] != 0:
@@ -116,8 +141,8 @@ class ConfigurableAdamW(torch.optim.Optimizer):
             # below: to save compute, we update scalar coefficient to account for debias/lamb/.. and multiply once
             if group["debias"] if group["debias"] is not None else (not group["lamb"]):
                 # if not specified, default to True for Adam, False for Lamb
-                mt_debias = 1. / (1 - beta1 ** state["step"]) if beta1 != 0 else 1
-                vt_debias = 1. / math.sqrt(1 - beta2 ** state["step"]) if beta2 != 0 else 1
+                mt_debias = 1.0 / (1 - beta1 ** state["step"]) if beta1 != 0 else 1
+                vt_debias = 1.0 / math.sqrt(1 - beta2 ** state["step"]) if beta2 != 0 else 1
                 bias_correction = mt_debias / vt_debias
                 update_scale *= bias_correction
 
@@ -139,9 +164,7 @@ class ConfigurableAdamW(torch.optim.Optimizer):
     def iterate_groups_with_prefetch(self):
         """Iterate parameters and optimizer states; skip parameters that do not require grad"""
         flat_params = [
-            (group, param)
-            for group, param in _get_flat_param_groups(self.param_groups)
-            if param.grad is not None
+            (group, param) for group, param in _get_flat_param_groups(self.param_groups) if param.grad is not None
         ]
 
         active_group, active_param = flat_params[0]
@@ -157,14 +180,25 @@ class ConfigurableAdamW(torch.optim.Optimizer):
             _commit_state_updates(active_state, active_state_fetched)
 
             active_group, active_param, active_state, active_state_fetched = (
-                next_group, next_param, next_state, next_state_fetched,
+                next_group,
+                next_param,
+                next_state,
+                next_state_fetched,
             )
 
 
 @maybe_script
 def _inner_adam_step_and_update_statistics(
-        p: torch.Tensor, grad: torch.Tensor, exp_avg: torch.Tensor, exp_avg_sq: torch.Tensor, v_hat_max: torch.Tensor,
-        beta1: float, beta2: float, eps: float, amsgrad: bool, compute_dtype: torch.dtype,
+    p: torch.Tensor,
+    grad: torch.Tensor,
+    exp_avg: torch.Tensor,
+    exp_avg_sq: torch.Tensor,
+    v_hat_max: torch.Tensor,
+    beta1: float,
+    beta2: float,
+    eps: float,
+    amsgrad: bool,
+    compute_dtype: torch.dtype,
 ):
     grad = grad.to(compute_dtype, copy=True)
     stored_exp_avg, stored_exp_avg_sq, stored_v_hat_max = exp_avg, exp_avg_sq, v_hat_max
@@ -198,10 +232,7 @@ def _get_flat_param_groups(param_groups):
 
 def _fetch_state_to_device(state, device):
     fetchable_state_keys = {"exp_avg", "exp_avg_sq", "v_hat_max"}.intersection(state.keys())
-    fetched_states = {
-        state_key: state[state_key].to(device, non_blocking=True)
-        for state_key in fetchable_state_keys
-    }
+    fetched_states = {state_key: state[state_key].to(device, non_blocking=True) for state_key in fetchable_state_keys}
     return state | fetched_states
 
 
