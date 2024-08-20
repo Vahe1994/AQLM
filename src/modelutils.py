@@ -1,13 +1,13 @@
 import math
 import os
+import re
 from contextlib import contextmanager
-from typing import Optional
+from typing import Sequence
 
 import torch
 import torch.nn as nn
 import transformers
 from accelerate import dispatch_model
-from torch.distributed.fsdp import FullyShardedDataParallel, MixedPrecision
 from transformers import AutoConfig, AutoModelForCausalLM
 
 from src.aq import QuantizedWeight
@@ -241,7 +241,7 @@ def load_dequantized_model(model, load_path):
         quant_layer = torch.load(os.path.join(load_path, str(layer_index) + ".pth"), map_location="cpu")
         for module in quant_layer.modules():
             if isinstance(module, QuantizedWeight):
-                if not hasattr(module, 'codes_storage'):
+                if not hasattr(module, "codes_storage"):
                     module.codes_storage = None  # backwards compatibility
         layers[layer_index] = load_linear_layers(layer, quant_layer, model)
     model.load_state_dict(torch.load(os.path.join(load_path, "not_quantized_weights.pt")), strict=False)
@@ -258,7 +258,7 @@ def load_quantized_model(model, load_path):
         )
         for module in model.model.layers[layer_index].modules():
             if isinstance(module, QuantizedWeight):
-                if not hasattr(module, 'codes_storage'):
+                if not hasattr(module, "codes_storage"):
                     module.codes_storage = None  # backwards compatibility
 
     model.load_state_dict(torch.load(os.path.join(load_path, "not_quantized_weights.pt")), strict=False)
@@ -289,3 +289,47 @@ def get_layers_prefix(config: transformers.PretrainedConfig) -> str:
     if config.model_type in ("llama", "mistral", "mixtral", "gemma"):
         return "model.layers"
     raise NotImplementedError(f"Can't get layers prefix for {config.model_type}")
+
+
+class FeatureExtractorWrapper(nn.Module):
+
+    def __init__(self, model: nn.Module, module_regex: str):
+        super().__init__()
+        self.model = model
+        self.cache_features = False  # if True - cache features
+        self.forward_hooks = {}
+        self.cached_features = {}
+        for module_name, module in self.model.named_modules():
+            # Remove _fsdp parts from module name
+            module_name = ".".join([x for x in module_name.split(".") if x != "_fsdp_wrapped_module"])
+            if re.search(module_regex, module_name):
+
+                def cache_output(mod_name):
+                    def hook(mod, inputs, outputs):
+                        if self.cache_features:
+                            if isinstance(outputs, Sequence):
+                                outputs = outputs[0]
+                            self.cached_features[mod_name] = outputs
+
+                    return hook
+
+                self.forward_hooks[module_name] = module.register_forward_hook(cache_output(module_name))
+
+    def clean_cache(self):
+        self.cached_features = {}
+
+    def clean_all(self):
+        for _, hook in self.forward_hooks():
+            hook.remove()
+        self.cached_features = {}
+
+    def forward(self, *input_args, **input_kwargs):
+        output = self.model(*input_args, **input_kwargs)
+        output.features = self.cached_features
+        return output
+        
+
+def maybe_unwrap_feature_extractor(model: nn.Module) -> nn.Module:
+    if isinstance(model, FeatureExtractorWrapper):
+        return model.model
+    return model

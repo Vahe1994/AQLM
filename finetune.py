@@ -4,9 +4,10 @@ based on https://github.com/huggingface/transformers/blob/main/examples/pytorch/
 """
 import argparse
 import os
+import re
 from contextlib import nullcontext
 from functools import partial
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Sequence
 
 import datasets
 import torch
@@ -30,7 +31,7 @@ from src.aq import QuantizedWeight
 from src.configurable_adam import ConfigurableAdamW
 from src.datautils import evaluate_perplexity, get_loaders, group_texts, split_long_texts
 from src.memory_efficient_loss import compute_kl_divergence_loss_values
-from src.modelutils import get_model, is_model_for_causal_lm
+from src.modelutils import FeatureExtractorWrapper, get_model, is_model_for_causal_lm, maybe_unwrap_feature_extractor
 from src.pv_optimizer import StraightThroughAdamW
 from src.pv_utils import (
     YourQuantizedWeightIsInAnotherRank,
@@ -441,6 +442,19 @@ def add_data_args(parser: argparse.ArgumentParser):
         action="store_true",
         help="If set, do not save intermediate preprocessing steps in memory",
     )
+    # SquareHead parameters
+    parser.add_argument(
+        "--squarehead_features",
+        type=str,
+        default=None,
+        help="Regex to extract features for feature knowledge distillation.",
+    )
+    parser.add_argument(
+        "--squarehead_weight",
+        type=float,
+        default=0.0,
+        help="Weight of SquareHead loss in feature distillation.",
+    )
     parser.add_argument(
         "--eval_datasets",
         nargs="+",
@@ -692,7 +706,7 @@ def trigger_fsdp_lazy_init_(
     print("Initializing FSDP root")
     dummy_batch = tokenizer("I am the monument to all your sins", return_tensors="pt")
     dummy_batch = {k: v.to(device) for k, v in dummy_batch.items()}
-    dummy_batch.pop('token_type_ids', None)
+    dummy_batch.pop("token_type_ids", None)
     with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
         with torch.no_grad():
             teacher_model(**dummy_batch)
@@ -935,6 +949,16 @@ def save_p_model(args: argparse.Namespace, quantized_model: FullyShardedDataPara
         print(f"Saved best model state dict to {os.path.join(args.save, f'best_model_state_dict.pt')}")
 
 
+def square_head_loss(
+    teacher_features: Dict[str, torch.Tensor], student_features: Dict[str, torch.Tensor], eps: float = 1e-6
+) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    feature_losses = {}
+    for (t_k, t_v), (s_k, s_v) in zip(teacher_features.items(), student_features.items()):
+        feature_losses[t_k] = (s_v - t_v).pow(2).mean() / (t_v.pow(2).mean() + eps)
+    loss = sum([v for _, v in feature_losses.items()])
+    return loss, feature_losses
+
+
 def compute_loss_on_batch(
     batch: dict,
     teacher_model: FullyShardedDataParallel,
@@ -942,13 +966,15 @@ def compute_loss_on_batch(
     *,
     amp_dtype: Optional[torch.dtype],
     max_tokens_per_chunk: Optional[int],
+    squarehead_weight: float = 0.0,
 ) -> torch.Tensor:
     if max_tokens_per_chunk is not None:  # chunked inference, transformer and lm head must be separate FSDP instances
+        # TODO add SquareHead loss
         with torch.no_grad():
             teacher_hidden_states = teacher_model.base_model(**batch).last_hidden_state
         with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
             student_hidden_states = student_model.base_model(**batch).last_hidden_state
-            return compute_kl_divergence_loss_values(
+            loss = compute_kl_divergence_loss_values(
                 student_hidden_states=student_hidden_states,
                 student_lm_head=student_model.get_output_embeddings(),
                 teacher_hidden_states=teacher_hidden_states,
@@ -958,18 +984,25 @@ def compute_loss_on_batch(
                 use_reentrant=False,
                 determinism_check="none",
             ).mean()
-
+        return loss
     else:  # combined inference without gradient checkpointing
         with torch.no_grad():
-            teacher_logprobs = F.log_softmax(teacher_model(**batch).logits, dim=-1)
+            teacher_outputs = teacher_model(**batch)
+            teacher_logprobs = F.log_softmax(teacher_outputs.logits, dim=-1)
         with torch.cuda.amp.autocast(enabled=amp_dtype is not None, dtype=amp_dtype):
-            student_logprobs = F.log_softmax(student_model(**batch).logits, dim=-1)
+            student_outputs = student_model(**batch)
+            student_logprobs = F.log_softmax(student_outputs.logits, dim=-1)
             loss = F.kl_div(
                 input=student_logprobs.flatten(0, -2),
                 target=teacher_logprobs.flatten(0, -2),
                 log_target=True,
                 reduction="batchmean",
             ).mean()
+
+        if getattr(student_model, "cache_features", False) and getattr(teacher_model, "cache_features", False):
+            feature_loss, _ = square_head_loss(student_outputs.features, teacher_outputs.features)
+            loss += squarehead_weight * feature_loss
+
         return loss
 
 
@@ -1109,6 +1142,15 @@ def main():
     torch.distributed.barrier()
     trigger_fsdp_lazy_init_(tokenizer, teacher_model, student_model, device, amp_dtype=args.amp_dtype)
 
+    # Wrap teacher and student
+
+    if args.squarehead_features and args.squarehead_weight > 0:
+        student_model = FeatureExtractorWrapper(student_model, args.squarehead_features)
+        teacher_model = FeatureExtractorWrapper(teacher_model, args.squarehead_features)
+        use_squarehead_loss = True
+    else:
+        use_squarehead_loss = False
+
     for current_epoch in range(args.max_epochs):
         if current_epoch < metadata["current_epoch"]:
             continue  # skip finished epochs
@@ -1121,21 +1163,34 @@ def main():
             metadata["microbatches_since_epoch_start"] += 1
             metadata["total_microbatches"] += 1
 
+            # Toggle feature caching on
+            if use_squarehead_loss:
+                student_model.cache_features = True
+                teacher_model.cache_features = True
+
             batch = {k: v.to(device) for k, v in batch.items()}
-            batch.pop('token_type_ids', None)
+            batch.pop("token_type_ids", None)
             loss = compute_loss_on_batch(
                 batch,
                 teacher_model,
                 student_model,
                 amp_dtype=args.amp_dtype,
                 max_tokens_per_chunk=args.loss_tokens_per_chunk,
+                squarehead_weight=args.squarehead_weight,
             )
+
+            # Toggle feature caching off
+            if use_squarehead_loss:
+                student_model.cache_features = False
+                student_model.cached_features = {}
+                teacher_model.cache_features = False
+                teacher_model.cached_features = {}
 
             metadata["loss_numerator"] += loss.item()
             metadata["loss_denominator"] += 1
             metadata["grad_steps_accumulated"] += 1
             if metadata["grad_steps_accumulated"] < grad_accumulation_steps:
-                with student_model.no_sync() if args.minimize_sync else nullcontext():
+                with maybe_unwrap_feature_extractor(student_model).no_sync() if args.minimize_sync else nullcontext():
                     (loss / grad_accumulation_steps).backward()
             else:
                 (loss / grad_accumulation_steps).backward()
@@ -1171,11 +1226,11 @@ def main():
                         metadata["best_eval_perplexity"] = perplexity_scores[args.eval_datasets[0]]
                         metadata["best_step"] = metadata["total_optimizer_steps"]
                         if args.keep_best_model:
-                            save_model(args, student_model, optimizer)
+                            save_model(args, maybe_unwrap_feature_extractor(student_model), optimizer)
                 if args.wandb and rank == 0:
                     wandb.log(metadata, step=metadata["total_microbatches"])
                 if args.save_every_steps and metadata["total_optimizer_steps"] % args.save_every_steps == 0:
-                    save_training_state(args, metadata, student_model, optimizer)
+                    save_training_state(args, metadata, maybe_unwrap_feature_extractor(student_model), optimizer)
 
         metadata["microbatches_since_epoch_start"] = 0
         metadata["current_epoch"] += 1
