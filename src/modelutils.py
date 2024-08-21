@@ -1,12 +1,16 @@
 import math
 import os
 from contextlib import contextmanager
+from typing import Optional
 
 import torch
 import torch.nn as nn
 import transformers
 from accelerate import dispatch_model
+from torch.distributed.fsdp import FullyShardedDataParallel, MixedPrecision
 from transformers import AutoConfig, AutoModelForCausalLM
+
+from src.aq import QuantizedWeight
 
 MODEL_ERROR_MSG = "Unsupported model type {} - only 'llama', 'Yi', 'opt', 'falcon', 'phi3' are supported"
 FALCON_TYPES = ("falcon", "refinedweb", "refinedwebmodel")
@@ -48,7 +52,7 @@ def get_model(
         dtype = (
             AutoConfig.from_pretrained(model_path, trust_remote_code=trust_remote_code).torch_dtype or "auto"
         )  # force transformers 4.29.2 to follow the same rules as 4.30.x
-    else:
+    elif isinstance(dtype, str):
         dtype = getattr(torch, dtype)
 
     model_kwargs = {}
@@ -82,7 +86,14 @@ def get_model(
     return model
 
 
-def get_model_head(model):
+def is_model_for_causal_lm(model: nn.Module):
+    assert isinstance(model, transformers.PreTrainedModel)
+    assert len(model.base_model_prefix) > 0 and hasattr(model, model.base_model_prefix)
+    assert model.get_output_embeddings() is not None
+    return True
+
+
+def get_model_head_with_norm(model):
     head = torch.nn.ModuleList()
     if model.config.model_type in (*LLAMA_LIKE, "phi3"):
         if model.model.norm is not None:
@@ -228,6 +239,10 @@ def load_dequantized_model(model, load_path):
         print("layer", layer_index)
         layer = layers[layer_index]
         quant_layer = torch.load(os.path.join(load_path, str(layer_index) + ".pth"), map_location="cpu")
+        for module in quant_layer.modules():
+            if isinstance(module, QuantizedWeight):
+                if not hasattr(module, "codes_storage"):
+                    module.codes_storage = None  # backwards compatibility
         layers[layer_index] = load_linear_layers(layer, quant_layer, model)
     model.load_state_dict(torch.load(os.path.join(load_path, "not_quantized_weights.pt")), strict=False)
     return model
@@ -241,6 +256,11 @@ def load_quantized_model(model, load_path):
             os.path.join(load_path, str(layer_index) + ".pth"),
             map_location=model.model.layers[layer_index].input_layernorm.weight.device,
         )
+        for module in model.model.layers[layer_index].modules():
+            if isinstance(module, QuantizedWeight):
+                if not hasattr(module, "codes_storage"):
+                    module.codes_storage = None  # backwards compatibility
+
     model.load_state_dict(torch.load(os.path.join(load_path, "not_quantized_weights.pt")), strict=False)
     return model
 
@@ -254,3 +274,18 @@ def save_not_quantized_weights(model: nn.Module, save_dir: str):
         name: param for name, param in model.named_parameters() if param not in already_saved_weights
     }
     torch.save(not_quantized_weights, os.path.join(save_dir, "not_quantized_weights.pt"))
+
+
+def save_quantized_model(model: transformers.PreTrainedModel, save_dir: str):
+    """Save dequantized model state in the same format as returned by AQLM calibration (main.py)"""
+    os.makedirs(save_dir, exist_ok=True)
+    for layer_index, layer in enumerate(get_layers(model)):
+        layer_save_path = os.path.join(save_dir, f"{layer_index}.pth")
+        torch.save(layer, layer_save_path)
+    save_not_quantized_weights(model, save_dir)
+
+
+def get_layers_prefix(config: transformers.PretrainedConfig) -> str:
+    if config.model_type in ("llama", "mistral", "mixtral", "gemma"):
+        return "model.layers"
+    raise NotImplementedError(f"Can't get layers prefix for {config.model_type}")

@@ -1,3 +1,4 @@
+"""Common utility functions for additive quantization"""
 from __future__ import annotations
 
 import contextlib
@@ -6,12 +7,14 @@ import os
 from typing import Any, Callable, Iterable, Iterator, List, Optional, Sequence, Union
 
 import torch
+import torch.distributed
+from torch import nn
+from torch.nn import functional as F
 
 ellipsis = type(...)
 
 
 def get_mean_nbits_by_codebook(codes: torch.IntTensor, huffman_group_size: int = 2):
-
     """
     Calculates average code length in codebooks.
     :param codes: codebook codes
@@ -56,6 +59,36 @@ def maybe_script(fn: callable) -> callable:
     # this is a reserved variable that must be set to TPU address (e.g. grpc://11.22.33.44:1337) for TPU to function
     should_script = int(os.environ.get("AQ_USE_JIT", not using_tpu))
     return torch.jit.script(fn) if should_script else fn
+
+
+@maybe_script
+def _dequantize_weight(
+    codes: torch.Tensor, codebooks: torch.Tensor, scales: Optional[torch.Tensor] = None
+) -> torch.Tensor:
+    """
+    Decode float weights from quantization codes. Differentiable.
+    :param codes: tensor of integer quantization codes, shape [*dims, num_out_groups, num_in_groups, num_codebooks]
+    :param codebooks: tensor of vectors for each quantization code, [num_codebooks, codebook_size, out_group_size, in_group_size]
+    :param scales: weight will be multiplied by this factor, must be broadcastble with [*dims, out_groups, num_in_groups, out_group_size, in_group_size]
+    :return: reconstructed weight tensor of shape [*dims, num_in_groups*group_size]
+    """
+    num_out_groups, num_in_groups, num_codebooks = codes.shape[-3:]
+    num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
+    out_features = num_out_groups * out_group_size
+    in_features = num_in_groups * in_group_size
+    codebook_offsets = torch.arange(
+        0, num_codebooks * codebook_size, codebook_size, device=codes.device
+    )  # shape: [num_codebooks]
+    reconstructed_weight_flat = F.embedding_bag(
+        codes.flatten(0, -2) + codebook_offsets, codebooks.flatten(0, 1).flatten(-2, -1), mode="sum"
+    )  # [prod(dims) * num_out_groups * num_in_groups, out_group_size * in_group_size]
+
+    reconstructed_weight_groupwise = reconstructed_weight_flat.view(
+        list(codes.shape[:-3]) + [num_out_groups, num_in_groups, out_group_size, in_group_size]
+    )
+    if scales is not None:
+        reconstructed_weight_groupwise = reconstructed_weight_groupwise.mul(scales)
+    return reconstructed_weight_groupwise.swapaxes(-3, -2).reshape(list(codes.shape[:-3]) + [out_features, in_features])
 
 
 @contextlib.contextmanager
@@ -117,3 +150,72 @@ def maybe_get_0th_element(x: Union[Any, Sequence[Any]]) -> Any:
 def _extract_into_tensor(tensor_list: List[torch.Tensor], indices: Iterable[int], device=None, dtype=None):
     extracted_items = [maybe_get_0th_element(tensor_list[i]) for i in indices]
     return torch.cat(extracted_items, dim=0).to(device=device, dtype=dtype)
+
+
+class IntCodes(nn.Module):
+    """
+    A storage for integer codes that makes them compatible with FullyShardedDataParallel,
+    see https://github.com/pytorch/pytorch/issues/123528 for details
+    """
+
+    def __init__(self, codes: torch.tensor, storage_dtype: torch.dtype = torch.float64):
+        super().__init__()
+        assert torch.finfo(storage_dtype).bits % torch.iinfo(codes.dtype).bits == 0
+        self.dtype, self.shape, self.numel = codes.dtype, codes.shape, codes.numel()
+        size_ratio = torch.finfo(storage_dtype).bits // torch.iinfo(codes.dtype).bits
+        codes = F.pad(codes.flatten().clone(), pad=[0, -codes.numel() % size_ratio])
+        assert len(codes.untyped_storage()) == codes.nbytes  # no offset / stride / tail
+        self.storage_dtype = storage_dtype
+        self.data = nn.Parameter(
+            torch.as_tensor(codes.untyped_storage(), device=codes.device, dtype=storage_dtype), requires_grad=False
+        )
+
+    def forward(self):
+        assert self.data.is_contiguous() and self.data.dtype == self.storage_dtype
+        byte_offset = self.data.storage_offset() * self.data.nbytes // self.data.numel()
+        return torch.as_tensor(
+            self.data.untyped_storage()[byte_offset : byte_offset + self.data.nbytes],
+            device=self.data.device,
+            dtype=self.dtype,
+        )[: self.numel].view(*self.shape)
+
+
+@contextlib.contextmanager
+def one_rank_at_a_time(local: bool = False, group_size: int = 1):
+    """
+    In distributed setting, let only group_size processes enter at a time
+    :param local: if True, the limit is enforced within each host, i.e. distributed hosts can act concurrently
+    :param group_size: if more than one is specified,
+    """
+    distributed = torch.distributed.is_initialized()
+    rank = int(os.environ.get("LOCAL_RANK" if local else "RANK", 0)) if distributed else 0
+    world_size = int(os.environ.get("LOCAL_WORLD_SIZE" if local else "WORLD_SIZE", 0)) if distributed else 1
+    if distributed:
+        torch.distributed.barrier()
+    for current_group_index in range(world_size // group_size):
+        if current_group_index == rank // group_size:
+            yield
+        if distributed:
+            torch.distributed.barrier()
+
+
+@contextlib.contextmanager
+def master_rank_first(local: bool, master_rank: int = 0):
+    distributed = torch.distributed.is_initialized()
+    rank = int(os.environ.get("LOCAL_RANK" if local else "RANK", 0)) if distributed else 0
+    if distributed and rank != master_rank:
+        torch.distributed.barrier()
+    yield
+    if distributed and rank == master_rank:
+        torch.distributed.barrier()
+
+
+def is_signed(dtype: torch.dtype) -> bool:
+    """Return True iff an integer dtype is signed"""
+    try:
+        return dtype.is_signed
+    except RuntimeError:  # see https://github.com/pytorch/pytorch/issues/125124
+        if dtype.is_floating_point:
+            return torch.finfo(dtype).min < 0
+        else:
+            return torch.iinfo(dtype).min < 0 and torch.iinfo(dtype).max > 0
