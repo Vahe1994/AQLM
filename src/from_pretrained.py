@@ -29,9 +29,11 @@ from transformers.modeling_attn_mask_utils import (
 from transformers.models.mixtral.modeling_mixtral import MixtralDecoderLayer
 from transformers.utils import get_file_from_repo
 
-import utils
+import logging
 
-logger = utils.eval_logger
+
+logger = logging.getLogger("aqe")
+logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="[%(asctime)s][aqe] %(message)s")
 DTYPE_MAP = dict(bfloat16=torch.bfloat16, float16=torch.float16, float32=torch.float32, auto="auto")
 DEFAULT_CACHE_DIR = os.environ.get("TRANSFORMERS_CACHE", os.environ.get(
                 "HF_HOME", f"{os.environ['HOME']}/.cache/huggingface") + "/hub")
