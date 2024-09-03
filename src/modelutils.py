@@ -11,6 +11,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel, MixedPrecision
 from transformers import AutoConfig, AutoModelForCausalLM
 
 from src.aq import QuantizedWeight
+from src.offload_blocks import ModelWithOffloadedBlocks
 
 MODEL_ERROR_MSG = "Unsupported model type {} - only 'llama', 'Yi', 'opt', 'falcon', 'phi3' are supported"
 FALCON_TYPES = ("falcon", "refinedweb", "refinedwebmodel")
@@ -46,7 +47,8 @@ def dispatch_quantized_model(model):
 
 
 def get_model(
-    model_path, load_quantized=None, dtype="auto", device_map=None, attn_implementation=None, trust_remote_code=False
+    model_path, load_quantized=None, dtype="auto", device_map=None, attn_implementation=None, trust_remote_code=False,
+        offload_blocks=False
 ):
     if dtype == "auto":
         dtype = (
@@ -61,25 +63,31 @@ def get_model(
         model_kwargs["attn_implementation"] = attn_implementation
 
     with suspend_nn_inits():
-        model = AutoModelForCausalLM.from_pretrained(
-            pretrained_model_name_or_path=model_path,
-            trust_remote_code=trust_remote_code,
-            torch_dtype=dtype,
-            # defer distribution if loading quantized
-            device_map=None if load_quantized else device_map,
-            low_cpu_mem_usage=True,
-            local_files_only=True,
-            **model_kwargs,
-        )
-        if load_quantized:
+        if offload_blocks:
             print("Initializing model with random weights...")
-            print("Loading quantized model ...")
-            model = load_quantized_model(model, load_quantized)
-            if device_map == "auto":
-                assert model.config.model_type in LLAMA_LIKE, "Dispatching is implemented only for Llama-like models."
-                model = dispatch_quantized_model(model)
+            cache_dir = os.environ.get("TRANSFORMERS_CACHE", os.environ.get(
+                "HF_HOME", f"{os.environ['HOME']}/.cache/huggingface") + "/hub")
+            model = ModelWithOffloadedBlocks.from_pretrained(
+                model_path, torch_dtype=dtype, cache_dir=cache_dir, **model_kwargs)
         else:
-            print("Loading pretrained model ...")
+            model = AutoModelForCausalLM.from_pretrained(
+                pretrained_model_name_or_path=model_path,
+                trust_remote_code=trust_remote_code,
+                torch_dtype=dtype,
+                # defer distribution if loading quantized
+                device_map=None if load_quantized else device_map,
+                low_cpu_mem_usage=True,
+                local_files_only=True,
+                **model_kwargs,
+            )
+            if load_quantized:
+                print("Loading quantized model ...")
+                model = load_quantized_model(model, load_quantized)
+                if device_map == "auto":
+                    assert model.config.model_type in LLAMA_LIKE, "Dispatching is implemented only for Llama-like models."
+                    model = dispatch_quantized_model(model)
+            else:
+                print("Loading pretrained model ...")
 
     print("Model loaded sucсessfully ...")
 

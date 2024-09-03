@@ -827,6 +827,11 @@ def main():
         help="Attention implementation.",
     )
     parser.add_argument(
+        "--offload_blocks",
+        action="store_true",
+        help="Load blocks from disk one block at a time to reduce RAM usage on big models.",
+    )
+    parser.add_argument(
         "--use_fast_tokenizer",
         action="store_true",
         help="Whether to use fast tokenizer (some models have only fast tokenizer).",
@@ -885,6 +890,8 @@ def main():
         args.dtype,
         attn_implementation=args.attn_implementation,
         trust_remote_code=args.trust_remote_code,
+        offload_blocks = args.offload_blocks
+
     ).train(False)
 
     if not args.load and not args.no_quant:
