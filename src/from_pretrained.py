@@ -28,6 +28,7 @@ from transformers.modeling_attn_mask_utils import (
 )
 from transformers.models.mixtral.modeling_mixtral import MixtralDecoderLayer
 from transformers.utils import get_file_from_repo
+import models
 
 import logging
 import sys
