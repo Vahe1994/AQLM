@@ -34,6 +34,46 @@ class QuantizedLinear(nn.Module):
         return self._forward(input)
 
 
+
+class FirstAdaptiveCodebook(nn.Module):
+    """
+    A module that forms a codebook dynamically to take into account input groups (and later output) groups
+    This does **not** yet take into account the previous codes. Output groups are also not implemented yet.
+    """
+    def __init__(
+        self, in_features: int, in_group_size: int, nbits_per_codebook: int,
+        hidden_size: int = 256, num_residual_blocks: int = 2, bias: bool = False, init_std_downscale: float = 1e-3,
+    ):
+        super().__init__()
+        assert in_features % in_group_size == 0
+        num_input_groups = in_features // in_group_size
+        self.input_group_embedding = nn.Embedding(num_input_groups, in_group_size)
+        
+        self.base_codebook = nn.Embedding(2 ** nbits_per_codebook, in_group_size)
+        
+        self.residual_blocks = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(in_group_size, hidden_size, bias=bias), nn.ReLU(), nn.Linear(hidden_size, in_group_size, bias=bias)
+            )
+        ])
+        with torch.no_grad():
+            for block in self.residual_blocks:
+                block[-1].weight *= init_std_downscale
+                if bias:
+                    block[-1].bias[...] = 0
+    
+    def forward(self, input_group_indices: torch.Tensor, codes: torch.Tensor):
+        assert isinstance(input_group_indices, torch.Tensor)
+        assert isinstance(codes, torch.Tensor)        
+        input_group_embedding = self.input_group_embedding(input_group_indices)
+        code_vectors = self.base_codebook(codes)
+        
+        for block in self.residual_blocks:
+            code_vectors = code_vectors + block(input_group_embedding + code_vectors)
+        
+        return code_vectors
+        
+
 class QuantizedWeight(nn.Module):
     EPS = 1e-9
 
@@ -55,9 +95,13 @@ class QuantizedWeight(nn.Module):
         super().__init__()
         self.out_features, self.in_features = reference_weight.shape
         assert self.in_features % in_group_size == 0
-        assert self.out_features % out_group_size == 0
+        assert self.out_features % out_group_size == 0        
         if nbits_per_codebook > torch.iinfo(code_dtype).bits - is_signed(code_dtype):
             raise ValueError(f"Code dtype cannot store {nbits_per_codebook} bits; please specify code_dtype manually")
+
+        assert num_codebooks == 1, "TODO multiple adaptive codebooks not yet implemented"
+        assert out_group_size == 1, "TODO output-group-adaptive codebooks not yet implemented"
+
 
         self.out_group_size, self.in_group_size = out_group_size, in_group_size
         self.num_codebooks = num_codebooks
@@ -106,10 +150,18 @@ class QuantizedWeight(nn.Module):
             codebook_size=self.codebook_size,
             **init_kwargs,
         )
+        
+        ### BEGIN SHENANIGANS
+        device = reference_weight.device
+        self.codebook_adapter = FirstAdaptiveCodebook(self.in_features, in_group_size, nbits_per_codebook).to(device)
+        codebook_index = 0 # TODO multiple codebooks not implemented
+        with torch.no_grad():
+            self.codebook_adapter.base_codebook.weight[...] = codebooks[codebook_index].view_as(self.codebook_adapter.base_codebook.weight)
+#         self.codebooks = nn.Parameter(
+#             codebooks, requires_grad=True
+#         )  # [num_codebooks, codebook_size, out_group_size, in_group_size]
+        ### END SHENANIGANS
 
-        self.codebooks = nn.Parameter(
-            codebooks, requires_grad=True
-        )  # [num_codebooks, codebook_size, out_group_size, in_group_size]
         self.codes: Optional[nn.Parameter] = nn.Parameter(
             codes.to(code_dtype), requires_grad=False
         )  # [num_out_groups, num_in_groups, num_codebooks]
@@ -141,41 +193,7 @@ class QuantizedWeight(nn.Module):
 
     def get_codebooks(self) -> torch.Tensor:
         """Get quantization codebooks or reconstruct them from second level quantization (see codebook_values_nbits)"""
-        if self.codebook_value_nbits >= 16:
-            return self.codebooks
-        elif 0 < self.codebook_value_nbits < 16:
-            with torch.no_grad():
-                codebooks_dimshuffle = (
-                    self.codebooks.reshape(
-                        self.num_codebooks,
-                        self.codebook_value_num_groups,
-                        self.codebook_size // self.codebook_value_num_groups,
-                        self.out_group_size,
-                        self.in_group_size,
-                    )
-                    .permute(0, 1, 3, 4, 2)
-                    .flatten(0, -2)
-                )
-                self.codebook_value_clusters, _unused, reconstructed_codebooks_dimshuffle = fit_kmeans_1d(
-                    codebooks_dimshuffle,
-                    k=2**self.codebook_value_nbits,
-                    initial_clusters=self.codebook_value_clusters,
-                )
-                reconstructed_codebooks = (
-                    reconstructed_codebooks_dimshuffle.view(
-                        self.num_codebooks,
-                        self.codebook_value_num_groups,
-                        self.out_group_size,
-                        self.in_group_size,
-                        self.codebook_size // self.codebook_value_num_groups,
-                    )
-                    .permute(0, 1, 4, 2, 3)
-                    .reshape_as(self.codebooks)
-                )
-            if torch.is_grad_enabled():
-                reconstructed_codebooks = reconstructed_codebooks + (self.codebooks - self.codebooks.detach())
-            return reconstructed_codebooks
-        raise NotImplementedError(f"{self.codebook_value_nbits}-bit codebook values are not supported")
+        raise NotImplementedError("TODO")
 
     def get_scales(self) -> torch.Tensor:
         """Get per-channel or per-group quantization scales or reconstruct those scales based on scales_nbits"""
@@ -206,7 +224,14 @@ class QuantizedWeight(nn.Module):
             Formally, the indices must be in range [ 0 , self.out_features // self.out_group_size )
 
         """
-        weight = _dequantize_weight(self.get_codes()[selection], self.get_codebooks(), self.get_scales()[selection])
+        num_input_groups = self.in_features // self.in_group_size
+        device = self.codes.device
+        codebooks = self.codebook_adapter(
+            torch.arange(num_input_groups, device=device).view(-1, 1),
+            torch.arange(2 ** self.nbits_per_codebook, device=device).view(1, -1)
+        ).reshape(num_input_groups, 1, 2 ** self.nbits_per_codebook, self.out_group_size, self.in_group_size)
+                                        #   ^-- this '1' is for num_codebooks, currently hard-coded as 1
+        weight = _dequantize_weight(self.get_codes()[selection], codebooks, self.get_scales()[selection])
         return weight
 
     @torch.no_grad()
@@ -234,7 +259,18 @@ class QuantizedWeight(nn.Module):
         :param kwargs: any additional keyword arguments are forwarded to beam_search_optimal_codes function
         :returns: the updated codes, in the same shape as self.get_codes()[selection]
         """
-        codebooks = self.get_codebooks()
+        ### BEGIN SHENANIGS
+#         codebooks = self.get_codebooks()
+        num_input_groups = self.in_features // self.in_group_size
+        device = self.codes.device
+        codebooks = self.codebook_adapter(
+            torch.arange(num_input_groups, device=device).view(-1, 1),
+            torch.arange(2 ** self.nbits_per_codebook, device=device).view(1, -1)
+        ).reshape(num_input_groups, 1, 2 ** self.nbits_per_codebook, self.out_group_size, self.in_group_size)
+                                        #   ^-- this '1' is for num_codebooks, currently hard-coded as 1
+
+        ### END SHENANIGANS
+
         prev_codes = self.get_codes()[selection]
         scales = self.get_scales()[selection]
         if XTX is not None:
@@ -247,6 +283,7 @@ class QuantizedWeight(nn.Module):
                 **kwargs,
             )
         else:
+            raise NotImplementedError("TODO")
             new_codes = beam_search_minimize_weight_mse(
                 reference_weight=reference_weight, codebooks=codebooks, prev_codes=prev_codes, scales=scales, **kwargs
             )

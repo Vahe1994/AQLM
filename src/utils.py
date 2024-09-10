@@ -67,20 +67,27 @@ def _dequantize_weight(
 ) -> torch.Tensor:
     """
     Decode float weights from quantization codes. Differentiable.
-    :param codes: tensor of integer quantization codes, shape [*dims, num_out_groups, num_in_groups, num_codebooks]
-    :param codebooks: tensor of vectors for each quantization code, [num_codebooks, codebook_size, out_group_size, in_group_size]
+    :param codes: tensor of integer quantization codes,
+        shape [*dims, num_out_groups, num_in_groups, num_codebooks]
+    :param codebooks: tensor of vectors for each quantization code,
+        shape [num_in_groups or 1, num_codebooks, codebook_size, out_group_size, in_group_size]
+        If the first dimension is 1, the code will use one codebook for all groups
     :param scales: weight will be multiplied by this factor, must be broadcastble with [*dims, out_groups, num_in_groups, out_group_size, in_group_size]
     :return: reconstructed weight tensor of shape [*dims, num_in_groups*group_size]
     """
+    if codebooks.ndim == 4:
+        codebooks = codebooks[None]
+    assert codebooks.ndim == 5
     num_out_groups, num_in_groups, num_codebooks = codes.shape[-3:]
-    num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
+    num_in_groups_or_1, num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
     out_features = num_out_groups * out_group_size
     in_features = num_in_groups * in_group_size
+
     codebook_offsets = torch.arange(
-        0, num_codebooks * codebook_size, codebook_size, device=codes.device
-    )  # shape: [num_codebooks]
+        0, num_in_groups_or_1 * num_codebooks * codebook_size, codebook_size, device=codes.device
+    ).reshape(num_in_groups_or_1, num_codebooks)
     reconstructed_weight_flat = F.embedding_bag(
-        codes.flatten(0, -2) + codebook_offsets, codebooks.flatten(0, 1).flatten(-2, -1), mode="sum"
+        (codes + codebook_offsets).flatten(0, -2), codebooks.flatten(0, 2).flatten(-2, -1), mode="sum"
     )  # [prod(dims) * num_out_groups * num_in_groups, out_group_size * in_group_size]
 
     reconstructed_weight_groupwise = reconstructed_weight_flat.view(

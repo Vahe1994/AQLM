@@ -26,7 +26,7 @@ def beam_search_optimal_codes(
     :param XTX: pairwise products of input features matmul(X.transpose(), X), shape: [in_features, in_features]
     :note: if XTX is divided by dataset size, this function will return *mean* squared error
     :param reference_weight: original weight matrix that is being quantized, shape: [out_features, in_features]
-    :param codebooks: look-up tables of codes, shape: [num_codebooks, codebook_size, out_group_siz, in_group_size]
+    :param codebooks: look-up tables of codes, shape: [in_groups or 1, num_codebooks, codebook_size, out_group_siz, in_group_size]
     :param prev_codes: previous-best integer weight codes, shape: [num_out_groups, num_in_groups, num_codebooks]
     :param scales: weight will be multiplied by this factor, shape = [num_out_groups, num_in_groups or 1, 1, 1]
     :param dim_rng: a source of randomness to (optionally) shuffle the order in which the beam search runs
@@ -60,8 +60,9 @@ def beam_search_optimal_codes(
     This should be treated as an educated guess with no proof and no ablation (as of the time of writing).
 
     """
+    assert codebooks.ndim == 5
     num_out_groups, num_in_groups, num_codebooks = prev_codes.shape
-    num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
+    _, num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
     in_features = num_in_groups * in_group_size
     out_features = num_out_groups * out_group_size
     assert reference_weight.shape == (out_features, in_features)
@@ -81,7 +82,7 @@ def beam_search_optimal_codes(
     # beam_losses shape: [current beam_size, num_out_groups], initial beam_size = 1
     if sparsity_regularizer != 0:
         beam_losses = beam_losses - sparsity_regularizer * (prev_codes == 0).sum(dim=(-1, -2))[None, :]
-
+    
     if verbose:
         progressbar = trange(num_in_groups * num_codebooks)
 
@@ -98,7 +99,7 @@ def beam_search_optimal_codes(
             best_losses, best_indices = _beam_search_squared_errors(
                 XTX=XTX,
                 reference_weight=reference_weight,
-                codebooks=codebooks,
+                codebooks=codebooks[input_group_index % codebooks.shape[0]],
                 scales=scales,
                 beam_losses=beam_losses,
                 beam_codes=beam_codes,
