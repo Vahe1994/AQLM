@@ -18,7 +18,7 @@ Learn how to run the prequantized models using this Google Colab examples:
 
 ### Browser demo
 
-We have implemented a demo that runs AQLM models in the browser using WebAssembly. The demo is available [here](https://galqiwi.github.io/aqlm-rs/).
+We have implemented a demo that runs AQLM models in the browser using WebAssembly. The demo is available [here](https://galqiwi.github.io/aqlm-rs/about.html).
 
 ### Models
 
