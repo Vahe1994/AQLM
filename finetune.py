@@ -55,7 +55,7 @@ def str2bool(arg: str) -> bool:
     if arg.lower() == "false":
         return False
     raise ValueError("Wrong argument format")
-    
+
 
 def add_model_args(parser: argparse.ArgumentParser):
     parser.add_argument(
@@ -695,9 +695,9 @@ def wrap_model_with_fsdp_(
     model = FullyShardedDataParallel(model, auto_wrap_policy=_modified_auto_wrap_policy, **kwargs)
 
     assert isinstance(model.module, transformers.PreTrainedModel)
-    assert isinstance(base_model, FullyShardedDataParallel)
+    assert isinstance(model.base_model, FullyShardedDataParallel)
     if wrap_lm_head:
-        assert isinstance(lm_head, FullyShardedDataParallel)
+        assert isinstance(model.get_output_embeddings(), FullyShardedDataParallel)
     return model
 
 
