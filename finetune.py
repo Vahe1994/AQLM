@@ -49,6 +49,14 @@ except ModuleNotFoundError:
     has_wandb = False
 
 
+def str2bool(arg: str) -> bool:
+    if arg.lower() == "true":
+        return True
+    if arg.lower() == "false":
+        return False
+    raise ValueError("Wrong argument format")
+    
+
 def add_model_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--base_model",
@@ -123,6 +131,12 @@ def add_model_args(parser: argparse.ArgumentParser):
         default=[],
         help="module classes (by name, similar to block_type) that will be wrapped in a separate fsdp instance and do "
         "not participate in FSDP AMP (if used). Applies to the student (de)quantized model, not the teacher model.",
+    )
+    parser.add_argument(
+        "--wrap_lm_head",
+        type=str2bool,
+        default=True,
+        help="Whether to wrap lm head in FSDP instance.",
     )
     parser.add_argument(
         "--attn_implementation",
@@ -543,6 +557,7 @@ def load_teacher_model(args: argparse.Namespace, device: torch.device) -> FullyS
     return wrap_model_with_fsdp_(
         model,
         auto_wrap_policy=lambda module, recurse, **_etc: recurse or isinstance(module, transformer_block_types),
+        wrap_lm_head=args.wrap_lm_head,
         cpu_offload=CPUOffload(offload_params=args.offload_teacher_params) if args.offload_teacher_params else None,
         limit_all_gathers=args.limit_all_gathers,
         forward_prefetch=args.forward_prefetch,
@@ -641,6 +656,7 @@ def load_student_model(
         student_model,
         use_orig_params=True,
         auto_wrap_policy=lambda module, recurse, **_etc: recurse or isinstance(module, block_types_to_wrap),
+        wrap_lm_head=args.wrap_lm_head,
         cpu_offload=CPUOffload(offload_params=args.offload_student_params) if args.offload_student_params else None,
         limit_all_gathers=args.limit_all_gathers,
         forward_prefetch=args.forward_prefetch,
@@ -664,20 +680,24 @@ def load_student_model(
 
 
 def wrap_model_with_fsdp_(
-    model: transformers.PreTrainedModel, auto_wrap_policy: callable, **kwargs
+    model: transformers.PreTrainedModel, auto_wrap_policy: callable, wrap_lm_head: bool = True, **kwargs
 ) -> FullyShardedDataParallel:
     """Wrap a model *ForCausalLM components: transformer and lm_head are wrapped as FSDP instances"""
     assert isinstance(model, transformers.PreTrainedModel) and is_model_for_causal_lm(model)
     base_model, lm_head = model.base_model, model.get_output_embeddings()
+    wrappable_modules = [base_model]
+    if wrap_lm_head:
+        wrappable_modules.append(lm_head)
 
     def _modified_auto_wrap_policy(module, recurse, **kwargs):
-        return auto_wrap_policy(module, recurse, **kwargs) or (module in (base_model, lm_head))
+        return auto_wrap_policy(module, recurse, **kwargs) or (module in wrappable_modules)
 
     model = FullyShardedDataParallel(model, auto_wrap_policy=_modified_auto_wrap_policy, **kwargs)
 
     assert isinstance(model.module, transformers.PreTrainedModel)
-    assert isinstance(model.base_model, FullyShardedDataParallel)
-    assert isinstance(model.get_output_embeddings(), FullyShardedDataParallel)
+    assert isinstance(base_model, FullyShardedDataParallel)
+    if wrap_lm_head:
+        assert isinstance(lm_head, FullyShardedDataParallel)
     return model
 
 
