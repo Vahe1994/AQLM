@@ -49,6 +49,91 @@ except ModuleNotFoundError:
     has_wandb = False
 
 
+####
+
+import os
+import sys
+import time
+import random
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import transformers
+
+from src.aq import QuantizedWeight, QuantizedLinear
+
+import torch
+from matmul_had import get_hadK
+from fast_hadamard_transform import hadamard_transform
+
+
+def matmul_hadU_cuda(X, hadK, K):
+    n = X.shape[-1]
+    if K == 1:
+        return hadamard_transform(X.contiguous(), 1/(n**0.5))
+
+    input = X.float().view(-1, K, n // K)
+    input = hadamard_transform(input.contiguous(), 1/(n**0.5))
+    input = hadK.to(input.device).to(input.dtype) @ input
+    return input.to(X.device).to(X.dtype).reshape(X.shape)
+
+
+class HadamardWrapper(nn.Module):
+    def __init__(self, SU, SV, inner, device='cuda'):
+        super().__init__()
+
+        assert False, 'NO_INIT'
+
+        self.out_dim, self.in_dim = len(SV), len(SU)
+
+        SU = SU.detach().clone().to(device).float()
+        SU.requires_grad = True
+
+        SV = SV.detach().clone().to(device).float()
+        SV.requires_grad = True
+        
+        self.register_buffer('SU', SU)
+        self.register_buffer('SV', SV)
+        self.inner = inner
+
+    def forward(self, x):
+        # assert isinstance(self.SU, nn.Parameter), type(self.SU)
+        # assert isinstance(self.SV, nn.Parameter), type(self.SV)
+
+        out_dim, in_dim = self.out_dim, self.in_dim
+        
+        had_left_T, K_left = get_hadK(in_dim)
+        if had_left_T is not None:
+            had_left_T = had_left_T.T.contiguous()
+            assert had_left_T.requires_grad == False
+        
+        had_right, K_right = get_hadK(out_dim)
+        if had_right is not None:
+            assert had_right.requires_grad == False
+
+        input_shape = x.shape
+        assert input_shape[-1] == in_dim
+
+        x = x.view(-1, in_dim)
+        # x = x.to(torch.float32)
+        x = x * self.SU
+        x = matmul_hadU_cuda(x, had_left_T, K_left) / 32
+        # x = x.to(torch.float16)
+
+        x = self.inner(x)
+
+        # x = x.to(torch.float32)
+        x = matmul_hadU_cuda(x, had_right, K_right)
+        x = x * self.SV * 32
+        # x = x.to(torch.float16)
+
+        x = x.reshape(tuple(input_shape[:-1]) + (out_dim,))
+
+        return x
+
+####
+
+
 def add_model_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--base_model",
