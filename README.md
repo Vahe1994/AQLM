@@ -4,7 +4,11 @@ Official PyTorch implementation for [Extreme Compression of Large Language Model
 
 **[2024.05]** AQLM was accepted to [ICML'2024](https://icml.cc/Conferences/2024)! If you're attending, meet us around [this poster](https://icml.cc/virtual/2024/poster/34964).
 
-**[2024.06]** there's a more effective way to tune quantized models with [PV-tuning](https://arxiv.org/abs/2405.14852)). We're releasing PV-tuned AQLM models [**in this collection**](https://huggingface.co/collections/ISTA-DASLab/aqlmpv-66564dff5d84f00a893ba93f) and the code is in the [pv-tuning branch](https://github.com/Vahe1994/AQLM/tree/pv-tuning). We'll merge the pv-tuning code into main after several technical improvements.
+**[2024.06]** We released a new paper that extends AQLM with new finetuning algorithm called [PV-tuning](https://arxiv.org/abs/2405.14852).
+We're also releasing PV-tuned AQLM models [**in this collection**](https://huggingface.co/collections/ISTA-DASLab/aqlmpv-66564dff5d84f00a893ba93f)
+
+**[2024.08]** We have [merged](https://github.com/Vahe1994/AQLM/commit/a441a3f0ece4cbaa2a91a3421c95a8b7432e4d99) the PV-Tuning branch into the main branch.
+To reproduce results with old finetuning (before Aug 21), use commit [559a366](https://github.com/Vahe1994/AQLM/commit/559a36681398d7189297fccf3b1e59e8e030e942).
 
 ## Inference
 
@@ -233,44 +237,55 @@ There are additional hyperparameters aviailable. Run `python main.py --help` for
 
 ### Finetuning
 
-**Note** this code will only fine-tune continuous parameters. To fine-tune both continuous and discrete parameters, please switch to [pv-tuning](https://github.com/Vahe1994/AQLM/tree/pv-tuning) branch and follow instructions in its readme.
+**Note** to reproduce results with old finetuning (before Aug 21), use commit [559a366](https://github.com/Vahe1994/AQLM/commit/559a36681398d7189297fccf3b1e59e8e030e942).
+Old version of finetuning produced worse results than new one even without PV-tuning, but was faster.
 
-The accuracy of the quantized model can be further improved via block finetuning. First, the logits 
-of the float16/bfloat16 are cached in RAM. Then the differentiable parameters of the quantized model
-are optimized to minimize KL-divergence with teacher logits. Typically, we use the same calibration data that was used for model quantization.
+The accuracy of the quantized model can be further improved via finetuning.
 
-The command to launch the script should look like this: 
+To use our new PV-Tuning algorithm, the command to launch the script should look like this: 
 
 ```bash
-python finetune.py \
-  --base_model $MODEL_PATH \
-  --quant_model $INPUT_PATH \
-  --dataset $DATASET_PATH \
-  --nsamples=<TOTAL_SIZE> \
-  --val_size=<VAL_SIZE> \
-  --lr=1e-5 \
-  --adam_beta1=0.90 \
-  --adam_beta2=0.999 \
-  --epochs=5 \
-  --early_stop=3 \
-  --batch_size=8 \
-  --microbatch_size=4 \
-  --save $DATA_PATH \
-  --gradient_checkpointing
+torchrun --nproc-per-node=$NUM_GPUS finetune.py \
+    --base_model $MODEL_PATH \
+    --quantized_model $QUANTIZED_WEIGHTS_PATH \
+    --model_seqlen=$SEQLEN \
+    --block_type LlamaDecoderLayer \
+    --load_dtype bfloat16 \
+    --amp_dtype bfloat16 \
+    --code_dtype uint16 \
+    --dataset_name=pajama \
+    --split none \
+    --seed 42 \
+    --preprocessing_chunk_length 100000 \
+    --cache_dir=$CACHE_DIR \
+    --trust_remote_code \
+    --update_codes \
+    --update_codebooks_and_scales \
+    --update_non_quantized_parameters \
+    --lamb \
+    --debias \
+    --lr 3e-4 \
+    --adam_beta1 0.90 \
+    --adam_beta2 0.95 \
+    --max_code_change_per_step 1e-2 \
+    --code_lr 1e-2 \
+    --code_beta1 0.0 \
+    --code_beta2 0.95 \
+    --beam_size 5 \
+    --delta_decay 0 \
+    --batch_size=128 \
+    --microbatch_size=1 \
+    --max_epochs 1 \
+    --gradient_checkpointing \
+    --print_every_steps=1 \
+    --verbose_optimizer \
+    --wandb \
+    --eval_every_steps=10 \
+    --keep_best_model \
+    --save $SAVE_PATH \
+    --save_every_steps 100 \
+    --attn_implementation flash_attention_2
 ```
-
-Main CLI arguments:
-- `--base_model` - path or name of the original floating-point model
-- `--quant_model` - path to quantized model weights.
-- `--dataset` - path or name of the calibration dataset
-- `--nsamples` - the number of calibration data _sequences_ (train + validation). If this parameter is not set, take all calibration data avaialble.
-- `--val_size` - the number of validation sequences for early stopping on end-to-end finetuning. By default equal to 0. Must be smaller than `--nsamples`.
-- `--gradient_checkpointing` - whether to use gradient checkpointing. Reduces peak memory usage at the cost of longer runtime.
-- `--finetune_dtype` - which dtype should be used on finetuning. By default `float32`. 
-- `--amp` - whether to use amp on finetuning. Requires `--finetune_dtype=float32`.
-
-For larger models one would need multi-GPU training. At the moment, FSDP training is not implemented and the model is finetuned on a single process with parameters sharded across available devices.
-
 
 ### Zero-shot benchmarks via LM Evaluation Harness
 
