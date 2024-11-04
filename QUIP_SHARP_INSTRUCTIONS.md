@@ -13,3 +13,4 @@ You can run it with finetune.py script.
 
 To make resulting checkpoint QUIP# compatible, you need to keep codes the same.
 Edit your `finetune.py` arguments by omitting `--update_codebooks_and_scales` flag.
+Note that the name is a bit misleading in described setup, as QUIP# scales will be actually updated.
