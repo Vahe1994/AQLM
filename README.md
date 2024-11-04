@@ -336,6 +336,9 @@ You may also specify flags such as `--save_safetensors` to control the saved mod
 
 Example command: `python convert_to_hf.py meta-llama/Llama-2-7b-hf ./path/to/saved/quantization ./converted-llama2-7b-hf  --save_safetensors`
 
+# Instructions for QuIP# finetuning
+Instructions for QuIP# finetuning can be found [here](https://github.com/Vahe1994/AQLM/blob/quip-sharp-patch/QUIP_SHARP_INSTRUCTIONS.md).
+
 ## Contributing
 
 If you want to contribute something substantial (more than a typo), please open an issue first.
