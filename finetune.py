@@ -682,7 +682,6 @@ def load_student_model(
 def wrap_model_with_fsdp_(
     model: transformers.PreTrainedModel, auto_wrap_policy: callable, monkeypatch_tied_embeddings: bool = False, **kwargs
 ) -> FullyShardedDataParallel:
-    model.config.tie_word_embeddings = False
     """Wrap a model *ForCausalLM components: transformer and lm_head are wrapped as FSDP instances"""
     assert isinstance(model, transformers.PreTrainedModel) and is_model_for_causal_lm(model)
     base_model, lm_head = model.base_model, model.get_output_embeddings()
