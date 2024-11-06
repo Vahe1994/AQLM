@@ -241,3 +241,6 @@ lm_eval --model hf --model_args pretrained=$MODEL_PATH,aqlm_checkpoint_path=$CON
 By default, the evaluation runs in float16 precision. For models native to bfloat16, we recommend chaning to dtype=bfloat16.
 
 That's it! You now know all you need to use PV-tuning for your models or reproduce our experiments.
+
+# Instructions for QuIP# finetuning
+Instructions for QuIP# finetuning can be found [here](https://github.com/Vahe1994/AQLM/blob/quip-sharp-patch/QUIP_SHARP_INSTRUCTIONS.md).
