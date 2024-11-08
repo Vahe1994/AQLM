@@ -7,11 +7,12 @@ import torch
 import torch.distributed
 import torch.nn as nn
 from torch.optim.optimizer import StateDict
+import numpy as np
 
 from src.aq import QuantizedWeight
 from src.configurable_adam import ConfigurableAdamW
 from src.pv_utils import YourQuantizedWeightIsInAnotherRank, print_runtime_stats
-
+from src.entropy_calculation import _get_entropy_penalties_upper_bound, _calculate_code_entropy
 
 class ParameterRole(Enum):
     QUANTIZED_PARAMETER = auto()  # entire quantized weight, in a de-quantized form
@@ -79,6 +80,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
         force_code_update: bool = False,
         stochastic_rounding_tau: float = 0,
         straight_through_buffer_dtype: Optional[torch.dtype] = None,
+        entropy_reg: float = 0.1,
         verbose: bool = False,
         **kwargs,
     ):
@@ -106,6 +108,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
         super().__init__(param_groups, **kwargs)
         self.ordered_quantized_weight_names = tuple(sorted(named_quantized_params.keys()))
         self.optimized_param_to_name = {param: name for name, param in all_optimized_params.items()}
+        self.entropy_reg = entropy_reg
         self.quantized_weights_by_name = {
             name: qw
             for name, qw in named_quantized_params.items()
@@ -316,7 +319,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
             reference_weights_by_name = self.straight_through_buffer_by_name
         else:
             reference_weights_by_name = self._aggregate_dequantized_weights()
-
+        avg_bits = []
         for param_group in self.param_groups:
             if param_group["role"] == ParameterRole.QUANTIZED_PARAMETER:
                 for param in param_group["params"]:
@@ -331,6 +334,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                     assert isinstance(quantized_weight, QuantizedWeight)
 
                     prev_codes = quantized_weight.get_codes().clone()  # [num_output_groups, num_input_groups]
+#                     print("we are here")
                     new_codes = quantized_weight.beam_search_update_codes_(
                         reference_weight=reference_weight,
                         beam_size=self.beam_size,
@@ -340,7 +344,10 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         code_selection_temperature=self.code_selection_temperature,
                         trust_ratio=self.code_trust_ratio,
                         dim_rng=random.Random(None),
+                        penalties=_get_entropy_penalties_upper_bound(prev_codes, num_codebooks=quantized_weight.num_codebooks,
+                                                                      nbits_per_codebook=quantized_weight.nbits_per_codebook,  regularizer=self.entropy_reg)
                     )  # note: this updates quantized_weight codes in-place
+                    avg_bits.append(_calculate_code_entropy(quantized_weight.get_codes(), num_codebooks=quantized_weight.num_codebooks, nbits_per_codebook=quantized_weight.nbits_per_codebook).mean().item())
                     if self.delta_decay != 0 and self.is_straight_through:
                         self.straight_through_buffer_by_name[name][...] = (
                             self.delta_decay * quantized_weight() + (1 - self.delta_decay) * reference_weight
@@ -374,7 +381,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                             f"{maybe_limit_msg}{maybe_individual_msg}\n{maybe_delta_msg}\n"
                         )
         assert len(remaining_quantized_weights) == 0
-
+        print("AVG entropy(not correct):", np.mean(avg_bits))
     @torch.no_grad()
     def _update_dequantized_weights(self):
         """Assign dequantized weight buffers to latest quantized weights after codebook/scale/code updates"""

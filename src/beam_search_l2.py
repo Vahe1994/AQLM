@@ -19,6 +19,8 @@ def beam_search_optimal_codes(
     beam_size: int,
     stochastic_rounding_tau: float = 0.0,
     chunk_size_bytes: int = 2**32,
+    penalties: Optional[torch.Tensor] = None,
+    penalty_weights: Optional[torch.Tensor] = None,
     dim_rng: Optional[random.Random] = None,
     force_update: bool = False,
     max_update_fraction: float = 1.0,
@@ -41,6 +43,10 @@ def beam_search_optimal_codes(
         then the probability of choosing each code is P_i = delta_i ^ -1/tau / (sum_j_in_choices delta_j ^ -1/tau).
         Note that if there is a code that has zero error, the algorithm will choose allways choose such a code
     :param chunk_size_bytes: process this many candidates at a time; reduce to save memory
+    :param penalties: additional penalty to loss for picking a given code, [num_codebooks, codebook_size]
+    :param penalty_weigths: multiplicative scale to penalties (same shape as codes) so that the final objective is 
+        ||reference_weight - dequantize(codes)||^2 + sum_[i,j,c] penalties[codes[i, j, c]] * penalty_weights[i,j,c]
+    
     :param force_update: if True, the algorithm will force codes to change even if code is optimal in terms
      of mean squared error. By default, the algorithm forces *all* weights to update this way, which may change weights
      too much. To limit the numer of updated weights, set max_code_change and trust_ratio.
@@ -67,6 +73,19 @@ def beam_search_optimal_codes(
     # reshape references, codes and codebooks so they are no longer group-wise
     num_output_groups, num_input_groups, num_codebooks = prev_codes.shape
     _num_codebooks, codebook_size, out_group_size, in_group_size = codebooks.shape
+    
+    if penalty_weights is not None:
+        assert penalties is not None
+        assert penalty_weights.shape == codes.shape  # (num_output_groups, num_input_groups, num_codebooks)
+    if penalties is not None:
+        assert penalties.shape == codebooks.shape[:2]  # (num_codebooks, codebook_size)
+        if penalty_weights is None:
+            penalty_weights = torch.ones_like(prev_codes, dtype=codebooks.dtype)
+        penalty_weights = penalty_weights / scales.square().squeeze(-1)
+        # why: in the inner beam search, we minimize un-scaled MSE; dividing penalty weights by scales^2 is ...
+        # ... equivalent to optimizing scaled MSE; weights with larger scales are more important.
+        
+        penalty_weights = penalty_weights.flatten(0, 1)  # [num_groups, num_codebooks]
 
     flat_unscaled_reference = reference_weight.reshape(
         num_output_groups, out_group_size, num_input_groups, in_group_size
@@ -76,8 +95,8 @@ def beam_search_optimal_codes(
     if scales is not None:
         flat_unscaled_reference = flat_unscaled_reference / scales
         # divide by scales; the resulting problem is equivalent to multiplying dequantized weight
-    flat_unscaled_reference = flat_unscaled_reference.flatten(2, 3).flatten(0, 1)
-    flat_prev_codes = prev_codes.flatten(0, -2)
+    flat_unscaled_reference = flat_unscaled_reference.flatten(2, 3).flatten(0, 1) # [num_output_groups*num_input_groups,out_group_size*in_group_size]
+    flat_prev_codes = prev_codes.flatten(0, -2) 
     flat_codebooks = codebooks.flatten(-2, -1).detach()
     dim_order = list(range(num_codebooks))
     if dim_rng is not None:
@@ -92,6 +111,8 @@ def beam_search_optimal_codes(
                 codebook=flat_codebooks[0],
                 chunk_size_values=chunk_size_bytes // _flat_reference[0, 0].nbytes,
                 code_dtype=prev_codes.dtype,
+                penalties=penalties,
+                penalty_weights=penalty_weights,
             )
         else:
             return _beam_search_update_codes_groupwise(
@@ -103,6 +124,8 @@ def beam_search_optimal_codes(
                 force_update=force_update,
                 chunk_size_values=chunk_size_bytes // _flat_reference[0, 0].nbytes,
                 dim_order=dim_order,
+                penalties=penalties,
+                penalty_weights=penalty_weights,
             )
 
     def _groupwise_squared_norms(delta: torch.Tensor):
@@ -137,6 +160,8 @@ def beam_search_optimal_codes(
     if max_update_fraction == 1:
         flat_new_codes = _update_flat_codes(flat_unscaled_reference, flat_prev_codes)
     else:
+        # may be penalty_weights -> penalty_weights[flat_indices_to_update]
+        penalty_weights = penalty_weights[flat_indices_to_update]
         flat_new_codes = flat_prev_codes.index_put(  # note: this is an out-of-place op that does not modify prev codes
             (flat_indices_to_update[:, None], torch.arange(num_codebooks, device=codebooks.device)[None, :]),
             _update_flat_codes(
@@ -176,6 +201,8 @@ def _beam_search_update_codes_groupwise(
     chunk_size_values: int,
     dim_order: Optional[List[int]],
     force_update: bool,
+    penalties: Optional[torch.Tensor],
+    penalty_weights: Optional[torch.Tensor],
 ) -> torch.Tensor:
     """
     :param reference: [num_groups, group_size]
@@ -183,6 +210,10 @@ def _beam_search_update_codes_groupwise(
     :param codebooks: [num_codebooks, codebook_size, group_size]
     :returns: [num_groups, num_codebooks]
     """
+    assert (penalty_weights is None) == (penalties is None)
+    if penalty_weights is not None:
+        assert penalties is not None
+        assert penalty_weights.shape == (len(reference), codes.shape[-1]), penalty_weights.shape
     if stochastic_rounding_tau > 0:
         assert beam_size >= 2, "with stochastic rounding, we need at least 2 hypotheses to choose from"
 
@@ -228,6 +259,14 @@ def _beam_search_update_codes_groupwise(
             else:
                 scores = -2 * scores + code_norms_sq[codebook_index]  # residue norms are const(j)
             # ^-- [num_groups_chunk, beam_size, codebook_size]
+            if penalty_weights is not None:
+                assert isinstance(penalties, torch.Tensor)
+                assert isinstance(penalty_weights, torch.Tensor)
+                scores = scores.add_(
+                    penalties[codebook_index, None, None, :] * 
+                    penalty_weights[chunk_start: chunk_start + chunk_size_rows, codebook_index, None, None]
+                )
+        
 
             flat_best_losses_chunk, flat_best_indices_chunk = torch.topk(
                 scores.flatten(1, 2),
@@ -271,23 +310,39 @@ def _beam_search_update_codes_groupwise(
 
 @maybe_script
 def _greedy_find_best_codes(
-    reference: torch.Tensor, codebook: torch.Tensor, chunk_size_values: int, code_dtype: torch.dtype
+    reference: torch.Tensor, codebook: torch.Tensor,
+    penalties: Optional[torch.Tensor],
+    penalty_weights: Optional[torch.Tensor],
+    chunk_size_values: int, code_dtype: torch.dtype,
 ) -> torch.Tensor:
     """
     :param reference: [num_groups, group_size]
     :param codebook: [codebook_size, group_size]
+    :param penalties: [codebook_size, 1]
+    :param penalty_weights: [num_groups, 1]
     :param chunk_size_values: how many values can be materialized in memory simultaneously
     :parma code_dtype the dtype of optimal codes returned by this function
     :returns: codes [num_groups, 1]
     """
+    assert (penalty_weights is None) == (penalties is None)
+    if penalty_weights is not None:
+        assert penalties is not None
+        assert penalty_weights.shape == (len(reference), 1)
+        penalties = penalties.flatten() # [codebook_size]
+        penalty_weights = penalty_weights.flatten() # [num_groups]
     codebook_t = codebook.T.contiguous()
     chunk_size = chunk_size_values // len(codebook)
     codebook_norms_sq = codebook.square().sum(dim=-1)
     new_codes = torch.empty((len(reference),), dtype=code_dtype, device=reference.device)
     for chunk_start in range(0, len(reference), chunk_size):
-        new_codes[chunk_start : chunk_start + chunk_size] = torch.addmm(
+        scores = torch.addmm(
             codebook_norms_sq[None], reference[chunk_start : chunk_start + chunk_size], codebook_t, alpha=-2
-        ).argmin(-1)
+        )  # ||quantized^2|| - 2 * <reference * codebook> + omitted_as_const[ || reference ||^2 ]
+        if penalty_weights is not None:
+            assert isinstance(penalties, torch.Tensor)
+            assert isinstance(penalty_weights, torch.Tensor)
+            scores = scores.add_(penalties[None, :] * penalty_weights[chunk_start: chunk_start + chunk_size, None])
+        new_codes[chunk_start : chunk_start + chunk_size] = scores.argmin(-1)
     return new_codes.unsqueeze(-1)
 
 
