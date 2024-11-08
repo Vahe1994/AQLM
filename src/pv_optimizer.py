@@ -334,7 +334,8 @@ class StraightThroughAdamW(ConfigurableAdamW):
                     assert isinstance(quantized_weight, QuantizedWeight)
 
                     prev_codes = quantized_weight.get_codes().clone()  # [num_output_groups, num_input_groups]
-#                     print("we are here")
+                    penalty_weights = torch.abs(reference_weight - quantized_weight())/(torch.abs(reference_weight.grad)+1e-8)
+                    
                     new_codes = quantized_weight.beam_search_update_codes_(
                         reference_weight=reference_weight,
                         beam_size=self.beam_size,
@@ -345,7 +346,9 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         trust_ratio=self.code_trust_ratio,
                         dim_rng=random.Random(None),
                         penalties=_get_entropy_penalties_upper_bound(prev_codes, num_codebooks=quantized_weight.num_codebooks,
-                                                                      nbits_per_codebook=quantized_weight.nbits_per_codebook,  regularizer=self.entropy_reg)
+                                                                      nbits_per_codebook=quantized_weight.nbits_per_codebook,  regularizer=self.entropy_reg),
+                        penalty_weights=_calculate_effective_learning_rates(
+                            quantized_weight, reference_weight, reference_weight.grad),
                     )  # note: this updates quantized_weight codes in-place
                     avg_bits.append(_calculate_code_entropy(quantized_weight.get_codes(), num_codebooks=quantized_weight.num_codebooks, nbits_per_codebook=quantized_weight.nbits_per_codebook).mean().item())
                     if self.delta_decay != 0 and self.is_straight_through:
@@ -451,6 +454,23 @@ class StraightThroughAdamW(ConfigurableAdamW):
         for name, loaded_values in straight_through_buffers.items():
             self.straight_through_buffer_by_name[name][...] = loaded_values
         super().load_state_dict(state_dict)
+
+    
+def _calculate_effective_learning_rates(
+    quantized_weight: QuantizedWeight, reference_weight: nn.Parameter, grad: torch.Tensor, percdamp: float = 1e-9
+) -> torch.Tensor:
+    out_features, in_features = reference_weight.shape
+
+    def _groupwise_norms(x):
+        return x.reshape(
+            out_features // quantized_weight.out_group_size, quantized_weight.out_group_size,
+            in_features // quantized_weight.in_group_size, quantized_weight.in_group_size
+        ).permute(0, 2, 1, 3).norm(dim=(2,3), p='fro')
+
+    denominator = _groupwise_norms(grad)
+    denominator = denominator.clamp_min(percdamp * denominator.mean())
+    effective_learning_rates = _groupwise_norms(reference_weight - quantized_weight()) / denominator
+    return effective_learning_rates.unsqueeze(-1).tile(1, 1, quantized_weight.num_codebooks)
 
 
 def _get_sharded_param_sizes_by_rank(named_dequantized_params: Dict[str, torch.Tensor]) -> Dict[str, Sequence[int]]:

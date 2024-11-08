@@ -76,7 +76,7 @@ def beam_search_optimal_codes(
     
     if penalty_weights is not None:
         assert penalties is not None
-        assert penalty_weights.shape == codes.shape  # (num_output_groups, num_input_groups, num_codebooks)
+        assert penalty_weights.shape == prev_codes.shape  # (num_output_groups, num_input_groups, num_codebooks)
     if penalties is not None:
         assert penalties.shape == codebooks.shape[:2]  # (num_codebooks, codebook_size)
         if penalty_weights is None:
