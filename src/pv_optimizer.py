@@ -82,6 +82,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
         straight_through_buffer_dtype: Optional[torch.dtype] = None,
         entropy_reg: float = 0.1,
         verbose: bool = False,
+        wandb = None,
         **kwargs,
     ):
         assert 0 <= delta_decay <= 1
@@ -145,6 +146,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
         self.stochastic_rounding_tau = stochastic_rounding_tau
         self.beam_size = beam_size
         self.verbose = verbose
+        self.wandb = wandb
 
     def _select_optimized_parameters(
         self,
@@ -334,7 +336,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                     assert isinstance(quantized_weight, QuantizedWeight)
 
                     prev_codes = quantized_weight.get_codes().clone()  # [num_output_groups, num_input_groups]
-                    penalty_weights = torch.abs(reference_weight - quantized_weight())/(torch.abs(reference_weight.grad)+1e-8)
+                    penalty_weights = 2*torch.abs(reference_weight - quantized_weight())/(torch.abs(reference_weight.grad)+1e-8)
                     
                     new_codes = quantized_weight.beam_search_update_codes_(
                         reference_weight=reference_weight,
@@ -385,6 +387,8 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         )
         assert len(remaining_quantized_weights) == 0
         print("AVG entropy(not correct):", np.mean(avg_bits))
+        if self.wandb:
+            self.wandb.log({"AVG entropy(not correct)": np.mean(avg_bits)})
     @torch.no_grad()
     def _update_dequantized_weights(self):
         """Assign dequantized weight buffers to latest quantized weights after codebook/scale/code updates"""

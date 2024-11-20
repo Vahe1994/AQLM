@@ -190,7 +190,7 @@ def beam_search_optimal_codes(
     return flat_new_codes.view_as(prev_codes)
 
 
-@maybe_script
+# @maybe_script
 def _beam_search_update_codes_groupwise(
     reference: torch.Tensor,
     codebooks: torch.Tensor,
@@ -262,11 +262,14 @@ def _beam_search_update_codes_groupwise(
             if penalty_weights is not None:
                 assert isinstance(penalties, torch.Tensor)
                 assert isinstance(penalty_weights, torch.Tensor)
+                _penalties = (
+                    penalties[codebook_index, None, None, :] * 
+                    penalty_weights[chunk_start: chunk_start + chunk_size_rows, codebook_index, None, None]
+                )
                 scores = scores.add_(
                     penalties[codebook_index, None, None, :] * 
                     penalty_weights[chunk_start: chunk_start + chunk_size_rows, codebook_index, None, None]
                 )
-        
 
             flat_best_losses_chunk, flat_best_indices_chunk = torch.topk(
                 scores.flatten(1, 2),
