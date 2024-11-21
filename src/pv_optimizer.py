@@ -321,7 +321,8 @@ class StraightThroughAdamW(ConfigurableAdamW):
             reference_weights_by_name = self.straight_through_buffer_by_name
         else:
             reference_weights_by_name = self._aggregate_dequantized_weights()
-        avg_bits = []
+        entropy_per_layer = []
+        codes_amount = 0
         for param_group in self.param_groups:
             if param_group["role"] == ParameterRole.QUANTIZED_PARAMETER:
                 for param in param_group["params"]:
@@ -352,7 +353,12 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         penalty_weights=_calculate_effective_learning_rates(
                             quantized_weight, reference_weight, reference_weight.grad),
                     )  # note: this updates quantized_weight codes in-place
-                    avg_bits.append(_calculate_code_entropy(quantized_weight.get_codes(), num_codebooks=quantized_weight.num_codebooks, nbits_per_codebook=quantized_weight.nbits_per_codebook).mean().item())
+                    
+                    codes_amount += torch.numel(quantized_weight.get_codes())
+                    avg_layer_entropy = _calculate_code_entropy(quantized_weight.get_codes(), num_codebooks=quantized_weight.num_codebooks, nbits_per_codebook=quantized_weight.nbits_per_codebook).mean().item()
+                    entropy_per_layer.append(avg_layer_entropy * torch.numel(quantized_weight.get_codes()))
+                    
+                    
                     if self.delta_decay != 0 and self.is_straight_through:
                         self.straight_through_buffer_by_name[name][...] = (
                             self.delta_decay * quantized_weight() + (1 - self.delta_decay) * reference_weight
@@ -386,9 +392,10 @@ class StraightThroughAdamW(ConfigurableAdamW):
                             f"{maybe_limit_msg}{maybe_individual_msg}\n{maybe_delta_msg}\n"
                         )
         assert len(remaining_quantized_weights) == 0
-        print("AVG entropy(not correct):", np.mean(avg_bits))
-        if self.wandb:
-            self.wandb.log({"AVG entropy(not correct)": np.mean(avg_bits)})
+        if codes_amount != 0:
+            print("AVG entropy:", np.sum(entropy_per_layer)/ codes_amount)
+            if self.wandb:
+                self.wandb.log({"AVG entropy": np.sum(entropy_per_layer)/ codes_amount})
     @torch.no_grad()
     def _update_dequantized_weights(self):
         """Assign dequantized weight buffers to latest quantized weights after codebook/scale/code updates"""

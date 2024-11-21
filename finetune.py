@@ -209,6 +209,12 @@ def add_finetuning_args(parser: argparse.ArgumentParser):
         " Please refer to the docstring of StraightThroughAdam for details.",
     )
     parser.add_argument(
+        "--entropy_reg",
+        type=float,
+        default=0.002,
+        help="Coefficient of entropy regularization. Higher the coefficent, entropy will have higher impact on overall loss.",
+    )
+    parser.add_argument(
         "--max_code_change_per_step",
         type=float,
         default=1e-2,
@@ -702,6 +708,7 @@ def create_pv_optimizer(
     args: argparse.Namespace,
     student_model: FullyShardedDataParallel,
     named_quantized_params: Dict[str, QuantizedWeight],
+    wandb = None
 ) -> torch.optim.Optimizer:
     """Create optimizer for PV-Tuning using a de-quantized student model and a dictionary of quantized weights"""
     named_dequantized_params = get_original_named_parameters_from_fsdp_module(student_model)
@@ -762,9 +769,11 @@ def create_pv_optimizer(
         max_code_change_per_step=args.max_code_change_per_step,
         force_code_update=args.force_code_update,
         code_trust_ratio=args.code_trust_ratio,
+        entropy_reg=args.entropy_reg,
         beam_size=args.beam_size,
         straight_through_buffer_dtype=args.straight_through_buffer_dtype,
         verbose=args.verbose_optimizer,
+        wandb = 
     )
 
 
@@ -1085,7 +1094,7 @@ def main():
                 print(name, param.shape, param.dtype)
 
     if use_pv_tuning:
-        optimizer = create_pv_optimizer(args, student_model, named_quantized_params)
+        optimizer = create_pv_optimizer(args, student_model, named_quantized_params, wandb = wandb)
     else:
         optimizer = create_p_optimizer(args, student_model)
     del named_quantized_params
