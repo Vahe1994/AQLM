@@ -99,7 +99,7 @@ def _get_autograd_matmul_op(forward_pass_kernel, backward_pass_kernel):
     class _QuantizedMatmul(torch.autograd.Function):
         @staticmethod
         def forward(
-            ctx: torch.Any,
+            ctx,
             input: torch.Tensor,
             codes: torch.IntTensor,
             codebooks: torch.Tensor,
