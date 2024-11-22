@@ -773,7 +773,7 @@ def create_pv_optimizer(
         beam_size=args.beam_size,
         straight_through_buffer_dtype=args.straight_through_buffer_dtype,
         verbose=args.verbose_optimizer,
-        wandb = 
+        wandb = wandb
     )
 
 
@@ -1094,7 +1094,7 @@ def main():
                 print(name, param.shape, param.dtype)
 
     if use_pv_tuning:
-        optimizer = create_pv_optimizer(args, student_model, named_quantized_params, wandb = wandb)
+        optimizer = create_pv_optimizer(args, student_model, named_quantized_params, wandb = wandb if args.wandb else None)
     else:
         optimizer = create_p_optimizer(args, student_model)
     del named_quantized_params
