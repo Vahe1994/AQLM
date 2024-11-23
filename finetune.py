@@ -1094,7 +1094,7 @@ def main():
                 print(name, param.shape, param.dtype)
 
     if use_pv_tuning:
-        optimizer = create_pv_optimizer(args, student_model, named_quantized_params, wandb = wandb if args.wandb else None)
+        optimizer = create_pv_optimizer(args, student_model, named_quantized_params, wandb = wandb if (args.wandb and rank == 0) else None)
     else:
         optimizer = create_p_optimizer(args, student_model)
     del named_quantized_params
