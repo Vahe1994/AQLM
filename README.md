@@ -235,6 +235,28 @@ Main CLI arguments:
 
 There are additional hyperparameters aviailable. Run `python main.py --help` for more details on command line arguments, including compression parameters.
 
+
+### Preparing fine-tuning dataset
+
+This is a script is used to pre-tokenize a subset of RedPajama data for future fine-tuning.
+
+```sh
+TARGET_MODEL=meta-llama/Llama-2-7b-hf  # used for tokenization
+SEQLEN=4096
+DATASET=togethercomputer/RedPajama-Data-1T-Sample
+OUTPUT_PATH=./redpajama_tokenized_llama2
+
+CUDA_VISIBLE_DEVICES=0 HF_HOME=/mnt/LLM OMP_NUM_THREADS=16 torchrun --master-port 3456 --nproc-per-node=1 finetune.py --base_model $TARGET_MODEL --quantized_model ./doesnt_matter --dtype bfloat16 --block_type LlamaDecoderLayer --dataset_name=$DATASET --split train --dataset_config_name plain_text --cache_dir=./cache_dir --trust_remote_code --model_seqlen=$SEQLEN --preprocessing_num_workers=64 --preprocessing_chunk_length 100000 --save_dataset_and_exit $OUTPUT_PATH
+
+tar -cvf tokenized_data_llama2.tar $OUTPUT_PATH   # optionally pack for distribution
+```
+
+The tokenized dataset is specific the model family (or more specifically, its tokenizer). For instance, Llama-3 8B is compatible with Llama-3 70B, but not with Llama-2 because it uses a different tokenizer.
+To tokenize the data for another model, you need to set 1) --base_model 2) model_seqlen and 3) the path to --save_dataset_and_exit .
+
+You can also set --preprocessing_num_workers to something hardware-appropriate. Note that setting --download_num_workers > 1 may cause download errors, possibly due to rate limit. These and other parameters are explained in the script's --help.
+The job requires 150-200 GiB of disk space to store the dataset sample and preprocessing cache. Both are stored in ./cache_dir and can be deleted afterwards.
+
 ### Finetuning
 
 **Note** to reproduce results with old finetuning (before Aug 21), use commit [559a366](https://github.com/Vahe1994/AQLM/commit/559a36681398d7189297fccf3b1e59e8e030e942).
@@ -253,7 +275,7 @@ torchrun --nproc-per-node=$NUM_GPUS finetune.py \
     --load_dtype bfloat16 \
     --amp_dtype bfloat16 \
     --code_dtype uint16 \
-    --dataset_name=pajama \
+    --dataset_name=$TOKENIZED_DATASET_PATH \
     --split none \
     --seed 42 \
     --preprocessing_chunk_length 100000 \
