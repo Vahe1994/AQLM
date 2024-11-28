@@ -1,6 +1,8 @@
-from typing import Optional
+from typing import Optional, Union
 import torch
 import huffman
+
+IntegerTypeTensor = Union[torch.LongTensor, torch.IntTensor, torch.ShortTensor, torch.ByteTensor]
 
 
 def _calculate_code_frequencies(codes: torch.LongTensor, num_codebooks: int, nbits_per_codebook: int ):
@@ -10,13 +12,19 @@ def _calculate_code_frequencies(codes: torch.LongTensor, num_codebooks: int, nbi
             codes[..., codebook_index].flatten(), minlength=2**nbits_per_codebook)
     return code_counts.float() / code_counts.sum(-1, keepdim=True)
 
-def _calculate_code_entropy(codes: torch.LongTensor, num_codebooks: int, nbits_per_codebook: int,  eps: float = 1e-20):
+
+def _calculate_code_entropy(
+        codes: IntegerTypeTensor, num_codebooks: int, nbits_per_codebook: int,  eps: float = 1e-20
+) -> torch.Tensor:
     """Calculate per-codebook code entropy measured in bits (base-2)"""
     probs = _calculate_code_frequencies(codes, num_codebooks, nbits_per_codebook)
     logprobs = torch.log2(probs.clamp_min(eps))
     return - torch.sum(probs * logprobs, dim=-1)
 
-def _get_huffman_penalties_upper_bound(codes: torch.LongTensor, regularizer: float, num_codebooks: int, nbits_per_codebook: int):
+
+def _get_huffman_penalties_upper_bound(
+        codes: IntegerTypeTensor, regularizer: float, num_codebooks: int, nbits_per_codebook: int
+) -> torch.Tensor:
     """Compute log-probability penalties that minimize a linearized upper bound on entropy """
     penalties = torch.empty(num_codebooks, 2 ** nbits_per_codebook, device=codes.device, dtype=torch.float32)
     probs = _calculate_code_frequencies(codes, num_codebooks, nbits_per_codebook)
@@ -32,11 +40,17 @@ def _get_huffman_penalties_upper_bound(codes: torch.LongTensor, regularizer: flo
         penalties[codebook_index] = (regularizer / probs.shape[-1]) * code_lengths
     return penalties
 
-def _get_entropy_penalties_upper_bound(codes: torch.LongTensor, regularizer: float, num_codebooks: int, nbits_per_codebook: int, eps: Optional[float] = None):
+
+def _get_entropy_penalties_upper_bound(codes: IntegerTypeTensor,
+                                       regularizer: float,
+                                       num_codebooks: int,
+                                       nbits_per_codebook: int,
+                                       eps: Optional[float] = None
+                                       ) -> torch.Tensor:
     """Compute log-probability penalties that minimize a linearized upper bound on entropy """
     probs = _calculate_code_frequencies(codes, num_codebooks, nbits_per_codebook)
     num_codes = torch.as_tensor(codes[..., 0].numel(), device=probs.device)
     if eps is None:
         eps = 1. / num_codes
     logprobs = torch.log2(probs.clamp_min(eps))
-    return (- regularizer / probs.shape[-1]) * logprobs 
+    return (- regularizer / probs.shape[-1]) * logprobs

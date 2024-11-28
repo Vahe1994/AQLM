@@ -216,17 +216,19 @@ class StraightThroughAdamW(ConfigurableAdamW):
         return param_groups, all_optimized_params
 
     def step(self, *args, **kwargs):
+        with print_runtime_stats("_aggregate_gradients_for_dequantized_weights", enabled=self.verbose):
+            aggregated_grads_by_name = self._aggregate_gradients_for_dequantized_weights()
         with print_runtime_stats("_propagate_grads_to_optimized_parameters", enabled=self.verbose):
-            self._propagate_grads_to_optimized_parameters()
+            self._propagate_grads_to_optimized_parameters(aggregated_grads_by_name)
         with print_runtime_stats("super().step", enabled=self.verbose):
             original_output = super().step(*args, **kwargs)
         with print_runtime_stats("_optimize_quantized_weights", enabled=self.verbose):
-            self._optimize_quantized_weights()
+            self._optimize_quantized_weights(aggregated_grads_by_name)
         with print_runtime_stats("_update_dequantized_weights", enabled=self.verbose):
             self._update_dequantized_weights()
         return original_output
 
-    def _aggregate_gradients_for_dequantized_weights(self):
+    def _aggregate_gradients_for_dequantized_weights(self) -> Dict[str, torch.Tensor]:
         """collect full parameter gradients from fsdp-sharded parameters, return dict[name -> grad]"""
         grad_shards_by_name = dict()
 
@@ -277,9 +279,8 @@ class StraightThroughAdamW(ConfigurableAdamW):
         return aggregated_params_by_name
 
     @torch.no_grad()
-    def _propagate_grads_to_optimized_parameters(self):
+    def _propagate_grads_to_optimized_parameters(self, aggregated_grads_by_name: Dict[str, torch.Tensor]):
         """Ensure that every optimized parameter receives gradient"""
-        aggregated_grads_by_name = self._aggregate_gradients_for_dequantized_weights()
         for param_group in self.param_groups:
             for param in param_group["params"]:
                 name = self.optimized_param_to_name[param]
@@ -311,7 +312,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         quantized_weight.forward().backward(aggregated_grads_by_name[name])
 
     @torch.no_grad()
-    def _optimize_quantized_weights(self):
+    def _optimize_quantized_weights(self, aggregated_grads_by_name: Dict[str, torch.Tensor]):
         """Update discrete state representations to approximate straight through buffers"""
         # note: if sharded, this only updates the subset of quantized weights that are assigned to local rank
         remaining_quantized_weights = {
@@ -330,15 +331,14 @@ class StraightThroughAdamW(ConfigurableAdamW):
                     name = self.optimized_param_to_name[param]
                     quantized_weight = remaining_quantized_weights.pop(name)
                     reference_weight = reference_weights_by_name[name]
-                    assert reference_weight.shape == quantized_weight.shape, (
-                        reference_weight.shape,
-                        quantized_weight.shape,
-                    )
+                    grad_wrt_reference_weight = aggregated_grads_by_name[name]
                     assert isinstance(quantized_weight, QuantizedWeight)
+                    assert reference_weight.shape == quantized_weight.shape == grad_wrt_reference_weight.shape, (
+                        reference_weight.shape, quantized_weight.shape, grad_wrt_reference_weight.shape
+                    )
 
                     prev_codes = quantized_weight.get_codes().clone()  # [num_output_groups, num_input_groups]
-                    penalty_weights = 2*torch.abs(reference_weight - quantized_weight())/(torch.abs(reference_weight.grad)+1e-8)
-                    
+
                     new_codes = quantized_weight.beam_search_update_codes_(
                         reference_weight=reference_weight,
                         beam_size=self.beam_size,
@@ -348,17 +348,24 @@ class StraightThroughAdamW(ConfigurableAdamW):
                         code_selection_temperature=self.code_selection_temperature,
                         trust_ratio=self.code_trust_ratio,
                         dim_rng=random.Random(None),
-                        penalties=_get_entropy_penalties_upper_bound(prev_codes, num_codebooks=quantized_weight.num_codebooks,
-                                                                      nbits_per_codebook=quantized_weight.nbits_per_codebook,  regularizer=self.entropy_reg),
+                        penalties=_get_entropy_penalties_upper_bound(
+                            prev_codes,
+                            num_codebooks=quantized_weight.num_codebooks,
+                            nbits_per_codebook=quantized_weight.nbits_per_codebook,
+                            regularizer=self.entropy_reg
+                        ),
                         penalty_weights=_calculate_effective_learning_rates(
-                            quantized_weight, reference_weight, reference_weight.grad),
+                            quantized_weight, reference_weight, grad_wrt_reference_weight),
                     )  # note: this updates quantized_weight codes in-place
                     
                     codes_amount += torch.numel(quantized_weight.get_codes())
-                    avg_layer_entropy = _calculate_code_entropy(quantized_weight.get_codes(), num_codebooks=quantized_weight.num_codebooks, nbits_per_codebook=quantized_weight.nbits_per_codebook).mean().item()
+                    avg_layer_entropy = _calculate_code_entropy(
+                        quantized_weight.get_codes(),
+                        num_codebooks=quantized_weight.num_codebooks,
+                        nbits_per_codebook=quantized_weight.nbits_per_codebook
+                    ).mean().item()
                     entropy_per_layer.append(avg_layer_entropy * torch.numel(quantized_weight.get_codes()))
-                    
-                    
+
                     if self.delta_decay != 0 and self.is_straight_through:
                         self.straight_through_buffer_by_name[name][...] = (
                             self.delta_decay * quantized_weight() + (1 - self.delta_decay) * reference_weight
@@ -470,6 +477,7 @@ class StraightThroughAdamW(ConfigurableAdamW):
 def _calculate_effective_learning_rates(
     quantized_weight: QuantizedWeight, reference_weight: nn.Parameter, grad: torch.Tensor, percdamp: float = 1e-9
 ) -> torch.Tensor:
+    assert grad is not None
     out_features, in_features = reference_weight.shape
 
     def _groupwise_norms(x):
