@@ -708,7 +708,7 @@ def create_pv_optimizer(
     args: argparse.Namespace,
     student_model: FullyShardedDataParallel,
     named_quantized_params: Dict[str, QuantizedWeight],
-    wandb = None
+    wandb=None,
 ) -> torch.optim.Optimizer:
     """Create optimizer for PV-Tuning using a de-quantized student model and a dictionary of quantized weights"""
     named_dequantized_params = get_original_named_parameters_from_fsdp_module(student_model)
@@ -773,7 +773,7 @@ def create_pv_optimizer(
         beam_size=args.beam_size,
         straight_through_buffer_dtype=args.straight_through_buffer_dtype,
         verbose=args.verbose_optimizer,
-        wandb = wandb
+        wandb=wandb,
     )
 
 
@@ -1094,7 +1094,9 @@ def main():
                 print(name, param.shape, param.dtype)
 
     if use_pv_tuning:
-        optimizer = create_pv_optimizer(args, student_model, named_quantized_params, wandb = wandb if (args.wandb and rank == 0) else None)
+        optimizer = create_pv_optimizer(
+            args, student_model, named_quantized_params, wandb=wandb if (args.wandb and rank == 0) else None
+        )
     else:
         optimizer = create_p_optimizer(args, student_model)
     del named_quantized_params
