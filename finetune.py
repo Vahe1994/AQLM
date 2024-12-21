@@ -1182,6 +1182,8 @@ def main():
                 if args.wandb and rank == 0:
                     wandb.log(metadata, step=metadata["total_microbatches"])
                 if args.save_every_steps and metadata["total_optimizer_steps"] % args.save_every_steps == 0:
+                    if not args.keep_best_model:
+                        save_model(args, student_model, optimizer)
                     save_training_state(args, metadata, student_model, optimizer)
 
         metadata["microbatches_since_epoch_start"] = 0
