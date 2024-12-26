@@ -102,14 +102,14 @@ if __name__ == "__main__":
 
             matmul = CUDA_KERNEL.code1x16_matmat if args.nbits_per_codebook == 16 else CUDA_KERNEL.code2x8_matmat
 
-            output = matmul(input, codes, codebooks, scales)
+            output = matmul(input, codes, codebooks, scales, None)
             if args.log_error:
                 print(
                     f"Relative error: {(torch.mean(torch.abs(output_ref - output)) / torch.mean(torch.abs(output_ref))).item():.2e}"
                 )
 
             dense += benchmark(lambda: F.linear(input, weight, out=output_ref), args.warmup_iters, args.benchmark_iters)
-            quant += benchmark(lambda: matmul(input, codes, codebooks, scales), args.warmup_iters, args.benchmark_iters)
+            quant += benchmark(lambda: matmul(input, codes, codebooks, scales, None), args.warmup_iters, args.benchmark_iters)
 
         print(f"{model}: Dense forward = {dense * 1e6:.0f} mus")
         print(f"{model}: Quant forward = {quant * 1e6:.0f} mus")
