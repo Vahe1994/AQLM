@@ -589,7 +589,7 @@ void  code2x8_matvec_cuda(
   int threads = 32 * thread_m;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
   const bool is_turing = cc_major == 7 && cc_minor == 5;
-  if (is_turing) {
+  if (!is_turing) {
     int shared = 16 * (2 * 256 * 8 + 32 * 9);
     cudaFuncSetAttribute(
       Code2x8MatVec<use_bfloat16>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared
@@ -655,7 +655,7 @@ void  code2x8_dequant_cuda(
   int threads = 32 * thread_m;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
   const bool is_turing = cc_major == 7 && cc_minor == 5;
-  if (is_turing) {
+  if (!is_turing) {
     int shared = 16 * (2 * 256 * 8 + 32 * 9);
     if (use_bfloat16) {
       cudaFuncSetAttribute(
