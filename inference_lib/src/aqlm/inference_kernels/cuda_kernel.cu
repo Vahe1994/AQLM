@@ -6,8 +6,6 @@
 
 #include <iostream>
 
-#include <stdexcept>
-
 template<bool use_bfloat16, size_t group_size>
 __global__ void Code1x16MatVec(
   const int4* __restrict__ A,
@@ -609,9 +607,6 @@ void  code2x8_matvec_cuda(
     cudaFuncSetAttribute(
       CodeKx8MatVec<use_bfloat16, 2>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared
     );
-    if (cudaGetLastError() != cudaSuccess) {
-      throw std::runtime_error("618");
-    }
     CodeKx8MatVec<use_bfloat16, 2><<<blocks, threads, shared, stream>>>(
       (const int4*) A,
       (const int4*) B,
@@ -620,9 +615,6 @@ void  code2x8_matvec_cuda(
       prob_m,
       prob_k
     );
-    if (cudaGetLastError() != cudaSuccess) {
-      throw std::runtime_error("628");
-    }
   }
 }
 
@@ -701,9 +693,6 @@ void  code2x8_dequant_cuda(
         prob_m,
         prob_k
       );
-      if (cudaGetLastError() != cudaSuccess) {
-          throw std::runtime_error("722");
-      }
     } else {
       cudaFuncSetAttribute(
         CodeKx8Dequant<false, 2>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared
@@ -715,9 +704,6 @@ void  code2x8_dequant_cuda(
         prob_m,
         prob_k
       );
-      if (cudaGetLastError() != cudaSuccess) {
-        throw std::runtime_error("748");
-      }
     }
   }
 }
