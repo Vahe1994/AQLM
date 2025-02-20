@@ -297,184 +297,177 @@ __global__ void Code2x8Dequant(
   }
 }
 
-template<bool use_bfloat16>
-__global__ void Code1x8MatVec(
+template<bool use_bfloat16, int K>
+__global__ void CodeKx8MatVec(
   const int4* __restrict__ A,
   const int4* __restrict__ B,
         int4* __restrict__ C,
   const int4* __restrict__ codebook,
   int prob_m,
-  int prob_k,
-  bool add_to_c,
-  size_t enc_offset
+  int prob_k
 ) {
-  int a_gl_stride = prob_k / 8 / 8;
-  int a_gl_rd = (blockDim.x / 32) * blockIdx.x + (threadIdx.x / 32);
-  bool pred = a_gl_rd < prob_m;
-  int b_gl_rd = 0;
-  int c_gl_wr = a_gl_rd;
-  a_gl_rd = a_gl_stride * a_gl_rd + threadIdx.x % 32;
-  int a_gl_end = a_gl_rd + a_gl_stride - threadIdx.x % 32;
-  int lane = threadIdx.x % 8;
-
   extern __shared__ int4 sh[];
   int4* sh_b = sh;
   int4* sh_code = sh_b + 32 * 9;
 
-  for (int i = threadIdx.x; i < 256; i += blockDim.x) {
-    int4 dec = codebook[i];
-    #pragma unroll
-    for (int j = 0; j < 8; j++)
-      sh_code[8 * i + (j + lane) % 8] = dec;
-  }
-  __syncthreads();
+  float res_accum = 0;
+  int c_gl_wr = (blockDim.x / 32) * blockIdx.x + (threadIdx.x / 32);
+  bool pred = c_gl_wr < prob_m;
 
-  float res = 0;
+  for (int codebook_idx = 0; codebook_idx < K; codebook_idx++) {
+    int a_gl_stride = prob_k / 8 / 8;
+    int a_gl_rd = c_gl_wr;
+    int b_gl_rd = 0;
+    a_gl_rd = a_gl_stride * a_gl_rd + threadIdx.x % 32;
+    int a_gl_end = a_gl_rd + a_gl_stride - threadIdx.x % 32;
+    int lane = threadIdx.x % 8;
 
-  int iters = (prob_k / 8 + 8 * 32 - 1) / (8 * 32);
-  while (iters--) {
-    // We pad shared memory to avoid bank conflicts during reads
-    __syncthreads();
-    for (int i = threadIdx.x; i < 32 * 8; i += blockDim.x) {
-      if (b_gl_rd + i < prob_k / 8)
-        sh_b[9 * (i / 8) + i % 8] = B[b_gl_rd + i];
-    }
-    __syncthreads();
-    b_gl_rd += 32 * 8;
-
-    int b_sh_rd = 9 * (threadIdx.x % 32);
-    if (pred && a_gl_rd < a_gl_end) {
-      const uint8_t* enc = reinterpret_cast<const uint8_t*>(&A[a_gl_rd]);
+    for (int i = threadIdx.x; i < 256; i += blockDim.x) {
+      int4 dec = codebook[i + 256 * codebook_idx];
       #pragma unroll
-      for (int i = 0; i < 8; i++) {
-        if constexpr (use_bfloat16) {
-        #if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)
-          nv_bfloat162* a = reinterpret_cast<nv_bfloat162*>(&sh_code[8 * enc[2 * i + enc_offset] + lane]);
-          nv_bfloat162* b = reinterpret_cast<nv_bfloat162*>(&sh_b[b_sh_rd]);
-          nv_bfloat162 res2 = {};
-          #pragma unroll
-          for (int j = 0; j < 4; j++)
-            res2 = __hfma2(a[j], b[j], res2);
-          res += __bfloat162float(res2.x) + __bfloat162float(res2.y);
-        #endif
-        } else {
-          half2* a = reinterpret_cast<half2*>(&sh_code[8 * enc[2 * i + enc_offset] + lane]);
-          half2* b = reinterpret_cast<half2*>(&sh_b[b_sh_rd]);
-          half2 res2 = {};
-          #pragma unroll
-          for (int j = 0; j < 4; j++)
-            res2 = __hfma2(a[j], b[j], res2);
-          res += __half2float(res2.x) + __half2float(res2.y);
-        }
-        b_sh_rd++;
-      }
-      a_gl_rd += 32;
+      for (int j = 0; j < 8; j++)
+        sh_code[8 * i + (j + lane) % 8] = dec;
     }
+    __syncthreads();
+    float res = 0;
+
+    int iters = (prob_k / 8 + 8 * 32 - 1) / (8 * 32);
+    while (iters--) {
+      // We pad shared memory to avoid bank conflicts during reads
+      __syncthreads();
+      for (int i = threadIdx.x; i < 32 * 8; i += blockDim.x) {
+        if (b_gl_rd + i < prob_k / 8)
+          sh_b[9 * (i / 8) + i % 8] = B[b_gl_rd + i];
+      }
+      __syncthreads();
+      b_gl_rd += 32 * 8;
+
+      int b_sh_rd = 9 * (threadIdx.x % 32);
+      if (pred && a_gl_rd < a_gl_end) {
+        const uint8_t* enc = reinterpret_cast<const uint8_t*>(&A[a_gl_rd]);
+        #pragma unroll
+        for (int i = 0; i < 8; i++) {
+          if constexpr (use_bfloat16) {
+          #if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)
+            nv_bfloat162* a = reinterpret_cast<nv_bfloat162*>(&sh_code[8 * enc[2 * i + codebook_idx] + lane]);
+            nv_bfloat162* b = reinterpret_cast<nv_bfloat162*>(&sh_b[b_sh_rd]);
+            nv_bfloat162 res2 = {};
+            #pragma unroll
+            for (int j = 0; j < 4; j++)
+              res2 = __hfma2(a[j], b[j], res2);
+            res += __bfloat162float(res2.x) + __bfloat162float(res2.y);
+          #endif
+          } else {
+            half2* a = reinterpret_cast<half2*>(&sh_code[8 * enc[2 * i + codebook_idx] + lane]);
+            half2* b = reinterpret_cast<half2*>(&sh_b[b_sh_rd]);
+            half2 res2 = {};
+            #pragma unroll
+            for (int j = 0; j < 4; j++)
+              res2 = __hfma2(a[j], b[j], res2);
+            res += __half2float(res2.x) + __half2float(res2.y);
+          }
+          b_sh_rd++;
+        }
+        a_gl_rd += 32;
+      }
+    }
+
+    if (pred) {
+      #pragma unroll
+      for (int i = 16; i > 0; i /= 2)
+        res += __shfl_down_sync(0xffffffff, res, i);
+      res_accum += res;
+    }
+
+    __syncthreads();
   }
 
   if (pred) {
-    #pragma unroll
-    for (int i = 16; i > 0; i /= 2)
-      res += __shfl_down_sync(0xffffffff, res, i);
     if (threadIdx.x % 32 == 0) {
       if constexpr (use_bfloat16) {
-        if (add_to_c) {
-        #if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800) 
-          reinterpret_cast<__nv_bfloat16*>(C)[c_gl_wr] = __hadd(
-            reinterpret_cast<__nv_bfloat16*>(C)[c_gl_wr],
-            __float2bfloat16(res)
-          );
-        #endif
-        } else {
-          reinterpret_cast<__nv_bfloat16*>(C)[c_gl_wr] = __float2bfloat16(res);
-        }
+        reinterpret_cast<__nv_bfloat16*>(C)[c_gl_wr] = __float2bfloat16(res_accum);
       } else {
-        if (add_to_c) {
-          reinterpret_cast<__half*>(C)[c_gl_wr] = __hadd(
-            reinterpret_cast<__half*>(C)[c_gl_wr],
-            __float2half(res)
-          );
-        } else {
-          reinterpret_cast<__half*>(C)[c_gl_wr] = __float2half(res);
-        }
+        reinterpret_cast<__half*>(C)[c_gl_wr] = __float2half(res_accum);
       }
     }
   }
 }
 
-template<bool use_bfloat16>
-__global__ void Code1x8Dequant(
+template<bool use_bfloat16, int K>
+__global__ void CodeKx8Dequant(
   const int4* __restrict__ A,
         int4* __restrict__ C,
   const int4* __restrict__ codebook,
   int prob_m,
-  int prob_k,
-  bool add_to_c,
-  size_t enc_offset
+  int prob_k
 ) {
-  int a_gl_stride = prob_k / 8 / 8;
-  int a_gl_rd = (blockDim.x / 32) * blockIdx.x + (threadIdx.x / 32);
-  bool pred = a_gl_rd < prob_m;
-  a_gl_rd = a_gl_stride * a_gl_rd + threadIdx.x % 32;
-  int a_gl_end = a_gl_rd + a_gl_stride - threadIdx.x % 32;
-  int lane = threadIdx.x % 8;
-
-  int c_gl_stride = prob_k / 8;
-  int c_gl_wr = (blockDim.x / 32) * blockIdx.x + (threadIdx.x / 32);
-  c_gl_wr = c_gl_stride * c_gl_wr + (threadIdx.x % 32) * 8;
-
   extern __shared__ int4 sh[];
   int4* sh_code = sh;
 
-  for (int i = threadIdx.x; i < 256; i += blockDim.x) {
-    int4 dec = codebook[i];
-    #pragma unroll
-    for (int j = 0; j < 8; j++)
-      sh_code[8 * i + (j + lane) % 8] = dec;
-  }
-  __syncthreads();
+  for (int codebook_idx = 0; codebook_idx < K; codebook_idx++) {
+    int a_gl_stride = prob_k / 8 / 8;
+    int a_gl_rd = (blockDim.x / 32) * blockIdx.x + (threadIdx.x / 32);
+    bool pred = a_gl_rd < prob_m;
+    a_gl_rd = a_gl_stride * a_gl_rd + threadIdx.x % 32;
+    int a_gl_end = a_gl_rd + a_gl_stride - threadIdx.x % 32;
+    int lane = threadIdx.x % 8;
 
-  int iters = (prob_k / 8 - 1) / (8 * 32) + 1;
-  while (iters--) {
-    if (pred && a_gl_rd < a_gl_end) {
-      const uint8_t* enc = reinterpret_cast<const uint8_t*>(&A[a_gl_rd]);
+    int c_gl_stride = prob_k / 8;
+    int c_gl_wr = (blockDim.x / 32) * blockIdx.x + (threadIdx.x / 32);
+    c_gl_wr = c_gl_stride * c_gl_wr + (threadIdx.x % 32) * 8;
+
+    for (int i = threadIdx.x; i < 256; i += blockDim.x) {
+      int4 dec = codebook[i + 256 * codebook_idx];
       #pragma unroll
-      for (int i = 0; i < 8; i++) {
-        int4* c_ptr = &C[a_gl_rd * 8 + i];
-        if constexpr (use_bfloat16) {
-          #if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)
-            nv_bfloat162* c_bf16_ptr = reinterpret_cast<nv_bfloat162*>(c_ptr);
-            nv_bfloat162* a = reinterpret_cast<nv_bfloat162*>(&sh_code[8 * enc[2 * i + enc_offset] + lane]);
-            if (add_to_c) {
+      for (int j = 0; j < 8; j++)
+        sh_code[8 * i + (j + lane) % 8] = dec;
+    }
+    __syncthreads();
+
+    int iters = (prob_k / 8 - 1) / (8 * 32) + 1;
+    while (iters--) {
+      if (pred && a_gl_rd < a_gl_end) {
+        const uint8_t* enc = reinterpret_cast<const uint8_t*>(&A[a_gl_rd]);
+        #pragma unroll
+        for (int i = 0; i < 8; i++) {
+          int4* c_ptr = &C[a_gl_rd * 8 + i];
+          if constexpr (use_bfloat16) {
+            #if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)
+              nv_bfloat162* c_bf16_ptr = reinterpret_cast<nv_bfloat162*>(c_ptr);
+              nv_bfloat162* a = reinterpret_cast<nv_bfloat162*>(&sh_code[8 * enc[2 * i + codebook_idx] + lane]);
+              if (codebook_idx != 0) {
+                  #pragma unroll
+                  for (int j = 0; j < 4; j++) {
+                    c_bf16_ptr[j] = __hadd2(c_bf16_ptr[j], a[j]);
+                  }
+              } else {
+                  #pragma unroll
+                  for (int j = 0; j < 4; j++) {
+                    c_bf16_ptr[j] = a[j];
+                  }
+              }
+            #endif
+          } else {
+            half2* c_fp16_ptr = reinterpret_cast<half2*>(c_ptr);
+            half2* a = reinterpret_cast<half2*>(&sh_code[8 * enc[2 * i + codebook_idx] + lane]);
+            if (codebook_idx != 0) {
                 #pragma unroll
                 for (int j = 0; j < 4; j++) {
-                  c_bf16_ptr[j] = __hadd2(c_bf16_ptr[j], a[j]);
+                  c_fp16_ptr[j] = __hadd2(c_fp16_ptr[j], a[j]);
                 }
             } else {
                 #pragma unroll
                 for (int j = 0; j < 4; j++) {
-                  c_bf16_ptr[j] = a[j];
+                  c_fp16_ptr[j] = a[j];
                 }
             }
-          #endif
-        } else {
-          half2* c_fp16_ptr = reinterpret_cast<half2*>(c_ptr);
-          half2* a = reinterpret_cast<half2*>(&sh_code[8 * enc[2 * i + enc_offset] + lane]);
-          if (add_to_c) {
-              #pragma unroll
-              for (int j = 0; j < 4; j++) {
-                c_fp16_ptr[j] = __hadd2(c_fp16_ptr[j], a[j]);
-              }
-          } else {
-              #pragma unroll
-              for (int j = 0; j < 4; j++) {
-                c_fp16_ptr[j] = a[j];
-              }
           }
         }
       }
+      a_gl_rd += 32;
     }
-    a_gl_rd += 32;
+
+    __syncthreads();
   }
 }
 
@@ -614,36 +607,21 @@ void  code2x8_matvec_cuda(
   } else {
     int shared = 16 * (256 * 8 + 32 * 9);
     cudaFuncSetAttribute(
-      Code1x8MatVec<use_bfloat16>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared
+      CodeKx8MatVec<use_bfloat16, 2>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared
     );
     if (cudaGetLastError() != cudaSuccess) {
       throw std::runtime_error("618");
     }
-    Code1x8MatVec<use_bfloat16><<<blocks, threads, shared, stream>>>(
+    CodeKx8MatVec<use_bfloat16, 2><<<blocks, threads, shared, stream>>>(
       (const int4*) A,
       (const int4*) B,
       (int4*) C,
       (const int4*) codebook,
       prob_m,
-      prob_k,
-      false,
-      0
+      prob_k
     );
     if (cudaGetLastError() != cudaSuccess) {
       throw std::runtime_error("628");
-    }
-    Code1x8MatVec<use_bfloat16><<<blocks, threads, shared, stream>>>(
-      (const int4*) A,
-      (const int4*) B,
-      (int4*) C,
-      (const int4*) codebook + 256,
-      prob_m,
-      prob_k,
-      true,
-      1
-    );
-    if (cudaGetLastError() != cudaSuccess) {
-      throw std::runtime_error("640");
     }
   }
 }
@@ -714,59 +692,31 @@ void  code2x8_dequant_cuda(
     int shared = 16 * (256 * 8 + 32 * 9);
     if (use_bfloat16) {
       cudaFuncSetAttribute(
-        Code1x8Dequant<true>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared
+        CodeKx8Dequant<true, 2>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared
       );
-      Code1x8Dequant<true><<<blocks, threads, shared, stream>>>(
+      CodeKx8Dequant<true, 2><<<blocks, threads, shared, stream>>>(
         (const int4*) A,
         (int4*) C,
         (const int4*) codebook,
         prob_m,
-        prob_k, 
-        false,
-        0
+        prob_k
       );
       if (cudaGetLastError() != cudaSuccess) {
           throw std::runtime_error("722");
       }
-      Code1x8Dequant<true><<<blocks, threads, shared, stream>>>(
-        (const int4*) A,
-        (int4*) C,
-        (const int4*) codebook + 256,
-        prob_m,
-        prob_k, 
-        true,
-        1
-      );
-      if (cudaGetLastError() != cudaSuccess) {
-        throw std::runtime_error("733");
-      }
     } else {
       cudaFuncSetAttribute(
-        Code1x8Dequant<false>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared
+        CodeKx8Dequant<false, 2>, cudaFuncAttributeMaxDynamicSharedMemorySize, shared
       );
-      Code1x8Dequant<false><<<blocks, threads, shared, stream>>>(
+      CodeKx8Dequant<false, 2><<<blocks, threads, shared, stream>>>(
         (const int4*) A,
         (int4*) C,
         (const int4*) codebook,
         prob_m,
-        prob_k,
-        false,
-        0
+        prob_k
       );
       if (cudaGetLastError() != cudaSuccess) {
         throw std::runtime_error("748");
-      }
-      Code1x8Dequant<false><<<blocks, threads, shared, stream>>>(
-        (const int4*) A,
-        (int4*) C,
-        (const int4*) codebook + 256,
-        prob_m,
-        prob_k,
-        true,
-        1
-      );
-      if (cudaGetLastError() != cudaSuccess) {
-        throw std::runtime_error("759");
       }
     }
   }
