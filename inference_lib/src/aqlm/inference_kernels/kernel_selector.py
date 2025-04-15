@@ -62,10 +62,32 @@ def get_forward_pass_kernel(
         codebook_size,
         out_group_size,
         in_group_size,
+    ) == (False, "cuda", 1, 256, 1, 8):
+        from .cuda_kernel import CUDA_FOLDER
+
+        return torch.ops.aqlm.code1x8_matmat
+    elif (
+        optimize_for_training,
+        codebooks.device.type,
+        num_codebooks,
+        codebook_size,
+        out_group_size,
+        in_group_size,
     ) == (True, "cuda", 2, 256, 1, 8):
         from .cuda_kernel import CUDA_FOLDER
 
         return torch.ops.aqlm.code2x8_matmat_dequant
+    elif (
+        optimize_for_training,
+        codebooks.device.type,
+        num_codebooks,
+        codebook_size,
+        out_group_size,
+        in_group_size,
+    ) == (True, "cuda", 1, 256, 1, 8):
+        from .cuda_kernel import CUDA_FOLDER
+
+        return torch.ops.aqlm.code1x8_matmat_dequant
     elif (optimize_for_training, codebooks.device.type, out_group_size) == (False, "cuda", 1):
         from .triton_kernel import triton_matmul
 
@@ -107,6 +129,17 @@ def get_backward_pass_kernel(
         from .cuda_kernel import CUDA_FOLDER
 
         return torch.ops.aqlm.code2x8_matmat_dequant_transposed
+    elif (
+        optimize_for_training,
+        codebooks.device.type,
+        num_codebooks,
+        codebook_size,
+        out_group_size,
+        in_group_size,
+    ) == (True, "cuda", 1, 256, 1, 8):
+        from .cuda_kernel import CUDA_FOLDER
+
+        return torch.ops.aqlm.code1x8_matmat_dequant_transposed
     else:
         forward_pass_kernel = get_forward_pass_kernel(
             codebooks=codebooks.transpose(2, 3), optimize_for_training=optimize_for_training
