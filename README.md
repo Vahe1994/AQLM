@@ -2,7 +2,7 @@
 
 Official PyTorch implementation for [Extreme Compression of Large Language Models via Additive Quantization](https://arxiv.org/pdf/2401.06118.pdf)
 
-**[2025.04]** Released aqlm v1.1.7. Added support for arbitrary 8-dimensional codebooks on GPU, improved accuracy for 1-bit models, e.g. [ISTA-DASLab/Llama-2-7b-AQLM-1Bit-1x8-hf](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-1Bit-1x8-hf) at ~1 bit achieves WikiText 2 PPL 7.85. To quantize your own models this way, use `num_codebooks=1, nbits_per_codebook=256` as per the tutorial below.
+**[2025.04]** Released aqlm v1.1.7 (special thanks: [zeronsix@](github.com/zeronsix)). Added support for arbitrary 8-dimensional codebooks on GPU, improved accuracy for 1-bit models, e.g. [ISTA-DASLab/Llama-2-7b-AQLM-1Bit-1x8-hf](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-1Bit-1x8-hf) at ~1 bit achieves WikiText 2 PPL 7.85. To quantize your own models this way, use `num_codebooks=1, nbits_per_codebook=256` as per the tutorial below.
 
 **[2024.11]** [PV-tuning](https://proceedings.neurips.cc/paper_files/paper/2024/hash/091166620a04a289c555f411d8899049-Abstract-Conference.html) was accepted to [NeurIPS'2024](https://neurips.cc/Conferences/2024) for oral presentation!
 
