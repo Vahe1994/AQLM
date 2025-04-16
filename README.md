@@ -2,6 +2,10 @@
 
 Official PyTorch implementation for [Extreme Compression of Large Language Models via Additive Quantization](https://arxiv.org/pdf/2401.06118.pdf)
 
+**[2025.04]** Released aqlm v1.1.7. Added support for arbitrary 8-dimensional codebooks on GPU, improved accuracy for 1-bit models, e.g. [ISTA-DASLab/Llama-2-7b-AQLM-1Bit-1x8-hf](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-1Bit-1x8-hf) at ~1 bit achieves WikiText 2 PPL 7.85. To quantize your own models this way, use `num_codebooks=1, nbits_per_codebook=256` as per the tutorial below.
+
+**[2024.11]** [PV-tuning](https://proceedings.neurips.cc/paper_files/paper/2024/hash/091166620a04a289c555f411d8899049-Abstract-Conference.html) was accepted to [NeurIPS'2024](https://neurips.cc/Conferences/2024) for oral presentation!
+
 **[2024.05]** AQLM was accepted to [ICML'2024](https://icml.cc/Conferences/2024)! If you're attending, meet us around [this poster](https://icml.cc/virtual/2024/poster/34964).
 
 **[2024.06]** We released a new paper that extends AQLM with new finetuning algorithm called [PV-tuning](https://arxiv.org/abs/2405.14852).
@@ -57,6 +61,7 @@ You can also download AQLM models tuned via PV-tuning:
 | Llama-2-7b | 1x16g8        | 5.68          | 2.4            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-PV-2Bit-1x16-hf) |
 | Llama-2-7b | 2x8g8         | 5.90          | 2.2            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-PV-2Bit-2x8-hf)  |
 | Llama-2-7b | 1x16g16     | 9.21          | 1.7            | [Link](https://huggingface.co/justheuristic/Llama-2-7b-AQLM-PV-1Bit-1x16-hf)  |
+| Llama-2-7b | 1x8g8 (**New!**)     | 7.85          | 1.34            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-1Bit-1x8-hf)  |
 | Llama-2-13b| 1x16g8        | 5.05           | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-13b-AQLM-PV-2Bit-1x16-hf)|
 | Llama-2-70b| 1x16g8        | 3.78           | 18.8           | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-70b-AQLM-PV-2Bit-1x16-hf)|
 | Meta-Llama-3-8B | 1x16g8        | 6.99          | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-8B-AQLM-PV-2Bit-1x16) |
