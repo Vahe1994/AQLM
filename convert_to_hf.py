@@ -55,7 +55,7 @@ def get_converted_state_dict(config, nbits: int, in_path: os.PathLike) -> [dict,
     layers_prefix = get_layers_prefix(config)
 
     for i in trange(num_layers):
-        layer = torch.load(os.path.join(in_path, f"{i}.pth"))
+        layer = torch.load(os.path.join(in_path, f"{i}.pth"), weights_only=False)
         for name, p in layer.named_parameters():
             if torch.is_floating_point(p.data):
                 p.data = p.data.half()
