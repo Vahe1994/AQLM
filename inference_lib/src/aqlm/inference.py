@@ -92,7 +92,8 @@ class QuantizedLinear(nn.Module):
             get_backward_pass_kernel(self.codebooks, True),
         )
 
-        self.use_gemv_rule = lambda input: math.prod(input.shape[:-1]) <= 6
+        threshold = 224 if input.device.type == "xpu" else 6
+        self.use_gemv_rule = lambda input: math.prod(input.shape[:-1]) <= threshold
 
 
 def _get_autograd_matmul_op(forward_pass_kernel, backward_pass_kernel):
