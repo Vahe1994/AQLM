@@ -92,7 +92,7 @@ class QuantizedLinear(nn.Module):
             get_backward_pass_kernel(self.codebooks, True),
         )
 
-        threshold = 224 if input.device.type == "xpu" else 6
+        threshold = 256 if input.device.type == "xpu" else 6
         self.use_gemv_rule = lambda input: math.prod(input.shape[:-1]) <= threshold
 
 
