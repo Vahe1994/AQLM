@@ -88,7 +88,7 @@ def get_forward_pass_kernel(
         from .cuda_kernel import CUDA_FOLDER
 
         return torch.ops.aqlm.code1x8_matmat_dequant
-    elif (optimize_for_training, codebooks.device.type, out_group_size) == (False, "cuda", 1):
+    elif (optimize_for_training, out_group_size) == (False, 1) and codebooks.device.type in ("cuda", "xpu"):
         from .triton_kernel import triton_matmul
 
         return triton_matmul
