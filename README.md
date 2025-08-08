@@ -25,6 +25,13 @@ Learn how to run the prequantized models using this Google Colab examples:
 | <a target="_blank" href="https://colab.research.google.com/github/Vahe1994/AQLM/blob/main/notebooks/colab_example.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="AQLM In Colab"/></a>         | <a target="_blank" href="https://colab.research.google.com/github/Vahe1994/AQLM/blob/main/notebooks/streaming_example.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="AQLM In Colab"/></a> | <a target="_blank" href="https://colab.research.google.com/github/Vahe1994/AQLM/blob/main/notebooks/aqlm_cuda_graph.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a> | <a target="_blank" href="https://colab.research.google.com/github/Vahe1994/AQLM/blob/main/notebooks/aqlm_2bit_training.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>  | <a target="_blank" href="https://colab.research.google.com/github/Vahe1994/AQLM/blob/main/notebooks/aqlm_vllm.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a> |
 
 
+### Browser demo (Rust/WASM)
+
+If you want to try AQLM+PV inference on CPU directly in your browser, check out aqlm-rs:
+
+- **Live demo**: [galqiwi.github.io/aqlm-rs/about.html](https://galqiwi.github.io/aqlm-rs/about.html)
+- **Source code**: [galqiwi/demo-aqlm-rs](https://github.com/galqiwi/demo-aqlm-rs)
+
 ### Models
 
 This repository is currently designed to work with models of `LLaMA`, `Mistral` and `Mixtral` families.
