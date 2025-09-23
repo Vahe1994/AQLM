@@ -6,7 +6,7 @@ import torch
 from torch.nn import functional as F
 from tqdm.asyncio import trange
 
-from src.utils import _dequantize_weight, maybe_script
+from .utils import _dequantize_weight, maybe_script
 
 
 @torch.inference_mode()

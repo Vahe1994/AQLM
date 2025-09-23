@@ -16,7 +16,7 @@ from lm_eval.tasks import include_path, initialize_tasks
 from lm_eval.utils import make_table
 from transformers import AutoModelForCausalLM
 
-from src.modelutils import load_dequantized_model
+from .src.modelutils import load_dequantized_model
 
 
 def _handle_non_serializable(o):

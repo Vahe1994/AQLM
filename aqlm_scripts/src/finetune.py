@@ -12,8 +12,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.parallel.scatter_gather import Gather
 
-from aq_engine import replace_parameter_
-from src.utils import iterate_minibatches
+from ..aq_engine import replace_parameter_
+from .utils import iterate_minibatches
 
 
 @torch.enable_grad()

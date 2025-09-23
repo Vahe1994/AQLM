@@ -8,9 +8,9 @@ import torch.distributed
 import torch.nn as nn
 from torch.optim.optimizer import StateDict
 
-from src.aq import QuantizedWeight
-from src.configurable_adam import ConfigurableAdamW
-from src.pv_utils import YourQuantizedWeightIsInAnotherRank, print_runtime_stats
+from .aq import QuantizedWeight
+from .configurable_adam import ConfigurableAdamW
+from .pv_utils import YourQuantizedWeightIsInAnotherRank, print_runtime_stats
 
 
 class ParameterRole(Enum):

@@ -12,9 +12,9 @@ import torch
 import transformers.models
 from torch import nn
 
-from src.aq import QuantizedLinear, QuantizedWeight
-from src.modelutils import get_model, save_quantized_model
-from src.utils import is_signed
+from .src.aq import QuantizedLinear, QuantizedWeight
+from .src.modelutils import get_model, save_quantized_model
+from .src.utils import is_signed
 
 
 def load_quantized_model_with_old_pickle(base_model_name: str, quantized_model_name: str, **kwargs):

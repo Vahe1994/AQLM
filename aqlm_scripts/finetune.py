@@ -25,21 +25,21 @@ from torch.distributed.fsdp import (
 )
 from tqdm.auto import tqdm
 
-from convert_legacy_model_format import load_quantized_model_with_old_pickle
-from src.aq import QuantizedWeight
-from src.configurable_adam import ConfigurableAdamW
-from src.datautils import evaluate_perplexity, get_loaders, group_texts, split_long_texts
-from src.memory_efficient_loss import compute_kl_divergence_loss_values
-from src.modelutils import get_model, is_model_for_causal_lm
-from src.pv_optimizer import StraightThroughAdamW
-from src.pv_utils import (
+from .convert_legacy_model_format import load_quantized_model_with_old_pickle
+from .src.aq import QuantizedWeight
+from .src.configurable_adam import ConfigurableAdamW
+from .src.datautils import evaluate_perplexity, get_loaders, group_texts, split_long_texts
+from .src.memory_efficient_loss import compute_kl_divergence_loss_values
+from .src.modelutils import get_model, is_model_for_causal_lm
+from .src.pv_optimizer import StraightThroughAdamW
+from .src.pv_utils import (
     YourQuantizedWeightIsInAnotherRank,
     create_dequantized_model,
     get_original_named_parameters_from_fsdp_module,
     infer_module_classes,
     split_quantized_weights_between_ranks,
 )
-from src.utils import IntCodes, is_signed, master_rank_first, one_rank_at_a_time
+from .src.utils import IntCodes, is_signed, master_rank_first, one_rank_at_a_time
 
 try:
     import wandb
