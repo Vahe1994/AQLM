@@ -71,14 +71,28 @@ You can also download AQLM models tuned via PV-tuning:
 | Llama-2-7b | 1x8g8 (**New!**)     | 7.85          | 1.34            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-7b-AQLM-1Bit-1x8-hf)  |
 | Llama-2-13b| 1x16g8        | 5.05           | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-13b-AQLM-PV-2Bit-1x16-hf)|
 | Llama-2-70b| 1x16g8        | 3.78           | 18.8           | [Link](https://huggingface.co/ISTA-DASLab/Llama-2-70b-AQLM-PV-2Bit-1x16-hf)|
+| Meta-Llama-3.2-1B | 2x8g8        | -          | 0.8           | [Link](https://huggingface.co/ISTA-DASLab/Llama-3.2-1B-AQLM-PV-2Bit-2x8) |
+| Meta-Llama-3.2-1B-Instruct | 2x8g8        | -          | 0.8            | [Link](https://huggingface.co/ISTA-DASLab/Llama-3.2-1B-Instruct-AQLM-PV-2Bit-2x8) |
+| Meta-Llama-3.2-3B | 2x8g8        | -          | 1.5            | [Link](https://huggingface.co/ISTA-DASLab/Llama-3.2-3B-AQLM-PV-2Bit-2x8) |
+| Meta-Llama-3.2-3B-Instruct | 2x8g8        | -          | 1.5            | [Link](https://huggingface.co/ISTA-DASLab/Llama-3.2-3B-Instruct-AQLM-PV-2Bit-2x8) |
 | Meta-Llama-3-8B | 1x16g8        | 6.99          | 4.1            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-8B-AQLM-PV-2Bit-1x16) |
 | Meta-Llama-3-8B  | 1x16g16        | 9.43          | 3.9            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-8B-AQLM-PV-1Bit-1x16) |
+| Meta-Llama-3.1-8B | 1x16g16        | -          | -            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3.1-8B-AQLM-PV-1Bit-1x16-hf) |
+| Meta-Llama-3.1-8B | 1x16g8        | -          | -            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3.1-8B-AQLM-PV-2Bit-1x16-hf) |
+| Meta-Llama-3.1-8B-Instruct | 1x16g16        | -          | -            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3.1-Instruct-8B-AQLM-PV-1Bit-1x16-hf) |
+| Meta-Llama-3.1-8B-Instruct | 1x16g8        | -          | -            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3.1-Instruct-8B-AQLM-PV-2Bit-1x16-hf) |
+| Meta-Llama-3.1-8B-Instruct | 2x8g8        | -          | -            | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3.1-8B-Instruct-AQLM-PV-2Bit-2x8-hf) |
 | Meta-Llama-3-70B | 1x16g8        | 4.57           | 21.9           | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-AQLM-PV-2Bit-1x16)|
 | Meta-Llama-3-70B | 1x16g16        | 8.67           | 13           | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3-70B-AQLM-PV-1Bit-1x16)|
+| Meta-Llama-3.1-70B-Instruct | 1x16g8        | -           | 18.8           | [Link](https://huggingface.co/ISTA-DASLab/Meta-Llama-3.1-70B-Instruct-AQLM-PV-2Bit-1x16)|
 | Mistral-7B-v0.1 | 1x16g8  | 5.22 | 2.51 | [Link](https://huggingface.co/ISTA-DASLab/Mistral-7B-v0.1-AQLM-PV-2Bit-1x16-hf) |
 | Phi-3-mini-4k-instruct | 1x16g8 | 6.63 | 1.4 | [Link](https://huggingface.co/ISTA-DASLab/Phi-3-mini-4k-instruct-AQLM-PV-2Bit-1x16-hf) |
-
-
+| Phi-3-medium-4k-instruct | 1x16g8 | 5.18 | 4.2 | [Link](https://huggingface.co/ISTA-DASLab/Phi-3-medium-4k-instruct-AQLM-PV-2Bit-1x16-hf) |
+| Phi-3-medium-4k-instruct | 1x16g16 | 7.42 | 2.7 | [Link](https://huggingface.co/ISTA-DASLab/Phi-3-medium-4k-instruct-AQLM-PV-1Bit-1x16-hf) |
+| Qwen2-72B | 1x16g8 | - | - | [Link](https://huggingface.co/ISTA-DASLab/Qwen2-72B-AQLM-PV-2bit-1x16)|
+| Qwen2-72B | 1x16g16 | - | - | [Link](https://huggingface.co/ISTA-DASLab/Qwen2-72B-AQLM-PV-1bit-1x16)|
+| Qwen2-72B-Instruct | 1x16g8 | - | - | [Link](https://huggingface.co/ISTA-DASLab/Qwen2-72B-Instruct-AQLM-PV-2bit-1x16)|
+| Qwen2-72B-Instruct | 1x16g16 | - | - | [Link](https://huggingface.co/ISTA-DASLab/Qwen2-72B-Instruct-AQLM-PV-1bit-1x16)|
 
 Note that models with "g16" in their scheme require aqlm inference library v1.1.6 or newer: 
 ```bash
