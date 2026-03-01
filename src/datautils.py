@@ -248,7 +248,14 @@ def get_loaders(
     if hasattr(data, "input_ids"):
         data = data.input_ids
 
-    print(f"Loaded data from {name}; {len(data)=} sequences")
+    if isinstance(data, torch.Tensor):
+        num_tokens = data.numel()
+        num_full_sequences = num_tokens // seqlen
+        print(
+            f"Loaded data from {name}; tokens={num_tokens}, full_sequences(seqlen={seqlen})={num_full_sequences}"
+        )
+    else:
+        print(f"Loaded data from {name}; {len(data)=} sequences")
     return data
 
 
