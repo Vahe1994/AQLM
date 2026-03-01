@@ -443,7 +443,10 @@ def init_aq_engines(
     :param forward_args: additional keyword arguments, e.g. attention mask
     :returns: a dictionary where keys are full layer names and values are AQUtil instances ready to run .quantize
     """
-    device = torch.device(f"cuda:{torch.cuda.current_device()}" if torch.cuda.is_available() else "cpu")
+    try:
+        device = next(layer.parameters()).device
+    except StopIteration:
+        device = inps_tensor.device
     all_sublayers = find_sublayers(layer)
     subset = {name: all_sublayers[name] for name in names}
     assert len(subset) > 0
@@ -536,7 +539,10 @@ def update_outs(
     :param forward_args: additional keyword arguments, e.g. attention mask
     :returns: a list of mean squared errors for each sequence
     """
-    device = torch.device(f"cuda:{torch.cuda.current_device()}" if torch.cuda.is_available() else "cpu")
+    try:
+        device = next(layer.parameters()).device
+    except StopIteration:
+        device = inps_tensor.device
     out_losses = []
     for j in trange(len(inps_tensor), desc="calc outs after quantization", leave=False):
         outs_batch = layer(inps_tensor[j].to(device).unsqueeze(0), **forward_args)[0]
@@ -895,6 +901,7 @@ def main():
     torch.cuda.reset_peak_memory_stats()
     datasets = ["wikitext2", "c4"]
     if args.new_eval:
+        # NOTE: datautils.get_loaders currently expects 'c4_new' (underscore), not 'c4-new' (dash).
         datasets = ["wikitext2", "c4-new"]
     for dataset in datasets:
         testloader = get_loaders(
