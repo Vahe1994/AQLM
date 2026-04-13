@@ -1,20 +1,40 @@
 [build-system]
-requires = [
-    "setuptools>=42",
-    "wheel"
-]
+requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.black]
-line-length = 120
-required-version = "22.3.0"
-exclude = "lm-evaluation-harness/*"
+[project]
+name = "aqlm-scripts"                      # distribution name on pip
+version = "0.0.1"
+description = "AQLM research scripts packaged for import as `aqlm_scripts`"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [{ name = "AQLM authors" }]
 
-[tool.isort]
-profile = "black"
-line_length = 120
-combine_as_imports = true
-combine_star = true
-known_local_folder = ["tests", "cli"]
-known_first_party = ["test_utils"]
-skip_glob = "lm-evaluation-harness/*"
+# Start from upstream requirements; the repo itself tells users to pip -r requirements.txt.
+# Mirror only what you need at runtime, or keep them all initially and prune later.
+dependencies = [
+  "safetensors==0.4.3",
+    "datasets==2.19.0",
+    "sentencepiece==0.2.0",
+    "torch>=2.3.0",
+    "numpy>=1.26.4",
+    "transformers==4.40.1",
+    "accelerate==0.29.3"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["aqlm_scripts*"]
+
+[tool.setuptools.package-data]
+"aqlm_scripts" = [
+  "**/*.json","**/*.txt","**/*.md","**/*.yaml","**/*.yml",
+  "**/*.html","**/*.cpp","**/*.cu","**/*.cuh","**/*.pt","**/*.pth"
+]
+
+[project.scripts]
+# optional: if these files define main() functions
+aqlm-quantize = "aqlm_scripts.main:main"
+aqlm-finetune = "aqlm_scripts.finetune:main"
+

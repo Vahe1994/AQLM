@@ -10,7 +10,7 @@ from accelerate import dispatch_model
 from torch.distributed.fsdp import FullyShardedDataParallel, MixedPrecision
 from transformers import AutoConfig, AutoModelForCausalLM
 
-from src.aq import QuantizedWeight
+from .aq import QuantizedWeight
 
 MODEL_ERROR_MSG = "Unsupported model type {} - only 'llama', 'Yi', 'opt', 'falcon', 'phi3' are supported"
 FALCON_TYPES = ("falcon", "refinedweb", "refinedwebmodel")

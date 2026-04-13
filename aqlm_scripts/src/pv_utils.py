@@ -12,7 +12,7 @@ import torch
 import transformers
 from torch import nn as nn
 
-from src.aq import QuantizedLinear, QuantizedWeight
+from .aq import QuantizedLinear, QuantizedWeight
 
 
 def infer_module_classes(model: nn.Module, class_name: str) -> Tuple[type[nn.Module], ...]:

@@ -4,7 +4,7 @@ from typing import Iterable, Optional, Tuple, Union
 
 import torch
 
-from src.utils import maybe_script
+from .utils import maybe_script
 
 NO_DATA = torch.empty(0)
 

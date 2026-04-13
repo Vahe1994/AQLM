@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple
 
 import torch
 
-from src.utils import maybe_script
+from .utils import maybe_script
 
 
 @maybe_script
